@@ -34,13 +34,25 @@ Vauban gère l'injection de dépendances, le lifecycle des composants et le char
 ### Modules
 | Module | Description |
 |---|---|
-| `chappe-api` | API publique : `Server`, `Router`, `Handler`, `Request`, `Response` |
-| `chappe-http` | Implémentation des protocoles HTTP/1.1 et HTTP/2 |
-| `chappe-core` | Moteur serveur, virtual threads, lifecycle |
-| `chappe-tests` | Tests d'intégration |
-| `chappe-bench` | Benchmarks JMH et validation de performance |
-| `chappe-conformance` | Suite de conformité HTTP (RFC 9110/9112/9113) |
+| `chappe-api` | API publique : `Server`, `Router`, `Handler`, `Request`, `Response`, `StaticFileHandler`, `MimeTypes`, `RequestContext` |
+| `chappe-http` | Protocoles HTTP/1.1 et HTTP/2, SslHandler TLS, ByteBufferPool |
+| `chappe-core` | Moteur serveur, virtual threads, protocol detection, lifecycle |
+| `chappe-tests` | Tests d'intégration (62 tests) |
+| `chappe-bench` | Benchmarks : comparatif Jetty/Helidon/JDK, throughput/latence |
+| `chappe-conformance` | Suite de conformité HTTP (45 tests RFC 9110/9112/9113) |
 | `chappe-examples` | Exemples d'utilisation |
+
+### Extension SPI
+Chappe fournit les hooks pour les extensions Servlet/JAX-RS/WebSocket :
+- **`Router.mount(prefix, handler)`** — enregistrement par path prefix avec stripping automatique
+- **`Request.contextPath()`/`pathInfo()`** — path relatif au mount point
+- **`Request.attribute(key, value)`** — attributs mutables per-request (Servlet compat)
+- **`Request.remoteAddress()`/`isSecure()`/`scheme()`** — metadata connexion
+- **`RequestContext.CURRENT`** — ScopedValue propagé avant chaque handler
+- **`Body.ofOutputStream()`** — streaming body (Servlet OutputStream compat)
+- **`Body.ofFile()`** — zero-copy via `FileChannel.transferTo()` (sendfile)
+- **`StaticFileHandler.builder()`** — fichiers statiques avec fallback chain (filesystem → classpath), cache mémoire, ETag, Cache-Control
+- **`MimeTypes.detect()`** — détection MIME par extension (26+ types)
 
 ### Validation du Serveur
 Le serveur doit être validé sur trois axes :
@@ -135,10 +147,10 @@ Le serveur doit être validé sur trois axes :
 - Tests d'intégration avec des vrais sockets (pas de mocking HTTP)
 - Benchmarks avec JMH dans un module séparé si nécessaire
 
-### Performance
-- Objectif : >100K req/sec sur HTTP/1.1 (connexions keep-alive)
-- Objectif : >150K req/sec sur HTTP/2 (multiplexage)
-- Latence p99 < 1ms pour les réponses statiques
+### Performance (résultats mesurés, voir BENCHMARKS.md)
+- **96K req/s** HTTP/1.1 (4 threads, NIO client) — #2 derrière Jetty, devant Helidon
+- **Latence p99 = 50 µs** — 20× sous l'objectif de 1ms
+- Optimisations : write coalescing, zero-alloc headers, thread-local buffer pool, fast path 200 OK
 - Zero-allocation sur le hot path (réutiliser les buffers)
 
 ## Principes Fondamentaux

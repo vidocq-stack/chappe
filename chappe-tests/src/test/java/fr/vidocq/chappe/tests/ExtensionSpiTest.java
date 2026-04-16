@@ -252,4 +252,105 @@ class ExtensionSpiTest {
         assertEquals("image/svg+xml", MimeTypes.detect("icon.svg"));
         assertEquals("application/octet-stream", MimeTypes.detect("unknown.xyz"));
     }
+
+    // ── StaticFileHandler Builder + Classpath ──
+
+    @Test
+    void classpathResourceServing() throws Exception {
+        var handler = StaticFileHandler.builder()
+                .addClasspath("static")
+                .build();
+        startServer(Router.builder().mount("/res", handler).build());
+
+        var html = get("/res/page.html");
+        assertEquals(200, html.statusCode());
+        assertTrue(html.body().contains("classpath"));
+        assertTrue(html.headers().firstValue("Content-Type").orElse("").contains("text/html"));
+
+        var json = get("/res/data.json");
+        assertEquals(200, json.statusCode());
+        assertTrue(json.body().contains("classpath"));
+    }
+
+    @Test
+    void classpathMetaInfResources() throws Exception {
+        var handler = StaticFileHandler.builder()
+                .addClasspath("META-INF/resources/webjars")
+                .build();
+        startServer(Router.builder().mount("/webjars", handler).build());
+
+        var js = get("/webjars/lib.js");
+        assertEquals(200, js.statusCode());
+        assertTrue(js.body().contains("webjar"));
+        assertTrue(js.headers().firstValue("Content-Type").orElse("").contains("javascript"));
+    }
+
+    @Test
+    void classpathNotFound() throws Exception {
+        var handler = StaticFileHandler.builder()
+                .addClasspath("static")
+                .build();
+        startServer(Router.builder().mount("/res", handler).build());
+
+        assertEquals(404, get("/res/nonexistent.txt").statusCode());
+    }
+
+    @Test
+    void fallbackChainFilesystemThenClasspath() throws Exception {
+        // Filesystem a un fichier, classpath a un autre
+        Files.writeString(tempDir.resolve("local.txt"), "from filesystem");
+
+        var handler = StaticFileHandler.builder()
+                .addPath(tempDir)               // filesystem d'abord
+                .addClasspath("static")          // puis classpath
+                .build();
+        startServer(Router.builder().mount("/assets", handler).build());
+
+        // Fichier filesystem
+        assertEquals("from filesystem", get("/assets/local.txt").body());
+        // Fichier classpath (pas sur filesystem)
+        assertTrue(get("/assets/page.html").body().contains("classpath"));
+    }
+
+    @Test
+    void cacheInMemoryWithEtag() throws Exception {
+        var handler = StaticFileHandler.builder()
+                .addClasspath("static")
+                .cacheInMemory(true)
+                .build();
+        startServer(Router.builder().mount("/cached", handler).build());
+
+        // Premier appel — cache miss, response avec ETag
+        var resp1 = get("/cached/data.json");
+        assertEquals(200, resp1.statusCode());
+        var etag = resp1.headers().firstValue("ETag").orElse(null);
+        assertNotNull(etag, "ETag should be present for cached resources");
+
+        // Deuxième appel avec If-None-Match → 304
+        var req = java.net.http.HttpRequest.newBuilder()
+                .uri(java.net.URI.create(baseUrl + "/cached/data.json"))
+                .header("If-None-Match", etag)
+                .GET().build();
+        var resp2 = client.send(req, java.net.http.HttpResponse.BodyHandlers.ofString());
+        assertEquals(304, resp2.statusCode());
+    }
+
+    @Test
+    void cacheControlHeader() throws Exception {
+        var handler = StaticFileHandler.builder()
+                .addClasspath("static")
+                .cacheControl("max-age=3600, public")
+                .build();
+        startServer(Router.builder().mount("/cc", handler).build());
+
+        var resp = get("/cc/page.html");
+        assertEquals("max-age=3600, public",
+                resp.headers().firstValue("Cache-Control").orElse(""));
+    }
+
+    @Test
+    void builderRequiresAtLeastOneSource() {
+        assertThrows(IllegalStateException.class, () ->
+                StaticFileHandler.builder().build());
+    }
 }
