@@ -292,12 +292,70 @@ public final class HttpRequestParser {
         return true;
     }
 
+    // Valeurs de headers courantes internées
+    private static final String V_KEEP_ALIVE = "keep-alive";
+    private static final String V_CLOSE = "close";
+    private static final String V_CHUNKED = "chunked";
+    private static final String V_GZIP = "gzip";
+    private static final String V_GZIP_DEFLATE = "gzip, deflate";
+    private static final String V_TEXT_HTML = "text/html";
+    private static final String V_TEXT_PLAIN = "text/plain";
+    private static final String V_APP_JSON = "application/json";
+    private static final String V_APP_FORM = "application/x-www-form-urlencoded";
+    private static final String V_ZERO = "0";
+
     private static String trimTrailingOws(StringBuilder sb) {
         int end = sb.length();
         while (end > 0 && (sb.charAt(end - 1) == ' ' || sb.charAt(end - 1) == '\t')) {
             end--;
         }
-        return sb.substring(0, end);
+        // Fast path : pas de trimming nécessaire
+        if (end == sb.length()) {
+            return internValue(sb);
+        }
+        // Slow path : crée une substring
+        sb.setLength(end);
+        return internValue(sb);
+    }
+
+    /** Intern des valeurs de headers courantes pour éviter les allocations. */
+    private static String internValue(StringBuilder sb) {
+        return switch (sb.length()) {
+            case 1 -> {
+                if (sb.charAt(0) == '0') yield V_ZERO;
+                yield sb.toString();
+            }
+            case 4 -> {
+                if (matchesIgnoreCase(sb, V_GZIP)) yield V_GZIP;
+                yield sb.toString();
+            }
+            case 5 -> {
+                if (matchesIgnoreCase(sb, V_CLOSE)) yield V_CLOSE;
+                yield sb.toString();
+            }
+            case 7 -> {
+                if (matchesIgnoreCase(sb, V_CHUNKED)) yield V_CHUNKED;
+                yield sb.toString();
+            }
+            case 9 -> {
+                if (matchesIgnoreCase(sb, V_TEXT_HTML)) yield V_TEXT_HTML;
+                yield sb.toString();
+            }
+            case 10 -> {
+                if (matchesIgnoreCase(sb, V_KEEP_ALIVE)) yield V_KEEP_ALIVE;
+                if (matchesIgnoreCase(sb, V_TEXT_PLAIN)) yield V_TEXT_PLAIN;
+                yield sb.toString();
+            }
+            case 13 -> {
+                if (matchesIgnoreCase(sb, V_GZIP_DEFLATE)) yield V_GZIP_DEFLATE;
+                yield sb.toString();
+            }
+            case 16 -> {
+                if (matchesIgnoreCase(sb, V_APP_JSON)) yield V_APP_JSON;
+                yield sb.toString();
+            }
+            default -> sb.toString();
+        };
     }
 
     private void addHeader(HttpRequestImpl target, String name, String value)

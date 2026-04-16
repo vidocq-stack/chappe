@@ -68,6 +68,10 @@ public final class HttpResponseWriter {
     // Buffer pour putAsciiLong (évite new byte[20] par Content-Length)
     private final byte[] digitsBuf = new byte[20];
 
+    // Fast-path : headers pré-encodés pour 200 OK keep-alive (sans Date, sans body)
+    private static final byte[] FAST_200_KA_PREFIX = ("HTTP/1.1 200 OK\r\n"
+            + "Connection: keep-alive\r\n").getBytes(StandardCharsets.US_ASCII);
+
     public void write(Response response, ByteBuffer buffer, WritableByteChannel channel,
                       boolean keepAlive, HttpMethod method) throws IOException {
         buffer.clear();
@@ -75,6 +79,18 @@ public final class HttpResponseWriter {
         int statusCode = response.status().code();
         boolean suppressBody = (method == HttpMethod.HEAD)
                 || statusCode == 204 || statusCode == 304;
+
+        // ═══ FAST PATH : 200 OK, keep-alive, pas de headers custom, body connu ═══
+        // C'est le cas le plus fréquent (~80% des réponses dans un serveur typique).
+        // On écrit tout en un seul bloc sans itérer les headers.
+        Body body = response.body();
+        long contentLength = body.contentLength();
+        if (statusCode == 200 && keepAlive && !suppressBody
+                && contentLength >= 0 && contentLength <= 8192
+                && response.headers().isEmpty()) {
+            writeFastPath(body, contentLength, buffer, channel);
+            return;
+        }
 
         // Status line
         putStatusLine(response.status(), buffer, channel);
@@ -96,8 +112,6 @@ public final class HttpResponseWriter {
         }
 
         // Content-Length ou Transfer-Encoding: chunked
-        Body body = response.body();
-        long contentLength = body.contentLength();
         boolean chunked = false;
         if (contentLength >= 0 && !response.headers().contains("Content-Length")) {
             putBytes(CONTENT_LENGTH_PREFIX, buffer, channel);
@@ -132,6 +146,37 @@ public final class HttpResponseWriter {
         if (buffer.position() > 0) {
             flush(buffer, channel);
         }
+    }
+
+    /**
+     * Fast path pour 200 OK keep-alive avec petit body sans headers custom.
+     * Tout est écrit en un seul channel.write() — 1 syscall.
+     */
+    private void writeFastPath(Body body, long contentLength, ByteBuffer buffer,
+                               WritableByteChannel channel) throws IOException {
+        // Status + Connection
+        putBytes(FAST_200_KA_PREFIX, buffer, channel);
+        // Date
+        putBytes(DATE_PREFIX, buffer, channel);
+        putBytes(getDateValue(), buffer, channel);
+        putBytes(CRLF, buffer, channel);
+        // Content-Length
+        putBytes(CONTENT_LENGTH_PREFIX, buffer, channel);
+        putAsciiLong(contentLength, buffer, channel);
+        putBytes(CRLF, buffer, channel);
+        // End of headers
+        putBytes(CRLF, buffer, channel);
+        // Body inline (tout tient dans le buffer de 16K)
+        if (contentLength > 0) {
+            try (InputStream in = body.asInputStream()) {
+                int read;
+                while ((read = in.read(bodyChunk)) != -1) {
+                    putBytes(bodyChunk, 0, read, buffer, channel);
+                }
+            }
+        }
+        // Single flush
+        flush(buffer, channel);
     }
 
     public void writeError(StatusCode status, String message, ByteBuffer buffer,

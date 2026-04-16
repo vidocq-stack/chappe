@@ -1,121 +1,56 @@
 package fr.vidocq.chappe.http;
 
 import java.nio.ByteBuffer;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.ArrayDeque;
 
 /**
- * Thread-safe pool of direct ByteBuffers for connection reuse.
- *
- * <p>Uses a lock-free {@link ConcurrentLinkedQueue} internally. Buffers are
- * cleared (position=0, limit=capacity) before being handed out. If the pool
- * is empty a new direct buffer is allocated on the fly; if the pool is full
- * a released buffer is simply discarded so the pool never grows beyond
- * {@code maxPoolSize}.
- *
- * <p>Typical configuration: bufferSize=16384 (16 KB), maxPoolSize=1024
- * (≈ 16 MB of pooled memory).
+ * Pool de ByteBuffer directs basé sur ThreadLocal — zéro contention.
+ * <p>
+ * Chaque carrier thread (platform thread) a son propre pool.
+ * Les virtual threads héritent du carrier sur lequel ils s'exécutent,
+ * ce qui est idéal : pas de CAS, pas de lock, accès direct.
  */
 public final class ByteBufferPool {
 
     private final int bufferSize;
-    private final int maxPoolSize;
-    private final ConcurrentLinkedQueue<ByteBuffer> pool = new ConcurrentLinkedQueue<>();
+    private final int maxPerThread;
 
-    /** Tracks the current number of buffers sitting in the queue. */
-    private final AtomicInteger count = new AtomicInteger(0);
+    private final ThreadLocal<ArrayDeque<ByteBuffer>> local;
 
-    /**
-     * Creates a new pool.
-     *
-     * @param bufferSize  capacity of each individual buffer in bytes (e.g. 16384)
-     * @param maxPoolSize maximum number of buffers kept in the pool at any time
-     */
     public ByteBufferPool(int bufferSize, int maxPoolSize) {
-        if (bufferSize <= 0) {
-            throw new IllegalArgumentException("bufferSize must be > 0, got: " + bufferSize);
-        }
-        if (maxPoolSize <= 0) {
-            throw new IllegalArgumentException("maxPoolSize must be > 0, got: " + maxPoolSize);
-        }
         this.bufferSize = bufferSize;
-        this.maxPoolSize = maxPoolSize;
+        // Distribuer le max sur ~8 carrier threads
+        this.maxPerThread = Math.max(4, maxPoolSize / 8);
+        this.local = ThreadLocal.withInitial(ArrayDeque::new);
     }
 
-    /**
-     * Acquires a buffer from the pool, or allocates a fresh direct buffer if the
-     * pool is empty.
-     *
-     * <p>The returned buffer is always in a cleared state: position=0,
-     * limit=capacity.
-     *
-     * @return a direct {@link ByteBuffer} with capacity == {@code bufferSize}
-     */
+    /** Acquiert un buffer (cleared). Zéro contention. */
     public ByteBuffer acquire() {
-        ByteBuffer buffer = pool.poll();
-        if (buffer != null) {
-            count.decrementAndGet();
-            buffer.clear();
-            return buffer;
+        var pool = local.get();
+        ByteBuffer buf = pool.pollFirst();
+        if (buf != null) {
+            buf.clear();
+            return buf;
         }
         return ByteBuffer.allocateDirect(bufferSize);
     }
 
-    /**
-     * Returns a buffer to the pool so it can be reused by a future {@link #acquire}
-     * call.
-     *
-     * <p>The buffer is only accepted back when:
-     * <ul>
-     *   <li>its capacity exactly matches {@code bufferSize}, and</li>
-     *   <li>the pool has not yet reached {@code maxPoolSize}.</li>
-     * </ul>
-     * Otherwise the buffer is silently discarded and will be garbage-collected.
-     *
-     * @param buffer the buffer to release; must not be {@code null}
-     */
+    /** Retourne un buffer au pool local. Zéro contention. */
     public void release(ByteBuffer buffer) {
-        if (buffer == null) {
-            return;
+        if (buffer == null || buffer.capacity() != bufferSize) return;
+        var pool = local.get();
+        if (pool.size() < maxPerThread) {
+            pool.offerFirst(buffer);
         }
-        if (buffer.capacity() != bufferSize) {
-            // Wrong size — discard
-            return;
-        }
-        // Optimistic check before the atomic increment to avoid overshooting.
-        if (count.get() >= maxPoolSize) {
-            return;
-        }
-        // Reserve a slot; another thread might beat us, so re-check.
-        int slot = count.incrementAndGet();
-        if (slot > maxPoolSize) {
-            // We overshot — undo the increment and discard.
-            count.decrementAndGet();
-            return;
-        }
-        pool.offer(buffer);
+        // sinon discard — sera GC'd
     }
 
-    /**
-     * Removes and discards all buffers currently held in the pool.
-     *
-     * <p>Buffers that have been acquired but not yet released are unaffected.
-     * This method is useful during orderly shutdown to release off-heap memory.
-     */
+    /** Vide le pool du thread courant. */
     public void clear() {
-        while (pool.poll() != null) {
-            count.decrementAndGet();
-        }
+        local.get().clear();
     }
 
-    /**
-     * Returns the number of buffers currently sitting idle in the pool.
-     *
-     * <p>This is a snapshot value; the actual count may change concurrently.
-     *
-     * @return current pool size
-     */
     public int pooledCount() {
-        return count.get();
+        return local.get().size();
     }
 }

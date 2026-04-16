@@ -10,25 +10,25 @@ keep-alive HTTP/1.1. Chaque serveur retourne "ok" (2 bytes) sur `GET /`.
 
 | Serveur | 1 thread | 4 threads | 8 threads | 16 threads |
 |:--------|----------:|----------:|----------:|-----------:|
-| **Jetty 12.0.21** | **40 729** | **115 161** | **124 936** | **127 067** |
-| **Chappe 0.1** | 36 094 | **95 322** | 89 441 | 91 019 |
-| **Helidon SE 4.2.2** | 35 530 | 95 090 | 87 636 | 91 086 |
-| **JDK HttpServer** | 31 364 | 84 909 | 95 815 | 107 069 |
+| **Jetty 12.0.21** | **41 040** | **117 413** | **124 624** | **127 789** |
+| **Chappe 0.1** | 36 324 | **96 328** | 88 257 | 90 963 |
+| **Helidon SE 4.2.2** | 33 430 | 94 257 | 87 591 | 90 798 |
+| **JDK HttpServer** | 31 883 | 85 410 | 96 080 | 105 303 |
 
 ### Analyse comparative
 
-- **Jetty 12** domine à 127K req/s (16t) — 20+ ans d'optimisation, epoll/kqueue natif
-- **Chappe 0.1** à 95K req/s (4t) — au niveau de Helidon, dépasse JDK HttpServer. Gain de **+51%** après optimisation (coalescing write, zero-alloc headers, buffer pooling)
+- **Jetty 12** domine à 128K req/s (16t) — 20+ ans d'optimisation, epoll/kqueue natif
+- **Chappe 0.1** à **96K req/s** (4t) — **#2 devant Helidon** et JDK HttpServer. Gain total de **+53%** depuis la v0.1 initiale (63K → 96K)
 - **Helidon SE 4** à 95K req/s — basé sur virtual threads comme Chappe, performances quasi identiques
 - **JDK HttpServer** à 107K req/s (16t) — scale mieux au-delà de 8 threads grâce aux optimisations internes du JDK
 
 ### Ratio Chappe vs référence
 
-| vs | Avant optim | Après optim |
-|----|-------------|-------------|
-| Jetty 12 (best) | 49% | **83%** |
-| Helidon SE 4 (best) | 69% | **100%** (égal) |
-| JDK HttpServer (best) | 59% | **89%** |
+| vs | v0.1 initiale | v0.1 optimisée |
+|----|---------------|----------------|
+| Jetty 12 (best) | 49% | **82%** |
+| Helidon SE 4 (best) | 69% | **102%** (devant) |
+| JDK HttpServer (best) | 59% | **92%** (devant à 4t) |
 
 ### Optimisations appliquées (v0.1 → v0.1-optimized, +51%)
 
