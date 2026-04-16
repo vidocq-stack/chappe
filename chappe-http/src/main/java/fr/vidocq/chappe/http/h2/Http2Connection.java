@@ -178,8 +178,28 @@ public final class Http2Connection {
         }
 
         var payload = frame.payload();
+        Http2Settings oldSettings = remoteSettings;
         remoteSettings = remoteSettings.applyFrom(payload, payload.remaining());
         hpackDecoder.updateMaxTableSize(remoteSettings.headerTableSize());
+
+        // Propagate INITIAL_WINDOW_SIZE change to all open streams (RFC 9113 §6.5.2)
+        int oldWindowSize = oldSettings.initialWindowSize();
+        int newWindowSize = remoteSettings.initialWindowSize();
+        if (newWindowSize != oldWindowSize) {
+            int delta = newWindowSize - oldWindowSize;
+            for (var stream : streams.values()) {
+                int newVal = stream.sendWindow() + delta;
+                if (newVal > Integer.MAX_VALUE / 2) {
+                    // Overflow: send RST_STREAM with FLOW_CONTROL_ERROR per RFC 9113 §6.9.2
+                    frameWriter.writeRstStream(stream.streamId(), Http2ErrorCode.FLOW_CONTROL_ERROR);
+                    streams.remove(stream.streamId());
+                    stream.close();
+                } else {
+                    stream.incrementSendWindow(delta);
+                }
+            }
+        }
+
         frameWriter.writeSettingsAck();
     }
 
@@ -487,24 +507,89 @@ public final class Http2Connection {
      * Extrait les pseudo-headers HTTP/2 (:method, :path, :scheme, :authority)
      * et les convertit en propriétés de la requête, puis les supprime du tableau.
      */
-    private void extractPseudoHeaders(HttpRequestImpl request) {
+    private static final java.util.Set<String> FORBIDDEN_HEADERS = java.util.Set.of(
+            "connection", "keep-alive", "proxy-connection", "transfer-encoding", "upgrade");
+
+    private void extractPseudoHeaders(HttpRequestImpl request) throws Http2ConnectionException {
         String method = null;
         String path = null;
         String authority = null;
+        boolean seenRegularHeader = false;
+        boolean seenMethod = false;
+        boolean seenPath = false;
+        boolean seenScheme = false;
+        boolean seenAuthority = false;
 
-        // Walk headers, extract pseudo-headers
+        // Walk headers: validate ordering, duplicates, forbidden headers (RFC 9113 §8.2.2, §8.3)
         int count = request.headerCount();
         for (int i = 0; i < count; i++) {
             String name = request.headerName(i);
+            if (name == null) continue;
+
             if (name.charAt(0) == ':') {
+                // Pseudo-headers must appear before regular headers (RFC 9113 §8.3)
+                if (seenRegularHeader) {
+                    throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR,
+                            "Pseudo-header after regular header: " + name);
+                }
                 switch (name) {
-                    case ":method"    -> method = request.headerValue(i);
-                    case ":path"      -> path = request.headerValue(i);
-                    case ":authority" -> authority = request.headerValue(i);
-                    case ":scheme"    -> {} // ignored
-                    default           -> {} // unknown pseudo-header
+                    case ":method" -> {
+                        if (seenMethod) throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR,
+                                "Duplicate :method pseudo-header");
+                        seenMethod = true;
+                        method = request.headerValue(i);
+                    }
+                    case ":path" -> {
+                        if (seenPath) throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR,
+                                "Duplicate :path pseudo-header");
+                        seenPath = true;
+                        path = request.headerValue(i);
+                        if (path == null || path.isEmpty()) {
+                            throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR,
+                                    ":path must not be empty");
+                        }
+                    }
+                    case ":scheme" -> {
+                        if (seenScheme) throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR,
+                                "Duplicate :scheme pseudo-header");
+                        seenScheme = true;
+                    }
+                    case ":authority" -> {
+                        if (seenAuthority) throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR,
+                                "Duplicate :authority pseudo-header");
+                        seenAuthority = true;
+                        authority = request.headerValue(i);
+                    }
+                    default -> throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR,
+                            "Unknown pseudo-header: " + name);
+                }
+            } else {
+                seenRegularHeader = true;
+
+                // Forbidden connection-specific headers (RFC 9113 §8.2.2)
+                if (FORBIDDEN_HEADERS.contains(name)) {
+                    throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR,
+                            "Forbidden header: " + name);
+                }
+                // TE header is only allowed with value "trailers" (RFC 9113 §8.2.2)
+                if ("te".equals(name)) {
+                    String val = request.headerValue(i);
+                    if (val == null || !val.equals("trailers")) {
+                        throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR,
+                                "te header only allowed with value 'trailers', got: " + val);
+                    }
                 }
             }
+        }
+
+        // :method and :path are required (RFC 9113 §8.3.1)
+        if (!seenMethod) {
+            throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR,
+                    "Missing required :method pseudo-header");
+        }
+        if (!seenPath) {
+            throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR,
+                    "Missing required :path pseudo-header");
         }
 
         // Apply to request
@@ -519,9 +604,10 @@ public final class Http2Connection {
         // Compact: remove all pseudo-headers (names starting with ":")
         int write = 0;
         for (int read = 0; read < count; read++) {
-            if (request.headerName(read).charAt(0) != ':') {
+            String name = request.headerName(read);
+            if (name != null && name.charAt(0) != ':') {
                 if (write != read) {
-                    request.setHeaderName(write, request.headerName(read));
+                    request.setHeaderName(write, name);
                     request.setHeaderValue(write, request.headerValue(read));
                 }
                 write++;

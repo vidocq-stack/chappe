@@ -100,19 +100,23 @@ final class DefaultRouterBuilder implements Router.Builder {
         var fallback = notFoundHandler;
 
         return request -> {
+            // Chercher une route qui matche path + method
+            boolean pathMatched = false;
+            var allowedMethods = new java.util.LinkedHashSet<HttpMethod>();
+
             for (var route : snapshot) {
-                if (route.method() == request.method()) {
-                    var params = matchPath(route.pattern(), request.path());
-                    if (params != null) {
-                        // Wrapper la request avec les path params
+                var params = matchPath(route.pattern(), request.path());
+                if (params != null) {
+                    pathMatched = true;
+                    allowedMethods.add(route.method());
+
+                    if (route.method() == request.method()) {
                         var routedRequest = params.isEmpty() ? request : withPathParams(request, params);
                         Handler h = route.handler();
-                        // Appliquer les filtres de la route (inclut parent + enfant)
                         var routeFilters = route.filters();
                         for (int i = routeFilters.size() - 1; i >= 0; i--) {
                             h = routeFilters.get(i).apply(h);
                         }
-                        // Appliquer les filtres globaux (ajoutés après les routes)
                         for (int i = globalFilters.size() - 1; i >= 0; i--) {
                             if (!routeFilters.contains(globalFilters.get(i))) {
                                 h = globalFilters.get(i).apply(h);
@@ -122,6 +126,16 @@ final class DefaultRouterBuilder implements Router.Builder {
                     }
                 }
             }
+
+            // 405 Method Not Allowed si le path matche mais pas la méthode (RFC 9110 §15.5.6)
+            if (pathMatched) {
+                var allow = String.join(", ", allowedMethods.stream().map(Enum::name).toList());
+                return Response.builder()
+                        .status(StatusCode.METHOD_NOT_ALLOWED)
+                        .header("Allow", allow)
+                        .build();
+            }
+
             return fallback.handle(request);
         };
     }

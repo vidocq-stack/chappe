@@ -2,6 +2,7 @@ package fr.vidocq.chappe.http;
 
 import fr.vidocq.chappe.api.Body;
 import fr.vidocq.chappe.api.Headers;
+import fr.vidocq.chappe.api.HttpMethod;
 import fr.vidocq.chappe.api.Response;
 import fr.vidocq.chappe.api.StatusCode;
 
@@ -10,6 +11,10 @@ import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.WritableByteChannel;
 import java.nio.charset.StandardCharsets;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.Locale;
 
 /**
  * Sérialisation d'une {@link Response} HTTP/1.1 vers un channel.
@@ -26,6 +31,15 @@ public final class HttpResponseWriter {
     private static final byte[] CONNECTION_KEEP_ALIVE = "Connection: keep-alive\r\n".getBytes(StandardCharsets.US_ASCII);
     private static final byte[] TRANSFER_ENCODING_CHUNKED = "Transfer-Encoding: chunked\r\n".getBytes(StandardCharsets.US_ASCII);
     private static final byte[] CHUNK_TERMINATOR = "0\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] DATE_PREFIX = "Date: ".getBytes(StandardCharsets.US_ASCII);
+
+    /** IMF-fixdate formatter (RFC 5322) — ex: "Tue, 15 Nov 1994 08:12:31 GMT" */
+    private static final DateTimeFormatter IMF_FIXDATE = DateTimeFormatter
+            .ofPattern("EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.US);
+
+    // Cache Date header (1 seconde de résolution)
+    private volatile long lastDateSecond;
+    private volatile byte[] cachedDateValue;
 
     // Status lines pré-encodées pour les codes courants
     private static final byte[] STATUS_200 = statusLine(200, "OK");
@@ -50,10 +64,17 @@ public final class HttpResponseWriter {
      * @param buffer    le buffer d'écriture (propriété de la connexion)
      * @param channel   le channel socket
      * @param keepAlive si true, ajoute Connection: keep-alive
+     * @param method    la méthode HTTP de la requête (pour HEAD body suppression)
      */
     public void write(Response response, ByteBuffer buffer, WritableByteChannel channel,
-                      boolean keepAlive) throws IOException {
+                      boolean keepAlive, HttpMethod method) throws IOException {
         buffer.clear();
+
+        int statusCode = response.status().code();
+
+        // Body suppression : HEAD, 204, 304 (RFC 9110 §9.3.2, §15.3.5, §15.4.5)
+        boolean suppressBody = (method == HttpMethod.HEAD)
+                || statusCode == 204 || statusCode == 304;
 
         // Status line
         putStatusLine(response.status(), buffer, channel);
@@ -66,6 +87,13 @@ public final class HttpResponseWriter {
             putBytes(CRLF, buffer, channel);
         }
 
+        // Date header (RFC 9110 §6.6.1 MUST)
+        if (!response.headers().contains("Date")) {
+            putBytes(DATE_PREFIX, buffer, channel);
+            putBytes(getDateValue(), buffer, channel);
+            putBytes(CRLF, buffer, channel);
+        }
+
         // Content-Length ou Transfer-Encoding: chunked
         Body body = response.body();
         long contentLength = body.contentLength();
@@ -74,13 +102,12 @@ public final class HttpResponseWriter {
             putBytes(CONTENT_LENGTH_PREFIX, buffer, channel);
             putAsciiLong(contentLength, buffer, channel);
             putBytes(CRLF, buffer, channel);
-        } else if (contentLength < 0 && !response.headers().contains("Transfer-Encoding")) {
-            // Taille inconnue sur keep-alive → chunked transfer encoding
+        } else if (contentLength < 0 && !suppressBody
+                   && !response.headers().contains("Transfer-Encoding")) {
             if (keepAlive) {
                 putBytes(TRANSFER_ENCODING_CHUNKED, buffer, channel);
                 chunked = true;
             }
-            // Si pas keep-alive, le body est terminé par la fermeture de connexion
         }
 
         // Connection header
@@ -92,12 +119,25 @@ public final class HttpResponseWriter {
         // Flush les headers
         flush(buffer, channel);
 
-        // Body
-        if (chunked) {
-            writeBodyChunked(body, buffer, channel);
-        } else {
-            writeBody(body, buffer, channel);
+        // Body (supprimé pour HEAD, 204, 304)
+        if (!suppressBody) {
+            if (chunked) {
+                writeBodyChunked(body, buffer, channel);
+            } else {
+                writeBody(body, buffer, channel);
+            }
         }
+    }
+
+    /** Retourne la valeur Date cachée (résolution 1 seconde). */
+    private byte[] getDateValue() {
+        long nowSecond = System.currentTimeMillis() / 1000;
+        if (nowSecond != lastDateSecond || cachedDateValue == null) {
+            lastDateSecond = nowSecond;
+            cachedDateValue = ZonedDateTime.now(ZoneOffset.UTC).format(IMF_FIXDATE)
+                    .getBytes(StandardCharsets.US_ASCII);
+        }
+        return cachedDateValue;
     }
 
     /**

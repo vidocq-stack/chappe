@@ -87,7 +87,31 @@ public final class HttpConnection {
                     break;
                 }
 
-                // 2. Setup du body
+                // 2. Validation Host header (RFC 9112 §3.2)
+                if (request.version() == HttpVersion.HTTP_1_1) {
+                    var hostValues = request.headers().all("Host");
+                    if (hostValues.isEmpty()) {
+                        sendError(StatusCode.BAD_REQUEST, "Missing Host header");
+                        break;
+                    }
+                    if (hostValues.size() > 1) {
+                        sendError(StatusCode.BAD_REQUEST, "Multiple Host headers");
+                        break;
+                    }
+                }
+
+                // 3. Expect: 100-continue (RFC 9110 §10.1.1)
+                if ("100-continue".equalsIgnoreCase(
+                        request.headers().first("Expect").orElse(null))) {
+                    // Envoyer 100 Continue avant la lecture du body
+                    var continueBytes = "HTTP/1.1 100 Continue\r\n\r\n".getBytes();
+                    var buf = ByteBuffer.wrap(continueBytes);
+                    while (buf.hasRemaining()) {
+                        writeChannel.write(buf);
+                    }
+                }
+
+                // 4. Setup du body
                 InputStream bodyStream;
                 try {
                     bodyStream = setupBody();
@@ -112,7 +136,7 @@ public final class HttpConnection {
                 }
 
                 // 4. Écrire la réponse
-                writer.write(response, writeBuffer, writeChannel, keepAlive);
+                writer.write(response, writeBuffer, writeChannel, keepAlive, request.method());
 
                 // 5. Drainer le body non lu (pour keep-alive)
                 if (bodyStream != null) {
