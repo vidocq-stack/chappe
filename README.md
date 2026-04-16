@@ -181,22 +181,95 @@ Handler secured = logging.andThen(auth).apply(myHandler);
 Request req = RequestContext.currentRequest();
 ```
 
-### Extension SPI (pour Servlet / JAX-RS)
+### Mount — sous-applications et extensions
+
+`mount()` délègue un préfixe de chemin entier à un sous-handler, tous verbes HTTP confondus.
+Le préfixe est **strippé automatiquement** du path avant d'appeler le handler :
+
 ```java
-// Deux extensions coexistent sur des préfixes différents
+// Le handler "admin" reçoit path="/dashboard", pas "/admin/dashboard"
 Router.builder()
-    .mount("/app", servletHandler)     // vidocq-servlet
-    .mount("/api", jaxrsHandler)       // vidocq-jaxrs
+    .mount("/admin", req -> Response.ok("path=" + req.path()))  
+    .build()
+
+// GET /admin/dashboard → handler voit path="/dashboard", contextPath="/admin"
+```
+
+#### Path stripping et contextPath
+
+Quand un handler est monté, la requête est wrappée :
+- `request.path()` → chemin **relatif** au mount (`/dashboard`)
+- `request.contextPath()` → le préfixe du mount (`/admin`)
+- `request.pathInfo()` → idem que `path()` pour les mounts
+
+```java
+.mount("/api", req -> {
+    // GET /api/v1/users arrive ici avec :
+    //   req.path()        → "/v1/users"
+    //   req.contextPath() → "/api"
+    //   req.pathInfo()    → "/v1/users"
+    return Response.ok(req.path());
+})
+```
+
+#### Coexistence de plusieurs mounts
+
+Plusieurs sous-apps coexistent sur des préfixes disjoints. Les routes exactes
+ont **priorité sur les mounts** :
+
+```java
+Router.builder()
+    .get("/health", _ -> Response.ok("UP"))     // priorité : route exacte
+    .mount("/app", servletHandler)               // vidocq-servlet
+    .mount("/api", jaxrsHandler)                 // vidocq-jaxrs
     .mount("/static", StaticFileHandler.of(webRoot))
+    .notFound(_ -> Response.of(StatusCode.NOT_FOUND))
+    .build()
+
+// GET /health        → route exacte "UP" (pas de mount)
+// GET /app/index.jsp → servletHandler avec path="/index.jsp"
+// GET /api/v1/users  → jaxrsHandler avec path="/v1/users"
+// GET /static/app.js → StaticFileHandler
+// GET /other         → 404
+```
+
+#### Ordre de résolution
+
+1. **Routes exactes** (get, post, put, delete...) — premier match par path + method
+2. **405** — si le path matche une route mais pas la méthode
+3. **Mounts** — premier mount dont le préfixe matche (ordre d'enregistrement)
+4. **notFound** — fallback 404
+
+#### Filtres hérités
+
+Les filtres déclarés avant un `mount()` s'appliquent au handler monté :
+
+```java
+Router.builder()
+    .filter(loggingFilter)                   // s'applique à tout
+    .mount("/api", jaxrsHandler)             // loggingFilter actif
+    .group("/admin", admin -> admin
+        .filter(authFilter)                  // authFilter seulement pour /admin
+        .mount("/panel", adminPanelHandler)  // loggingFilter + authFilter actifs
+    )
     .build()
 ```
 
-L'API `Request` fournit tout ce qu'il faut aux extensions :
-- `contextPath()` / `pathInfo()` — path relatif au mount
-- `attribute(key, value)` — attributs mutables per-request
-- `remoteAddress()` / `localAddress()` / `isSecure()` / `scheme()`
-- `Body.ofOutputStream()` — streaming body (Servlet OutputStream compat)
-- `Body.ofFile()` — zero-copy via `FileChannel.transferTo()`
+#### Request enrichi pour les extensions
+
+Le handler monté a accès à toute la metadata de connexion :
+
+| Méthode | Usage |
+|---------|-------|
+| `request.contextPath()` | Préfixe du mount (`"/api"`) |
+| `request.pathInfo()` | Chemin relatif (`"/v1/users"`) |
+| `request.attribute(key, value)` | Attributs mutables per-request (Servlet compat) |
+| `request.remoteAddress()` | Adresse IP du client |
+| `request.localAddress()` | Adresse du serveur |
+| `request.isSecure()` | `true` si TLS |
+| `request.scheme()` | `"http"` ou `"https"` |
+| `Body.ofOutputStream(writer)` | Streaming body (Servlet OutputStream compat) |
+| `Body.ofFile(path)` | Zero-copy via `FileChannel.transferTo()` |
 
 ## Performance
 
