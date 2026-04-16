@@ -1,0 +1,120 @@
+# ============================================================
+# Java
+# ============================================================
+*.class
+*.log
+*.ctxt
+.mtj.tmp/
+*.jar
+*.war
+*.nar
+*.ear
+*.zip
+*.tar.gz
+*.rar
+hs_err_pid*
+replay_pid*
+
+# ============================================================
+# Maven
+# ============================================================
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.jar
+!.mvn/wrapper/maven-wrapper.properties
+
+# ============================================================
+# Eclipse
+# ============================================================
+.metadata
+bin/
+tmp/
+*.tmp
+*.bak
+*.swp
+*~.nib
+local.properties
+.settings/
+.loadpath
+.recommenders
+.project
+.classpath
+.factorypath
+.apt_generated/
+.apt_generated_test/
+.springBeans
+.sts4-cache/
+.checkstyle
+.pmd
+.fbExcludeFilterFile
+.externalToolBuilders/
+*.launch
+.cproject
+.autotools
+.buildpath
+.target
+
+# ============================================================
+# IntelliJ IDEA
+# ============================================================
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+.idea_modules/
+atlassian-ide-plugin.xml
+
+# ============================================================
+# NetBeans
+# ============================================================
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+nb-configuration.xml
+
+# ============================================================
+# VS Code
+# ============================================================
+.vscode/
+.history/
+
+# ============================================================
+# OS
+# ============================================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ============================================================
+# JMH / Benchmarks
+# ============================================================
+jmh-result.*
+jmh-result-*.json
+
+# ============================================================
+# Logs & runtime
+# ============================================================
+logs/
+*.log.*
+*.pid
+
+# ============================================================
+# Claude Code / tooling local
+# ============================================================
+.claude/settings.local.json
+tasks/
