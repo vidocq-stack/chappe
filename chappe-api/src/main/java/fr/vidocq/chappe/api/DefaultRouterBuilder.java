@@ -17,8 +17,10 @@ import java.util.function.Consumer;
 final class DefaultRouterBuilder implements Router.Builder {
 
     private record Route(HttpMethod method, String pattern, Handler handler, List<Filter> filters) {}
+    private record Mount(String prefix, Handler handler, List<Filter> filters) {}
 
     private final List<Route> routes = new ArrayList<>();
+    private final List<Mount> mounts = new ArrayList<>();
     private final List<Filter> filters = new ArrayList<>();
     private final String prefix;
     private Handler notFoundHandler = _ -> Response.of(StatusCode.NOT_FOUND);
@@ -80,6 +82,13 @@ final class DefaultRouterBuilder implements Router.Builder {
         configurator.accept(child);
         // Les routes enfant portent déjà leurs filtres (parent + enfant)
         routes.addAll(child.routes);
+        mounts.addAll(child.mounts);
+        return this;
+    }
+
+    @Override
+    public Router.Builder mount(String mountPrefix, Handler handler) {
+        mounts.add(new Mount(prefix + mountPrefix, handler, List.copyOf(filters)));
         return this;
     }
 
@@ -98,6 +107,7 @@ final class DefaultRouterBuilder implements Router.Builder {
     @Override
     public Router build() {
         var snapshot = List.copyOf(routes);
+        var mountSnapshot = List.copyOf(mounts);
         var globalFilters = List.copyOf(filters);
         var fallback = notFoundHandler;
 
@@ -152,6 +162,16 @@ final class DefaultRouterBuilder implements Router.Builder {
                         .build();
             }
 
+            // Check mounts (after routes, before notFound)
+            for (var mount : mountSnapshot) {
+                if (path.equals(mount.prefix()) || path.startsWith(mount.prefix() + "/")) {
+                    Handler h = mount.handler();
+                    var mf = mount.filters();
+                    for (int i = mf.size() - 1; i >= 0; i--) { h = mf.get(i).apply(h); }
+                    return h.handle(withMount(request, mount.prefix(), path));
+                }
+            }
+
             return fallback.handle(request);
         };
     }
@@ -199,12 +219,45 @@ final class DefaultRouterBuilder implements Router.Builder {
             @Override public HttpMethod method() { return delegate.method(); }
             @Override public URI uri() { return delegate.uri(); }
             @Override public String path() { return delegate.path(); }
+            @Override public String contextPath() { return delegate.contextPath(); }
+            @Override public String pathInfo() { return delegate.pathInfo(); }
             @Override public String query() { return delegate.query(); }
             @Override public HttpVersion version() { return delegate.version(); }
             @Override public Headers headers() { return delegate.headers(); }
             @Override public Body body() { return delegate.body(); }
             @Override public Map<String, String> pathParams() { return pathParams; }
             @Override public Map<String, String> queryParams() { return delegate.queryParams(); }
+            @Override public Object attribute(String key) { return delegate.attribute(key); }
+            @Override public Request attribute(String key, Object value) { delegate.attribute(key, value); return this; }
+            @Override public java.net.InetSocketAddress remoteAddress() { return delegate.remoteAddress(); }
+            @Override public java.net.InetSocketAddress localAddress() { return delegate.localAddress(); }
+            @Override public boolean isSecure() { return delegate.isSecure(); }
+            @Override public String scheme() { return delegate.scheme(); }
+        };
+    }
+
+    private static Request withMount(Request delegate, String mountPrefix, String originalPath) {
+        String stripped = originalPath.substring(mountPrefix.length());
+        if (stripped.isEmpty()) stripped = "/";
+        final String mountedPath = stripped;
+        return new Request() {
+            @Override public HttpMethod method() { return delegate.method(); }
+            @Override public URI uri() { return delegate.uri(); }
+            @Override public String path() { return mountedPath; }
+            @Override public String contextPath() { return mountPrefix; }
+            @Override public String pathInfo() { return mountedPath; }
+            @Override public String query() { return delegate.query(); }
+            @Override public HttpVersion version() { return delegate.version(); }
+            @Override public Headers headers() { return delegate.headers(); }
+            @Override public Body body() { return delegate.body(); }
+            @Override public Map<String, String> pathParams() { return delegate.pathParams(); }
+            @Override public Map<String, String> queryParams() { return delegate.queryParams(); }
+            @Override public Object attribute(String key) { return delegate.attribute(key); }
+            @Override public Request attribute(String key, Object value) { delegate.attribute(key, value); return this; }
+            @Override public java.net.InetSocketAddress remoteAddress() { return delegate.remoteAddress(); }
+            @Override public java.net.InetSocketAddress localAddress() { return delegate.localAddress(); }
+            @Override public boolean isSecure() { return delegate.isSecure(); }
+            @Override public String scheme() { return delegate.scheme(); }
         };
     }
 }

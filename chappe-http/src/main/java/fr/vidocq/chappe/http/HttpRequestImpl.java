@@ -42,6 +42,36 @@ public final class HttpRequestImpl implements Request {
     public void setHeaderName(int i, String name) { this.headerNames[i] = name; }
     public void setHeaderValue(int i, String value) { this.headerValues[i] = value; }
 
+    public void setContextPath(String contextPath) { this.contextPath = contextPath; this.pathInfoCache = null; }
+    public void setRemoteAddress(java.net.InetSocketAddress remoteAddress) { this.remoteAddress = remoteAddress; }
+    public void setLocalAddress(java.net.InetSocketAddress localAddress) { this.localAddress = localAddress; }
+    public void setSecure(boolean secure) { this.secure = secure; this.scheme = secure ? "https" : "http"; }
+
+    /**
+     * Initialise les informations de connexion à partir du canal socket.
+     * Appelé une seule fois à la création de la connexion.
+     */
+    public void initConnectionInfo(java.nio.channels.SocketChannel channel, boolean secure) {
+        if (channel != null) {
+            try {
+                this.remoteAddress = (java.net.InetSocketAddress) channel.getRemoteAddress();
+                this.localAddress = (java.net.InetSocketAddress) channel.getLocalAddress();
+            } catch (java.io.IOException _) {
+                // Ignore — addresses remain null
+            }
+        }
+        setSecure(secure);
+    }
+
+    // --- Champs d'enrichissement (connexion + requête) ---
+    private String contextPath = "";
+    private String pathInfoCache;
+    private final java.util.LinkedHashMap<String, Object> attributes = new java.util.LinkedHashMap<>();
+    private java.net.InetSocketAddress remoteAddress;
+    private java.net.InetSocketAddress localAddress;
+    private boolean secure;
+    private String scheme = "http";
+
     // --- Champs calculés paresseusement ---
     private URI uri;
     private String path;
@@ -87,6 +117,10 @@ public final class HttpRequestImpl implements Request {
         pathQueryParsed = false;
         queryParams = null;
         pathParams = Collections.emptyMap();
+        // Per-request fields (NOT connection-level: remoteAddress, localAddress, secure, scheme)
+        contextPath = "";
+        pathInfoCache = null;
+        attributes.clear();
     }
 
     // --- Request interface ---
@@ -146,6 +180,48 @@ public final class HttpRequestImpl implements Request {
         }
         return queryParams;
     }
+
+    @Override
+    public String contextPath() { return contextPath; }
+
+    @Override
+    public String pathInfo() {
+        if (pathInfoCache == null) {
+            var p = path();
+            if (contextPath.isEmpty() || !p.startsWith(contextPath)) {
+                pathInfoCache = p;
+            } else {
+                var info = p.substring(contextPath.length());
+                pathInfoCache = info.isEmpty() ? "/" : info;
+            }
+        }
+        return pathInfoCache;
+    }
+
+    @Override
+    public Object attribute(String key) { return attributes.get(key); }
+
+    @Override
+    public Request attribute(String key, Object value) {
+        if (value == null) {
+            attributes.remove(key);
+        } else {
+            attributes.put(key, value);
+        }
+        return this;
+    }
+
+    @Override
+    public java.net.InetSocketAddress remoteAddress() { return remoteAddress; }
+
+    @Override
+    public java.net.InetSocketAddress localAddress() { return localAddress; }
+
+    @Override
+    public boolean isSecure() { return secure; }
+
+    @Override
+    public String scheme() { return scheme; }
 
     // --- Helpers privés ---
 

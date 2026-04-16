@@ -4,6 +4,7 @@ import fr.vidocq.chappe.api.Body;
 import fr.vidocq.chappe.api.Handler;
 import fr.vidocq.chappe.api.HttpMethod;
 import fr.vidocq.chappe.api.HttpVersion;
+import fr.vidocq.chappe.api.RequestContext;
 import fr.vidocq.chappe.api.Response;
 import fr.vidocq.chappe.api.ServerConfig;
 import fr.vidocq.chappe.api.StatusCode;
@@ -390,7 +391,9 @@ public final class Http2Connection {
 
             Response response;
             try {
-                response = handler.handle(request);
+                var ctx = new RequestContext(request);
+                response = ScopedValue.where(RequestContext.CURRENT, ctx)
+                        .call(() -> handler.handle(request));
             } catch (Exception _) {
                 response = Response.of(StatusCode.INTERNAL_SERVER_ERROR);
             }

@@ -65,6 +65,9 @@ public interface Router extends Handler {
         /** Ajoute un filtre à toutes les routes de ce builder. */
         Builder filter(Filter filter);
 
+        /** Mounts a sub-handler at the given path prefix (all methods, path stripping). */
+        Builder mount(String prefix, Handler handler);
+
         /** Handler pour les routes non trouvées (404 par défaut). */
         Builder notFound(Handler handler);
 

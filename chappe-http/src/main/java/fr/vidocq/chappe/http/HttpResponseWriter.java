@@ -1,6 +1,7 @@
 package fr.vidocq.chappe.http;
 
 import fr.vidocq.chappe.api.Body;
+import fr.vidocq.chappe.api.FileBody;
 import fr.vidocq.chappe.api.HttpMethod;
 import fr.vidocq.chappe.api.Response;
 import fr.vidocq.chappe.api.StatusCode;
@@ -242,6 +243,30 @@ public final class HttpResponseWriter {
     private void writeBody(Body body, ByteBuffer buffer, WritableByteChannel channel)
             throws IOException {
         if (body.contentLength() == 0) return;
+
+        // Zero-copy fast path for file bodies on raw SocketChannel
+        if (body instanceof FileBody fb) {
+            // Flush any buffered data first
+            if (buffer.position() > 0) {
+                flush(buffer, channel);
+            }
+            if (channel instanceof java.nio.channels.SocketChannel) {
+                try (var fc = java.nio.channels.FileChannel.open(fb.path(), java.nio.file.StandardOpenOption.READ)) {
+                    long remaining = fb.contentLength();
+                    long position = fb.offset();
+                    while (remaining > 0) {
+                        long transferred = fc.transferTo(position, remaining, channel);
+                        if (transferred <= 0) break;
+                        position += transferred;
+                        remaining -= transferred;
+                    }
+                }
+                return;
+            }
+            // For non-SocketChannel (TLS), fall through to InputStream path
+        }
+
+        // Existing InputStream-based path
         try (InputStream in = body.asInputStream()) {
             int read;
             while ((read = in.read(bodyChunk)) != -1) {

@@ -62,4 +62,19 @@ public interface Body {
     static Body of(InputStream stream) {
         return of(stream, -1);
     }
+
+    /** Body backed by a file. Zero-copy via FileChannel.transferTo when possible. */
+    static Body ofFile(java.nio.file.Path path) {
+        return new FileBody(path, 0, -1);
+    }
+
+    /** Body backed by a file range (for HTTP Range support). */
+    static Body ofFile(java.nio.file.Path path, long offset, long length) {
+        return new FileBody(path, offset, length);
+    }
+
+    /** Body from a writer callback. Invoked lazily on a virtual thread. Content-Length unknown (chunked). */
+    static Body ofOutputStream(java.util.function.Consumer<java.io.OutputStream> writer) {
+        return new OutputStreamBody(writer);
+    }
 }

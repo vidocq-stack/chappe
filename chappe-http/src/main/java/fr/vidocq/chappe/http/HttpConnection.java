@@ -62,6 +62,11 @@ public final class HttpConnection {
         this.parser = new HttpRequestParser();
         this.writer = new HttpResponseWriter();
         this.request = new HttpRequestImpl();
+
+        // Populate connection-level metadata once
+        if (closeable instanceof SocketChannel sc) {
+            request.initConnectionInfo(sc, false);
+        }
     }
 
     /**
@@ -123,11 +128,13 @@ public final class HttpConnection {
                     request.body = Body.of(bodyStream, contentLength());
                 }
 
-                // 3. Dispatch au handler
+                // 3. Dispatch au handler avec ScopedValue binding
                 boolean keepAlive = isKeepAlive();
                 Response response;
                 try {
-                    response = handler.handle(request);
+                    var ctx = new RequestContext(request);
+                    response = ScopedValue.where(RequestContext.CURRENT, ctx)
+                            .call(() -> handler.handle(request));
                 } catch (Exception e) {
                     response = Response.builder()
                             .status(StatusCode.INTERNAL_SERVER_ERROR)
