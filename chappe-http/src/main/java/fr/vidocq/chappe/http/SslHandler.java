@@ -10,21 +10,35 @@ import java.nio.ByteBuffer;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.channels.WritableByteChannel;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Wraps a {@link SocketChannel} and {@link SSLEngine} to provide transparent TLS
  * read/write as {@link ReadableByteChannel} and {@link WritableByteChannel}.
  * <p>
- * Conçu pour les virtual threads — les opérations bloquent proprement.
+ * Thread-safe pour read/write concurrents (HTTP/2 : frame loop lit sur un thread,
+ * stream threads écrivent des réponses).
+ * <ul>
+ *   <li>Les opérations de lecture (unwrap) sont protégées par {@code readLock}</li>
+ *   <li>Les opérations d'écriture (wrap) sont protégées par {@code writeLock}</li>
+ *   <li>SSLEngine supporte unwrap/wrap concurrents si les buffers sont séparés</li>
+ * </ul>
  */
 public final class SslHandler implements ReadableByteChannel, WritableByteChannel, Closeable {
 
     private final SocketChannel channel;
     private final SSLEngine engine;
 
+    // Buffers de lecture (unwrap) — accédés uniquement sous readLock
     private final ByteBuffer netInBuffer;
-    private final ByteBuffer netOutBuffer;
     private final ByteBuffer appInBuffer;
+
+    // Buffer d'écriture (wrap) — accédé uniquement sous writeLock
+    private final ByteBuffer netOutBuffer;
+
+    // Verrous séparés pour read/write concurrent
+    private final ReentrantLock readLock = new ReentrantLock();
+    private final ReentrantLock writeLock = new ReentrantLock();
 
     private static final ByteBuffer EMPTY = ByteBuffer.allocate(0);
 
@@ -38,11 +52,11 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
         this.netInBuffer = ByteBuffer.allocate(packetSize);
         this.netOutBuffer = ByteBuffer.allocate(packetSize);
         this.appInBuffer = ByteBuffer.allocate(appSize);
-        appInBuffer.flip(); // démarre vide
+        appInBuffer.flip();
     }
 
     // -------------------------------------------------------------------------
-    // Handshake
+    // Handshake (single-threaded, avant read/write concurrents)
     // -------------------------------------------------------------------------
 
     public void doHandshake() throws IOException {
@@ -54,7 +68,7 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
                 case NEED_UNWRAP -> {
                     int bytesRead = channel.read(netInBuffer);
                     if (bytesRead < 0) {
-                        throw new IOException("Channel closed during TLS handshake (NEED_UNWRAP)");
+                        throw new IOException("Channel closed during TLS handshake");
                     }
                     netInBuffer.flip();
 
@@ -82,7 +96,7 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
                     SSLEngineResult result = engine.wrap(EMPTY, netOutBuffer);
                     netOutBuffer.flip();
                     if (result.getStatus() == Status.BUFFER_OVERFLOW) {
-                        throw new IOException("netOutBuffer overflow during handshake wrap");
+                        throw new IOException("netOutBuffer overflow during handshake");
                     }
                     while (netOutBuffer.hasRemaining()) {
                         channel.write(netOutBuffer);
@@ -110,25 +124,30 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
     }
 
     // -------------------------------------------------------------------------
-    // ReadableByteChannel — ne retourne JAMAIS 0 (bloque sur virtual thread)
+    // ReadableByteChannel — thread-safe via readLock
     // -------------------------------------------------------------------------
 
     @Override
     public int read(ByteBuffer dst) throws IOException {
-        // Drainer les données déjà déchiffrées
+        readLock.lock();
+        try {
+            return readInternal(dst);
+        } finally {
+            readLock.unlock();
+        }
+    }
+
+    private int readInternal(ByteBuffer dst) throws IOException {
         if (appInBuffer.hasRemaining()) {
             return drain(dst);
         }
 
-        // Boucle jusqu'à obtenir des données applicatives ou EOF
         while (true) {
             appInBuffer.clear();
 
-            // netInBuffer est en write mode (après compact précédent ou init)
-            // Lire plus de données chiffrées depuis le réseau (bloque sur virtual thread)
             int bytesRead = channel.read(netInBuffer);
             if (bytesRead < 0 && netInBuffer.position() == 0) {
-                return -1; // EOF et pas de données résiduelles
+                return -1;
             }
 
             netInBuffer.flip();
@@ -136,26 +155,18 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
             netInBuffer.compact();
             appInBuffer.flip();
 
-            // Gérer les tâches post-handshake (TLS 1.3 key updates, etc.)
+            // Post-handshake events (TLS 1.3 key updates)
             handlePostUnwrap(result);
 
             switch (result.getStatus()) {
                 case OK -> {
                     if (appInBuffer.hasRemaining()) return drain(dst);
-                    // unwrap a consommé des octets protocole sans produire de données app — boucler
                 }
                 case BUFFER_UNDERFLOW -> {
-                    // Enregistrement TLS incomplet — il faut plus de données réseau
-                    // netInBuffer contient déjà le fragment partiel (après compact)
-                    // La boucle relira depuis le channel (bloque sur virtual thread)
-                    if (bytesRead < 0) return -1; // channel fermé, impossible d'obtenir plus
+                    if (bytesRead < 0) return -1;
                 }
-                case BUFFER_OVERFLOW -> {
-                    throw new IOException("appInBuffer overflow during read unwrap");
-                }
-                case CLOSED -> {
-                    return -1;
-                }
+                case BUFFER_OVERFLOW -> throw new IOException("appInBuffer overflow");
+                case CLOSED -> { return -1; }
             }
         }
     }
@@ -171,7 +182,8 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
     }
 
     /**
-     * Gère les événements post-unwrap (tasks déléguées, key updates TLS 1.3).
+     * Post-unwrap : gère les tâches déléguées et les key updates TLS 1.3.
+     * Les wraps nécessaires sont faits sous writeLock.
      */
     private void handlePostUnwrap(SSLEngineResult result) throws IOException {
         HandshakeStatus hs = result.getHandshakeStatus();
@@ -181,12 +193,17 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
                 while ((task = engine.getDelegatedTask()) != null) {
                     task.run();
                 }
-            } else { // NEED_WRAP
-                netOutBuffer.clear();
-                engine.wrap(EMPTY, netOutBuffer);
-                netOutBuffer.flip();
-                while (netOutBuffer.hasRemaining()) {
-                    channel.write(netOutBuffer);
+            } else { // NEED_WRAP — doit utiliser writeLock
+                writeLock.lock();
+                try {
+                    netOutBuffer.clear();
+                    engine.wrap(EMPTY, netOutBuffer);
+                    netOutBuffer.flip();
+                    while (netOutBuffer.hasRemaining()) {
+                        channel.write(netOutBuffer);
+                    }
+                } finally {
+                    writeLock.unlock();
                 }
             }
             hs = engine.getHandshakeStatus();
@@ -194,11 +211,20 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
     }
 
     // -------------------------------------------------------------------------
-    // WritableByteChannel
+    // WritableByteChannel — thread-safe via writeLock
     // -------------------------------------------------------------------------
 
     @Override
     public int write(ByteBuffer src) throws IOException {
+        writeLock.lock();
+        try {
+            return writeInternal(src);
+        } finally {
+            writeLock.unlock();
+        }
+    }
+
+    private int writeInternal(ByteBuffer src) throws IOException {
         int totalWritten = 0;
         while (src.hasRemaining()) {
             netOutBuffer.clear();
@@ -212,12 +238,8 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
                     }
                     totalWritten += result.bytesConsumed();
                 }
-                case BUFFER_OVERFLOW -> {
-                    throw new IOException("netOutBuffer overflow during write wrap");
-                }
-                case BUFFER_UNDERFLOW -> {
-                    throw new IOException("Unexpected BUFFER_UNDERFLOW during write wrap");
-                }
+                case BUFFER_OVERFLOW -> throw new IOException("netOutBuffer overflow during write");
+                case BUFFER_UNDERFLOW -> throw new IOException("Unexpected BUFFER_UNDERFLOW during write");
             }
 
             if (result.getStatus() == Status.CLOSED) break;
@@ -226,16 +248,12 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
     }
 
     // -------------------------------------------------------------------------
-    // ALPN
+    // ALPN & lifecycle
     // -------------------------------------------------------------------------
 
     public String getAlpnProtocol() {
         return engine.getApplicationProtocol();
     }
-
-    // -------------------------------------------------------------------------
-    // Lifecycle
-    // -------------------------------------------------------------------------
 
     @Override
     public boolean isOpen() {
@@ -244,10 +262,11 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
 
     @Override
     public void close() throws IOException {
+        writeLock.lock();
         try {
             engine.closeOutbound();
             netOutBuffer.clear();
-            SSLEngineResult result = engine.wrap(EMPTY, netOutBuffer);
+            engine.wrap(EMPTY, netOutBuffer);
             netOutBuffer.flip();
             if (netOutBuffer.hasRemaining()) {
                 while (netOutBuffer.hasRemaining()) {
@@ -255,13 +274,9 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
                 }
             }
         } catch (IOException _) {
-            // Best effort
         } finally {
-            try {
-                engine.closeInbound();
-            } catch (javax.net.ssl.SSLException _) {
-                // Peer may not have sent close_notify
-            }
+            writeLock.unlock();
+            try { engine.closeInbound(); } catch (javax.net.ssl.SSLException _) {}
             channel.close();
         }
     }

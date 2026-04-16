@@ -115,7 +115,7 @@ public final class Http2Connection {
         } catch (Http2ConnectionException e) {
             sendGoaway(e.errorCode());
         } catch (IOException _) {
-            // Connexion perdue — rien à faire
+            // Connexion perdue
         } finally {
             close();
         }
@@ -131,6 +131,7 @@ public final class Http2Connection {
 
             // PRIORITY frames are skipped (null)
             if (frame == null) continue;
+
 
             // CONTINUATION state enforcement (RFC 9113 §6.10)
             if (expectingContinuationForStream >= 0) {
@@ -163,7 +164,7 @@ public final class Http2Connection {
     // Handlers par type de frame
     // -------------------------------------------------------------------------
 
-    private void handleSettings(Http2Frame.SettingsFrame frame) throws Http2ConnectionException {
+    private void handleSettings(Http2Frame.SettingsFrame frame) throws IOException {
         if (frame.ack()) return;
 
         if (frame.streamId() != 0) {
@@ -177,7 +178,7 @@ public final class Http2Connection {
         frameWriter.writeSettingsAck();
     }
 
-    private void handlePing(Http2Frame.PingFrame frame) throws Http2ConnectionException {
+    private void handlePing(Http2Frame.PingFrame frame) throws IOException {
         if (frame.ack()) return;
 
         if (frame.streamId() != 0) {
@@ -188,7 +189,7 @@ public final class Http2Connection {
         frameWriter.writePingAck(frame.opaqueData());
     }
 
-    private void handleHeaders(Http2Frame.HeadersFrame frame) throws Http2ConnectionException {
+    private void handleHeaders(Http2Frame.HeadersFrame frame) throws IOException {
         int streamId = frame.streamId();
 
         // Stream ID must be odd (client-initiated) and greater than lastStreamId
@@ -198,8 +199,8 @@ public final class Http2Connection {
         }
         lastStreamId = streamId;
 
-        // Check max concurrent streams
-        if (streams.size() >= remoteSettings.maxConcurrentStreams()) {
+        // Check max concurrent streams (notre limite, pas celle du client)
+        if (streams.size() >= localSettings.maxConcurrentStreams()) {
             frameWriter.writeRstStream(streamId, Http2ErrorCode.REFUSED_STREAM);
             return;
         }
@@ -221,7 +222,7 @@ public final class Http2Connection {
     }
 
     private void handleContinuation(Http2Frame.ContinuationFrame frame)
-            throws Http2ConnectionException {
+            throws IOException {
         int streamId = frame.streamId();
         var stream = streams.get(streamId);
         if (stream == null) {
@@ -245,6 +246,7 @@ public final class Http2Connection {
         // Extract pseudo-headers
         extractPseudoHeaders(stream.request());
 
+
         // Half-close remote if END_STREAM was set on HEADERS
         if (stream.headersEndStream()) {
             stream.halfCloseRemote();
@@ -257,7 +259,7 @@ public final class Http2Connection {
                 .start(() -> dispatchStream(stream));
     }
 
-    private void handleData(Http2Frame.DataFrame frame) throws Http2ConnectionException {
+    private void handleData(Http2Frame.DataFrame frame) throws IOException {
         int streamId = frame.streamId();
         var stream = streams.get(streamId);
         if (stream == null) {
@@ -295,7 +297,7 @@ public final class Http2Connection {
     }
 
     private void handleWindowUpdate(Http2Frame.WindowUpdateFrame frame)
-            throws Http2ConnectionException {
+            throws IOException {
         int increment = frame.windowIncrement();
         if (increment == 0) {
             throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR,
@@ -348,13 +350,15 @@ public final class Http2Connection {
             }
 
             sendResponse(stream, response);
+        } catch (IOException _) {
+            // Connexion perdue pendant l'écriture de la réponse
         } finally {
             stream.close();
             streams.remove(stream.streamId());
         }
     }
 
-    private void sendResponse(Http2Stream stream, Response response) {
+    private void sendResponse(Http2Stream stream, Response response) throws IOException {
         int streamId = stream.streamId();
 
         // Encode response headers via HPACK
@@ -392,7 +396,7 @@ public final class Http2Connection {
                     frameWriter.writeData(streamId, new byte[0], 0, 0, true);
                 }
             } catch (IOException e) {
-                throw new UncheckedIOException(e);
+                throw e; // propagée au dispatchStream
             }
 
             stream.halfCloseLocal();
@@ -482,7 +486,7 @@ public final class Http2Connection {
         try {
             frameWriter.writeGoaway(lastStreamId, errorCode);
             goawaySent = true;
-        } catch (UncheckedIOException _) {
+        } catch (IOException _) {
             // Connection already broken
         }
     }

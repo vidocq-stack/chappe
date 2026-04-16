@@ -26,9 +26,8 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Tests d'intégration TLS — HTTPS avec certificat auto-signé.
  * <p>
- * TODO: Le SslHandler nécessite un debug approfondi de l'implémentation SSLEngine.
- * Les tests cleartext (82) passent tous. Ces tests seront activés une fois le
- * SslHandler stabilisé.
+ * Couvre HTTP/1.1 over TLS, multiple requêtes keep-alive,
+ * et HTTP/2 via ALPN negotiation.
  */
 class TlsTest {
 
@@ -124,7 +123,6 @@ class TlsTest {
     }
 
     @Test
-    @org.junit.jupiter.api.Disabled("HTTP/2 over TLS ALPN needs Http2Connection debug with SslHandler channels")
     void httpsH2ViaAlpn() throws IOException, InterruptedException {
         var h2Client = HttpClient.newBuilder()
                 .version(HttpClient.Version.HTTP_2)
