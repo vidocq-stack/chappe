@@ -24,6 +24,8 @@ public final class HttpResponseWriter {
     private static final byte[] CONTENT_LENGTH_PREFIX = "Content-Length: ".getBytes(StandardCharsets.US_ASCII);
     private static final byte[] CONNECTION_CLOSE = "Connection: close\r\n".getBytes(StandardCharsets.US_ASCII);
     private static final byte[] CONNECTION_KEEP_ALIVE = "Connection: keep-alive\r\n".getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] TRANSFER_ENCODING_CHUNKED = "Transfer-Encoding: chunked\r\n".getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] CHUNK_TERMINATOR = "0\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
 
     // Status lines pré-encodées pour les codes courants
     private static final byte[] STATUS_200 = statusLine(200, "OK");
@@ -64,13 +66,21 @@ public final class HttpResponseWriter {
             putBytes(CRLF, buffer, channel);
         }
 
-        // Content-Length si connu et pas déjà défini
+        // Content-Length ou Transfer-Encoding: chunked
         Body body = response.body();
         long contentLength = body.contentLength();
+        boolean chunked = false;
         if (contentLength >= 0 && !response.headers().contains("Content-Length")) {
             putBytes(CONTENT_LENGTH_PREFIX, buffer, channel);
             putAsciiLong(contentLength, buffer, channel);
             putBytes(CRLF, buffer, channel);
+        } else if (contentLength < 0 && !response.headers().contains("Transfer-Encoding")) {
+            // Taille inconnue sur keep-alive → chunked transfer encoding
+            if (keepAlive) {
+                putBytes(TRANSFER_ENCODING_CHUNKED, buffer, channel);
+                chunked = true;
+            }
+            // Si pas keep-alive, le body est terminé par la fermeture de connexion
         }
 
         // Connection header
@@ -83,7 +93,11 @@ public final class HttpResponseWriter {
         flush(buffer, channel);
 
         // Body
-        writeBody(body, buffer, channel);
+        if (chunked) {
+            writeBodyChunked(body, buffer, channel);
+        } else {
+            writeBody(body, buffer, channel);
+        }
     }
 
     /**
@@ -137,6 +151,33 @@ public final class HttpResponseWriter {
             putBytes(("HTTP/1.1 " + status.code() + " " + status.reason() + "\r\n")
                     .getBytes(StandardCharsets.US_ASCII), buffer, channel);
         }
+    }
+
+    private void writeBodyChunked(Body body, ByteBuffer buffer, WritableByteChannel channel)
+            throws IOException {
+        if (body.contentLength() == 0) {
+            putBytes(CHUNK_TERMINATOR, buffer, channel);
+            flush(buffer, channel);
+            return;
+        }
+
+        try (InputStream in = body.asInputStream()) {
+            byte[] chunk = new byte[8192];
+            int read;
+            while ((read = in.read(chunk)) != -1) {
+                // chunk-size in hex + CRLF
+                byte[] sizeHex = Integer.toHexString(read).getBytes(StandardCharsets.US_ASCII);
+                putBytes(sizeHex, buffer, channel);
+                putBytes(CRLF, buffer, channel);
+                // chunk-data
+                putBytes(chunk, 0, read, buffer, channel);
+                // CRLF after data
+                putBytes(CRLF, buffer, channel);
+            }
+        }
+        // Terminal chunk: "0\r\n\r\n"
+        putBytes(CHUNK_TERMINATOR, buffer, channel);
+        flush(buffer, channel);
     }
 
     private void writeBody(Body body, ByteBuffer buffer, WritableByteChannel channel)

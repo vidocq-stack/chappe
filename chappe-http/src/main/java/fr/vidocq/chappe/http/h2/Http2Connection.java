@@ -18,6 +18,9 @@ import java.nio.channels.SocketChannel;
 import java.nio.channels.WritableByteChannel;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Gestionnaire de connexion HTTP/2 — une instance par connexion,
@@ -61,8 +64,10 @@ public final class Http2Connection {
     private volatile boolean goawaySent = false;
 
     // --- Flow control (connexion) ---
-    private volatile int connectionRecvWindow = 65_535;
-    private volatile int connectionSendWindow = 65_535;
+    private final AtomicInteger connectionRecvWindow = new AtomicInteger(65_535);
+    private final AtomicInteger connectionSendWindow = new AtomicInteger(65_535);
+    private final ReentrantLock connectionSendLock = new ReentrantLock();
+    private final Condition connectionSendWindowAvailable = connectionSendLock.newCondition();
 
     // --- CONTINUATION state ---
     private int expectingContinuationForStream = -1;
@@ -269,8 +274,8 @@ public final class Http2Connection {
 
         int dataLength = frame.data().remaining();
 
-        // Update flow control windows
-        connectionRecvWindow -= dataLength;
+        // Update flow control windows (atomic)
+        connectionRecvWindow.addAndGet(-dataLength);
         stream.consumeRecvWindow(dataLength);
 
         // Copy data and offer to stream
@@ -284,9 +289,10 @@ public final class Http2Connection {
         }
 
         // Auto WINDOW_UPDATE if recv window is getting low
-        if (connectionRecvWindow < WINDOW_UPDATE_THRESHOLD) {
-            int increment = 65_535 - connectionRecvWindow;
-            connectionRecvWindow += increment;
+        int connRecv = connectionRecvWindow.get();
+        if (connRecv < WINDOW_UPDATE_THRESHOLD) {
+            int increment = 65_535 - connRecv;
+            connectionRecvWindow.addAndGet(increment);
             frameWriter.writeWindowUpdate(0, increment);
         }
         if (stream.recvWindow() < WINDOW_UPDATE_THRESHOLD) {
@@ -306,10 +312,30 @@ public final class Http2Connection {
 
         int streamId = frame.streamId();
         if (streamId == 0) {
-            connectionSendWindow += increment;
+            // Check overflow: connection send window must not exceed 2^31-1 (RFC 9113 §6.9.1)
+            int current = connectionSendWindow.get();
+            if (current > Integer.MAX_VALUE - increment) {
+                throw new Http2ConnectionException(Http2ErrorCode.FLOW_CONTROL_ERROR,
+                        "Connection send window overflow");
+            }
+            connectionSendWindow.addAndGet(increment);
+            connectionSendLock.lock();
+            try {
+                connectionSendWindowAvailable.signalAll();
+            } finally {
+                connectionSendLock.unlock();
+            }
         } else {
             var stream = streams.get(streamId);
             if (stream != null) {
+                // Check overflow: stream send window must not exceed 2^31-1 (RFC 9113 §6.9.1)
+                int current = stream.sendWindow();
+                if (current > Integer.MAX_VALUE - increment) {
+                    frameWriter.writeRstStream(streamId, Http2ErrorCode.FLOW_CONTROL_ERROR);
+                    streams.remove(streamId);
+                    stream.close();
+                    return;
+                }
                 stream.incrementSendWindow(increment);
             }
             // Ignore WINDOW_UPDATE for unknown/closed streams (RFC 9113 §6.9)
@@ -374,32 +400,82 @@ public final class Http2Connection {
         if (hasBody) {
             try (InputStream is = body.asInputStream()) {
                 byte[] buf = new byte[DATA_CHUNK_SIZE];
-                int prevLen = -1;
-                byte[] prevBuf = new byte[DATA_CHUNK_SIZE];
-
                 int read;
                 while ((read = is.read(buf)) != -1) {
-                    if (prevLen >= 0) {
-                        frameWriter.writeData(streamId, prevBuf, 0, prevLen, false);
+                    int offset = 0;
+                    int remaining = read;
+                    while (remaining > 0) {
+                        // Wait for flow control window availability
+                        int allowed = waitForSendWindow(stream);
+                        int chunkSize = Math.min(remaining, allowed);
+
+                        frameWriter.writeData(streamId, buf, offset, chunkSize, false);
+
+                        // Decrement both windows
+                        connectionSendWindow.addAndGet(-chunkSize);
+                        stream.consumeSendWindow(chunkSize);
+
+                        offset += chunkSize;
+                        remaining -= chunkSize;
                     }
-                    // Swap buffers to avoid copying
-                    byte[] tmp = prevBuf;
-                    prevBuf = buf;
-                    buf = tmp;
-                    prevLen = read;
                 }
 
-                if (prevLen >= 0) {
-                    frameWriter.writeData(streamId, prevBuf, 0, prevLen, true);
-                } else {
-                    // Body was empty but we sent endStream=false on headers
-                    frameWriter.writeData(streamId, new byte[0], 0, 0, true);
-                }
+                // Send final empty DATA frame with END_STREAM
+                frameWriter.writeData(streamId, new byte[0], 0, 0, true);
+            } catch (InterruptedException _) {
+                Thread.currentThread().interrupt();
+                throw new IOException("Interrupted while waiting for flow control window");
             } catch (IOException e) {
                 throw e; // propagée au dispatchStream
             }
 
             stream.halfCloseLocal();
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Flow control helpers
+    // -------------------------------------------------------------------------
+
+    /**
+     * Waits until both the connection and stream send windows allow sending data.
+     * Returns the maximum number of bytes that can be sent in one DATA frame,
+     * respecting both windows and the remote max frame size.
+     */
+    private int waitForSendWindow(Http2Stream stream) throws InterruptedException {
+        while (true) {
+            int connWindow = connectionSendWindow.get();
+            int streamWindow = stream.sendWindow();
+            int maxFrame = remoteSettings.maxFrameSize();
+            int allowed = Math.min(Math.min(connWindow, streamWindow), maxFrame);
+
+            if (allowed > 0) {
+                return allowed;
+            }
+
+            // Wait on connection-level condition if connection window is the bottleneck
+            if (connWindow <= 0) {
+                connectionSendLock.lock();
+                try {
+                    while (connectionSendWindow.get() <= 0) {
+                        connectionSendWindowAvailable.await();
+                    }
+                } finally {
+                    connectionSendLock.unlock();
+                }
+            }
+
+            // Wait on stream-level condition if stream window is the bottleneck
+            if (streamWindow <= 0) {
+                stream.sendLock().lock();
+                try {
+                    while (stream.sendWindow() <= 0) {
+                        stream.sendWindowAvailable().await();
+                    }
+                } finally {
+                    stream.sendLock().unlock();
+                }
+            }
         }
     }
 

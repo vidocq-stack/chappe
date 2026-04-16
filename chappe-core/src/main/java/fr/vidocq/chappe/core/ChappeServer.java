@@ -150,6 +150,9 @@ final class ChappeServer implements Server {
             try {
                 SocketChannel clientChannel = serverChannel.accept();
                 clientChannel.configureBlocking(true);
+                // Configurer le timeout de lecture (idle/read timeout)
+                int timeoutMs = (int) config.idleTimeout().toMillis();
+                clientChannel.socket().setSoTimeout(timeoutMs);
                 executor.submit(() -> handleConnection(clientChannel));
             } catch (AsynchronousCloseException _) {
                 break;

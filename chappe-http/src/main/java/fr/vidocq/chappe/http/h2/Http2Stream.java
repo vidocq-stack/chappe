@@ -7,6 +7,9 @@ import fr.vidocq.chappe.http.HttpRequestImpl;
 import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * État d'un stream HTTP/2 — lifecycle, flow control, construction de la requête.
@@ -21,9 +24,11 @@ public final class Http2Stream {
     private volatile State state;
     private final HttpRequestImpl request;
 
-    // Flow control
-    private volatile int recvWindow;
-    private volatile int sendWindow;
+    // Flow control (atomic for thread-safe concurrent access)
+    private final AtomicInteger recvWindow;
+    private final AtomicInteger sendWindow;
+    private final ReentrantLock sendLock = new ReentrantLock();
+    private final Condition sendWindowAvailable = sendLock.newCondition();
 
     // Accumulation du header block (HEADERS + CONTINUATION)
     private ByteArrayOutputStream headerBlockAccumulator;
@@ -38,8 +43,8 @@ public final class Http2Stream {
     public Http2Stream(int streamId, int initialRecvWindow, int initialSendWindow) {
         this.streamId = streamId;
         this.state = State.IDLE;
-        this.recvWindow = initialRecvWindow;
-        this.sendWindow = initialSendWindow;
+        this.recvWindow = new AtomicInteger(initialRecvWindow);
+        this.sendWindow = new AtomicInteger(initialSendWindow);
         this.request = new HttpRequestImpl();
         this.request.setVersion(HttpVersion.HTTP_2);
     }
@@ -64,13 +69,26 @@ public final class Http2Stream {
 
     // --- Flow control ---
 
-    public int recvWindow() { return recvWindow; }
-    public int sendWindow() { return sendWindow; }
+    public int recvWindow() { return recvWindow.get(); }
+    public int sendWindow() { return sendWindow.get(); }
 
-    public void consumeRecvWindow(int delta) { recvWindow -= delta; }
-    public void consumeSendWindow(int delta) { sendWindow -= delta; }
-    public void incrementSendWindow(int delta) { sendWindow += delta; }
-    public void incrementRecvWindow(int delta) { recvWindow += delta; }
+    public void consumeRecvWindow(int delta) { recvWindow.addAndGet(-delta); }
+    public void consumeSendWindow(int delta) { sendWindow.addAndGet(-delta); }
+
+    public void incrementSendWindow(int delta) {
+        sendWindow.addAndGet(delta);
+        sendLock.lock();
+        try {
+            sendWindowAvailable.signalAll();
+        } finally {
+            sendLock.unlock();
+        }
+    }
+
+    public void incrementRecvWindow(int delta) { recvWindow.addAndGet(delta); }
+
+    public ReentrantLock sendLock() { return sendLock; }
+    public Condition sendWindowAvailable() { return sendWindowAvailable; }
 
     // --- Accumulation du header block ---
 

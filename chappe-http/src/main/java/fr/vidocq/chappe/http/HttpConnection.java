@@ -88,7 +88,13 @@ public final class HttpConnection {
                 }
 
                 // 2. Setup du body
-                InputStream bodyStream = setupBody();
+                InputStream bodyStream;
+                try {
+                    bodyStream = setupBody();
+                } catch (BadBodyException e) {
+                    sendError(StatusCode.BAD_REQUEST, e.getMessage());
+                    break;
+                }
                 if (bodyStream != null) {
                     request.body = Body.of(bodyStream, contentLength());
                 }
@@ -137,11 +143,17 @@ public final class HttpConnection {
 
     // --- Helpers internes ---
 
-    private InputStream setupBody() {
+    /**
+     * Setup du body de la requête.
+     * @return l'InputStream du body, ou null si pas de body
+     * @throws BadBodyException si le Content-Length est invalide ou dépasse la limite
+     */
+    private InputStream setupBody() throws BadBodyException {
         var headers = request.headers();
         var transferEncoding = headers.first("Transfer-Encoding").orElse(null);
         var contentLengthStr = headers.first("Content-Length").orElse(null);
 
+        // Transfer-Encoding: chunked gagne sur Content-Length (RFC 9112 §6.3)
         if ("chunked".equalsIgnoreCase(transferEncoding)) {
             return HttpBodyReader.chunked(readBuffer, readChannel);
         }
@@ -151,17 +163,23 @@ public final class HttpConnection {
             try {
                 cl = Long.parseLong(contentLengthStr);
             } catch (NumberFormatException _) {
-                return null;
+                throw new BadBodyException("Invalid Content-Length: " + contentLengthStr);
             }
-            if (cl <= 0) return null;
+            if (cl < 0) {
+                throw new BadBodyException("Negative Content-Length: " + cl);
+            }
+            if (cl == 0) return null;
             if (cl > config.maxRequestSize()) {
-                // On ne peut pas throw ici proprement, le handler recevra un body tronqué
-                // Le vrai check se fait au parsing, mais on borne quand même
+                throw new BadBodyException("Content-Length " + cl + " exceeds max " + config.maxRequestSize());
             }
             return HttpBodyReader.fixedLength(readBuffer, readChannel, cl);
         }
 
         return null;
+    }
+
+    private static final class BadBodyException extends Exception {
+        BadBodyException(String message) { super(message); }
     }
 
     private long contentLength() {

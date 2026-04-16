@@ -156,6 +156,9 @@ final class ChunkedInputStream extends InputStream {
             if (digit < 0) {
                 throw new IOException("Invalid hex digit in chunk size: " + (char) b);
             }
+            if (size > (Long.MAX_VALUE >> 4)) {
+                throw new IOException("Chunk size overflow");
+            }
             size = (size << 4) | digit;
         }
     }
