@@ -29,12 +29,18 @@ final class ArrayHeaders implements Headers {
 
     @Override
     public Optional<String> first(String name) {
+        var v = firstOrNull(name);
+        return v != null ? Optional.of(v) : Optional.empty();
+    }
+
+    @Override
+    public String firstOrNull(String name) {
         for (int i = 0; i < count; i++) {
             if (names[i].equalsIgnoreCase(name)) {
-                return Optional.of(values[i]);
+                return values[i];
             }
         }
-        return Optional.empty();
+        return null;
     }
 
     @Override

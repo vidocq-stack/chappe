@@ -33,12 +33,12 @@ public final class HttpConnection {
     private volatile boolean open = true;
 
     public HttpConnection(SocketChannel channel, Handler handler, ServerConfig config) {
-        this(channel, channel, channel, handler, config, null);
+        this(channel, channel, channel, handler, config, null, null);
     }
 
     public HttpConnection(SocketChannel channel, Handler handler, ServerConfig config,
                           ByteBuffer prefilledBuffer) {
-        this(channel, channel, channel, handler, config, prefilledBuffer);
+        this(channel, channel, channel, handler, config, prefilledBuffer, null);
     }
 
     /**
@@ -46,7 +46,7 @@ public final class HttpConnection {
      */
     public HttpConnection(ReadableByteChannel readChannel, WritableByteChannel writeChannel,
                           Closeable closeable, Handler handler, ServerConfig config,
-                          ByteBuffer prefilledBuffer) {
+                          ByteBuffer prefilledBuffer, ByteBuffer writeBuffer) {
         this.readChannel = readChannel;
         this.writeChannel = writeChannel;
         this.closeable = closeable;
@@ -58,7 +58,7 @@ public final class HttpConnection {
             this.readBuffer = ByteBuffer.allocateDirect(BUFFER_SIZE);
             readBuffer.flip();
         }
-        this.writeBuffer = ByteBuffer.allocateDirect(BUFFER_SIZE);
+        this.writeBuffer = writeBuffer != null ? writeBuffer : ByteBuffer.allocateDirect(BUFFER_SIZE);
         this.parser = new HttpRequestParser();
         this.writer = new HttpResponseWriter();
         this.request = new HttpRequestImpl();
@@ -102,7 +102,7 @@ public final class HttpConnection {
 
                 // 3. Expect: 100-continue (RFC 9110 §10.1.1)
                 if ("100-continue".equalsIgnoreCase(
-                        request.headers().first("Expect").orElse(null))) {
+                        request.headers().firstOrNull("Expect"))) {
                     // Envoyer 100 Continue avant la lecture du body
                     var continueBytes = "HTTP/1.1 100 Continue\r\n\r\n".getBytes();
                     var buf = ByteBuffer.wrap(continueBytes);
@@ -174,8 +174,8 @@ public final class HttpConnection {
      */
     private InputStream setupBody() throws BadBodyException {
         var headers = request.headers();
-        var transferEncoding = headers.first("Transfer-Encoding").orElse(null);
-        var contentLengthStr = headers.first("Content-Length").orElse(null);
+        var transferEncoding = headers.firstOrNull("Transfer-Encoding");
+        var contentLengthStr = headers.firstOrNull("Content-Length");
 
         // Transfer-Encoding: chunked gagne sur Content-Length (RFC 9112 §6.3)
         if ("chunked".equalsIgnoreCase(transferEncoding)) {
@@ -208,7 +208,7 @@ public final class HttpConnection {
 
     private long contentLength() {
         var headers = request.headers();
-        var transferEncoding = headers.first("Transfer-Encoding").orElse(null);
+        var transferEncoding = headers.firstOrNull("Transfer-Encoding");
         if ("chunked".equalsIgnoreCase(transferEncoding)) return -1;
 
         return headers.first("Content-Length")
@@ -220,7 +220,7 @@ public final class HttpConnection {
     }
 
     private boolean isKeepAlive() {
-        var connection = request.headers().first("Connection").orElse(null);
+        var connection = request.headers().firstOrNull("Connection");
         if (request.version() == HttpVersion.HTTP_1_1) {
             // HTTP/1.1 : keep-alive par défaut, sauf si Connection: close
             return !"close".equalsIgnoreCase(connection);

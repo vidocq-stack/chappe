@@ -1,7 +1,6 @@
 package fr.vidocq.chappe.http;
 
 import fr.vidocq.chappe.api.Body;
-import fr.vidocq.chappe.api.Headers;
 import fr.vidocq.chappe.api.HttpMethod;
 import fr.vidocq.chappe.api.Response;
 import fr.vidocq.chappe.api.StatusCode;
@@ -19,29 +18,35 @@ import java.util.Locale;
 /**
  * Sérialisation d'une {@link Response} HTTP/1.1 vers un channel.
  * <p>
- * Utilise des fragments pré-encodés pour les status lines courantes
- * et écrit via un buffer de coalescing pour minimiser les syscalls.
+ * Optimisé pour minimiser les allocations et les syscalls :
+ * <ul>
+ *   <li>Headers écrits directement char-par-char (pas de byte[] intermédiaire)</li>
+ *   <li>Headers + body coalescés dans un seul write quand possible</li>
+ *   <li>Buffer de lecture du body réutilisé (pas d'allocation par réponse)</li>
+ *   <li>Content-Length écrit directement dans le buffer (pas de byte[20])</li>
+ * </ul>
  */
 public final class HttpResponseWriter {
 
-    private static final byte[] CRLF = "\r\n".getBytes(StandardCharsets.US_ASCII);
-    private static final byte[] COLON_SPACE = ": ".getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] CRLF = {'\r', '\n'};
+    private static final byte COLON = ':';
+    private static final byte SPACE = ' ';
     private static final byte[] CONTENT_LENGTH_PREFIX = "Content-Length: ".getBytes(StandardCharsets.US_ASCII);
     private static final byte[] CONNECTION_CLOSE = "Connection: close\r\n".getBytes(StandardCharsets.US_ASCII);
     private static final byte[] CONNECTION_KEEP_ALIVE = "Connection: keep-alive\r\n".getBytes(StandardCharsets.US_ASCII);
     private static final byte[] TRANSFER_ENCODING_CHUNKED = "Transfer-Encoding: chunked\r\n".getBytes(StandardCharsets.US_ASCII);
     private static final byte[] CHUNK_TERMINATOR = "0\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
     private static final byte[] DATE_PREFIX = "Date: ".getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] CONTENT_TYPE_TEXT = "Content-Type: text/plain; charset=utf-8\r\n".getBytes(StandardCharsets.US_ASCII);
 
-    /** IMF-fixdate formatter (RFC 5322) — ex: "Tue, 15 Nov 1994 08:12:31 GMT" */
     private static final DateTimeFormatter IMF_FIXDATE = DateTimeFormatter
             .ofPattern("EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.US);
 
-    // Cache Date header (1 seconde de résolution)
-    private volatile long lastDateSecond;
-    private volatile byte[] cachedDateValue;
+    // Cache Date header (1 seconde)
+    private static volatile long lastDateSecond;
+    private static volatile byte[] cachedDateValue;
 
-    // Status lines pré-encodées pour les codes courants
+    // Status lines pré-encodées
     private static final byte[] STATUS_200 = statusLine(200, "OK");
     private static final byte[] STATUS_201 = statusLine(201, "Created");
     private static final byte[] STATUS_204 = statusLine(204, "No Content");
@@ -57,37 +62,33 @@ public final class HttpResponseWriter {
     private static final byte[] STATUS_502 = statusLine(502, "Bad Gateway");
     private static final byte[] STATUS_503 = statusLine(503, "Service Unavailable");
 
-    /**
-     * Écrit une réponse complète vers le channel.
-     *
-     * @param response  la réponse à écrire
-     * @param buffer    le buffer d'écriture (propriété de la connexion)
-     * @param channel   le channel socket
-     * @param keepAlive si true, ajoute Connection: keep-alive
-     * @param method    la méthode HTTP de la requête (pour HEAD body suppression)
-     */
+    // Buffer réutilisé pour la lecture du body (évite new byte[8192] par réponse)
+    private final byte[] bodyChunk = new byte[8192];
+
+    // Buffer pour putAsciiLong (évite new byte[20] par Content-Length)
+    private final byte[] digitsBuf = new byte[20];
+
     public void write(Response response, ByteBuffer buffer, WritableByteChannel channel,
                       boolean keepAlive, HttpMethod method) throws IOException {
         buffer.clear();
 
         int statusCode = response.status().code();
-
-        // Body suppression : HEAD, 204, 304 (RFC 9110 §9.3.2, §15.3.5, §15.4.5)
         boolean suppressBody = (method == HttpMethod.HEAD)
                 || statusCode == 204 || statusCode == 304;
 
         // Status line
         putStatusLine(response.status(), buffer, channel);
 
-        // Headers de la réponse
+        // Headers — écriture directe sans allocation byte[]
         for (var entry : response.headers()) {
-            putBytes(entry.name().getBytes(StandardCharsets.US_ASCII), buffer, channel);
-            putBytes(COLON_SPACE, buffer, channel);
-            putBytes(entry.value().getBytes(StandardCharsets.US_ASCII), buffer, channel);
+            putAsciiString(entry.name(), buffer, channel);
+            putByte(COLON, buffer, channel);
+            putByte(SPACE, buffer, channel);
+            putAsciiString(entry.value(), buffer, channel);
             putBytes(CRLF, buffer, channel);
         }
 
-        // Date header (RFC 9110 §6.6.1 MUST)
+        // Date header
         if (!response.headers().contains("Date")) {
             putBytes(DATE_PREFIX, buffer, channel);
             putBytes(getDateValue(), buffer, channel);
@@ -116,10 +117,9 @@ public final class HttpResponseWriter {
         // Fin des headers
         putBytes(CRLF, buffer, channel);
 
-        // Flush les headers
-        flush(buffer, channel);
+        // *** PAS de flush intermédiaire ici — on coalesce headers + body ***
 
-        // Body (supprimé pour HEAD, 204, 304)
+        // Body
         if (!suppressBody) {
             if (chunked) {
                 writeBodyChunked(body, buffer, channel);
@@ -127,126 +127,137 @@ public final class HttpResponseWriter {
                 writeBody(body, buffer, channel);
             }
         }
-    }
 
-    /** Retourne la valeur Date cachée (résolution 1 seconde). */
-    private byte[] getDateValue() {
-        long nowSecond = System.currentTimeMillis() / 1000;
-        if (nowSecond != lastDateSecond || cachedDateValue == null) {
-            lastDateSecond = nowSecond;
-            cachedDateValue = ZonedDateTime.now(ZoneOffset.UTC).format(IMF_FIXDATE)
-                    .getBytes(StandardCharsets.US_ASCII);
+        // Flush final unique (headers + body en un seul write si tout tient dans le buffer)
+        if (buffer.position() > 0) {
+            flush(buffer, channel);
         }
-        return cachedDateValue;
     }
 
-    /**
-     * Écrit une réponse d'erreur minimale (quand le dispatch échoue).
-     */
     public void writeError(StatusCode status, String message, ByteBuffer buffer,
                            WritableByteChannel channel) throws IOException {
         buffer.clear();
-
         putStatusLine(status, buffer, channel);
 
         byte[] bodyBytes = message.getBytes(StandardCharsets.UTF_8);
-
-        putBytes("Content-Type: text/plain; charset=utf-8\r\n".getBytes(StandardCharsets.US_ASCII), buffer, channel);
+        putBytes(CONTENT_TYPE_TEXT, buffer, channel);
         putBytes(CONTENT_LENGTH_PREFIX, buffer, channel);
         putAsciiLong(bodyBytes.length, buffer, channel);
         putBytes(CRLF, buffer, channel);
         putBytes(CONNECTION_CLOSE, buffer, channel);
         putBytes(CRLF, buffer, channel);
-
         putBytes(bodyBytes, buffer, channel);
 
         flush(buffer, channel);
     }
 
-    // --- Helpers internes ---
+    // --- Status line ---
 
     private void putStatusLine(StatusCode status, ByteBuffer buffer,
                                WritableByteChannel channel) throws IOException {
         byte[] preEncoded = switch (status.code()) {
-            case 200 -> STATUS_200;
-            case 201 -> STATUS_201;
-            case 204 -> STATUS_204;
-            case 301 -> STATUS_301;
-            case 302 -> STATUS_302;
-            case 304 -> STATUS_304;
-            case 400 -> STATUS_400;
-            case 401 -> STATUS_401;
-            case 403 -> STATUS_403;
-            case 404 -> STATUS_404;
-            case 405 -> STATUS_405;
-            case 500 -> STATUS_500;
-            case 502 -> STATUS_502;
-            case 503 -> STATUS_503;
+            case 200 -> STATUS_200; case 201 -> STATUS_201; case 204 -> STATUS_204;
+            case 301 -> STATUS_301; case 302 -> STATUS_302; case 304 -> STATUS_304;
+            case 400 -> STATUS_400; case 401 -> STATUS_401; case 403 -> STATUS_403;
+            case 404 -> STATUS_404; case 405 -> STATUS_405; case 500 -> STATUS_500;
+            case 502 -> STATUS_502; case 503 -> STATUS_503;
             default -> null;
         };
-
         if (preEncoded != null) {
             putBytes(preEncoded, buffer, channel);
         } else {
-            putBytes(("HTTP/1.1 " + status.code() + " " + status.reason() + "\r\n")
-                    .getBytes(StandardCharsets.US_ASCII), buffer, channel);
+            putAsciiString("HTTP/1.1 ", buffer, channel);
+            putAsciiLong(status.code(), buffer, channel);
+            putByte(SPACE, buffer, channel);
+            putAsciiString(status.reason(), buffer, channel);
+            putBytes(CRLF, buffer, channel);
         }
     }
+
+    // --- Body writers ---
 
     private void writeBodyChunked(Body body, ByteBuffer buffer, WritableByteChannel channel)
             throws IOException {
         if (body.contentLength() == 0) {
             putBytes(CHUNK_TERMINATOR, buffer, channel);
-            flush(buffer, channel);
             return;
         }
-
         try (InputStream in = body.asInputStream()) {
-            byte[] chunk = new byte[8192];
             int read;
-            while ((read = in.read(chunk)) != -1) {
-                // chunk-size in hex + CRLF
-                byte[] sizeHex = Integer.toHexString(read).getBytes(StandardCharsets.US_ASCII);
-                putBytes(sizeHex, buffer, channel);
+            while ((read = in.read(bodyChunk)) != -1) {
+                putAsciiHex(read, buffer, channel);
                 putBytes(CRLF, buffer, channel);
-                // chunk-data
-                putBytes(chunk, 0, read, buffer, channel);
-                // CRLF after data
+                putBytes(bodyChunk, 0, read, buffer, channel);
                 putBytes(CRLF, buffer, channel);
             }
         }
-        // Terminal chunk: "0\r\n\r\n"
         putBytes(CHUNK_TERMINATOR, buffer, channel);
-        flush(buffer, channel);
     }
 
     private void writeBody(Body body, ByteBuffer buffer, WritableByteChannel channel)
             throws IOException {
-        long contentLength = body.contentLength();
-        if (contentLength == 0) return;
-
+        if (body.contentLength() == 0) return;
         try (InputStream in = body.asInputStream()) {
-            byte[] chunk = new byte[8192];
             int read;
-            while ((read = in.read(chunk)) != -1) {
-                int off = 0;
-                while (off < read) {
-                    int space = buffer.remaining();
-                    if (space == 0) {
-                        flush(buffer, channel);
-                        space = buffer.remaining();
-                    }
-                    int toPut = Math.min(read - off, space);
-                    buffer.put(chunk, off, toPut);
-                    off += toPut;
-                }
+            while ((read = in.read(bodyChunk)) != -1) {
+                putBytes(bodyChunk, 0, read, buffer, channel);
             }
         }
-        flush(buffer, channel);
     }
 
-    private void putBytes(byte[] data, ByteBuffer buffer,
-                          WritableByteChannel channel) throws IOException {
+    // --- Primitives d'écriture optimisées ---
+
+    /** Écrit une String ASCII directement dans le buffer, char par char — zéro allocation. */
+    private void putAsciiString(String s, ByteBuffer buffer, WritableByteChannel channel)
+            throws IOException {
+        for (int i = 0, len = s.length(); i < len; i++) {
+            if (!buffer.hasRemaining()) flush(buffer, channel);
+            buffer.put((byte) s.charAt(i));
+        }
+    }
+
+    /** Écrit un seul byte. */
+    private void putByte(byte b, ByteBuffer buffer, WritableByteChannel channel)
+            throws IOException {
+        if (!buffer.hasRemaining()) flush(buffer, channel);
+        buffer.put(b);
+    }
+
+    /** Écrit un long en ASCII décimal directement dans le buffer — zéro allocation. */
+    private void putAsciiLong(long value, ByteBuffer buffer, WritableByteChannel channel)
+            throws IOException {
+        if (value == 0) {
+            putByte((byte) '0', buffer, channel);
+            return;
+        }
+        int pos = digitsBuf.length;
+        long v = value;
+        while (v > 0) {
+            digitsBuf[--pos] = (byte) ('0' + (v % 10));
+            v /= 10;
+        }
+        putBytes(digitsBuf, pos, digitsBuf.length - pos, buffer, channel);
+    }
+
+    /** Écrit un int en hex ASCII — pour chunked transfer. */
+    private void putAsciiHex(int value, ByteBuffer buffer, WritableByteChannel channel)
+            throws IOException {
+        if (value == 0) {
+            putByte((byte) '0', buffer, channel);
+            return;
+        }
+        int pos = digitsBuf.length;
+        int v = value;
+        while (v > 0) {
+            int digit = v & 0xF;
+            digitsBuf[--pos] = (byte) (digit < 10 ? '0' + digit : 'a' + digit - 10);
+            v >>>= 4;
+        }
+        putBytes(digitsBuf, pos, digitsBuf.length - pos, buffer, channel);
+    }
+
+    private void putBytes(byte[] data, ByteBuffer buffer, WritableByteChannel channel)
+            throws IOException {
         int off = 0;
         while (off < data.length) {
             int space = buffer.remaining();
@@ -258,25 +269,6 @@ public final class HttpResponseWriter {
             buffer.put(data, off, toPut);
             off += toPut;
         }
-    }
-
-    private void putAsciiLong(long value, ByteBuffer buffer,
-                              WritableByteChannel channel) throws IOException {
-        if (value == 0) {
-            if (!buffer.hasRemaining()) flush(buffer, channel);
-            buffer.put((byte) '0');
-            return;
-        }
-
-        // Max 20 digits pour un long
-        byte[] digits = new byte[20];
-        int pos = digits.length;
-        long v = value;
-        while (v > 0) {
-            digits[--pos] = (byte) ('0' + (v % 10));
-            v /= 10;
-        }
-        putBytes(digits, pos, digits.length - pos, buffer, channel);
     }
 
     private void putBytes(byte[] data, int off, int len, ByteBuffer buffer,
@@ -300,6 +292,16 @@ public final class HttpResponseWriter {
             channel.write(buffer);
         }
         buffer.clear();
+    }
+
+    private static byte[] getDateValue() {
+        long nowSecond = System.currentTimeMillis() / 1000;
+        if (nowSecond != lastDateSecond || cachedDateValue == null) {
+            lastDateSecond = nowSecond;
+            cachedDateValue = ZonedDateTime.now(ZoneOffset.UTC).format(IMF_FIXDATE)
+                    .getBytes(StandardCharsets.US_ASCII);
+        }
+        return cachedDateValue;
     }
 
     private static byte[] statusLine(int code, String reason) {

@@ -21,6 +21,11 @@ public interface Headers extends Iterable<Headers.Entry> {
     /** Retourne toutes les valeurs pour le nom donné. */
     List<String> all(String name);
 
+    /** Première valeur ou {@code null} — évite l'allocation Optional. */
+    default String firstOrNull(String name) {
+        return first(name).orElse(null);
+    }
+
     /** Vérifie la présence d'un en-tête avec ce nom. */
     boolean contains(String name);
 

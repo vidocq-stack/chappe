@@ -166,24 +166,26 @@ final class ChappeServer implements Server {
 
     private void handleConnection(SocketChannel channel) {
         ByteBuffer readBuffer = bufferPool.acquire();
+        ByteBuffer writeBuffer = bufferPool.acquire();
         try {
             if (config.tlsEnabled()) {
-                handleTlsConnection(channel, readBuffer);
+                handleTlsConnection(channel, readBuffer, writeBuffer);
             } else {
-                handleCleartextConnection(channel, readBuffer);
+                handleCleartextConnection(channel, readBuffer, writeBuffer);
             }
         } catch (IOException _) {
             try { channel.close(); } catch (IOException _2) {}
         } finally {
             bufferPool.release(readBuffer);
+            bufferPool.release(writeBuffer);
         }
     }
 
     /**
      * Connexion TLS : handshake SSLEngine → ALPN → dispatch.
      */
-    private void handleTlsConnection(SocketChannel channel, ByteBuffer readBuffer)
-            throws IOException {
+    private void handleTlsConnection(SocketChannel channel, ByteBuffer readBuffer,
+                                     ByteBuffer writeBuffer) throws IOException {
         SSLContext sslContext = config.sslContext();
         SSLEngine engine = sslContext.createSSLEngine();
         engine.setUseClientMode(false);
@@ -216,15 +218,15 @@ final class ChappeServer implements Server {
                 return;
             }
             readBuffer.flip();
-            new HttpConnection(sslHandler, sslHandler, sslHandler, handler, config, readBuffer).run();
+            new HttpConnection(sslHandler, sslHandler, sslHandler, handler, config, readBuffer, writeBuffer).run();
         }
     }
 
     /**
      * Connexion cleartext : byte sniffing → dispatch.
      */
-    private void handleCleartextConnection(SocketChannel channel, ByteBuffer readBuffer)
-            throws IOException {
+    private void handleCleartextConnection(SocketChannel channel, ByteBuffer readBuffer,
+                                          ByteBuffer writeBuffer) throws IOException {
         readBuffer.clear();
         int read = channel.read(readBuffer);
         if (read == -1) {
@@ -236,7 +238,7 @@ final class ChappeServer implements Server {
         if (read >= 6 && isHttp2Preface(readBuffer)) {
             new Http2Connection(channel, handler, config, readBuffer).run();
         } else {
-            new HttpConnection(channel, handler, config, readBuffer).run();
+            new HttpConnection(channel, channel, channel, handler, config, readBuffer, writeBuffer).run();
         }
     }
 
