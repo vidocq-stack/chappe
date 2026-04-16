@@ -51,12 +51,11 @@ public class LargeResponseBench {
                 .version(HttpClient.Version.HTTP_2)
                 .build();
 
-        String url = "http://localhost:" + server.port() + "/";
+        String url = "http://127.0.0.1:" + server.port() + "/";
 
         http11Request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .GET()
-                .header("Connection", "keep-alive")
                 .build();
 
         http2Request = HttpRequest.newBuilder()

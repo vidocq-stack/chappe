@@ -42,9 +42,8 @@ public class Http11ThroughputBench {
                 .build();
 
         request = HttpRequest.newBuilder()
-                .uri(URI.create("http://localhost:" + server.port() + "/"))
+                .uri(URI.create("http://127.0.0.1:" + server.port() + "/"))
                 .GET()
-                .header("Connection", "keep-alive")
                 .build();
     }
 
