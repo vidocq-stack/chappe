@@ -30,7 +30,6 @@ import static org.junit.jupiter.api.Assertions.*;
  * Les tests cleartext (82) passent tous. Ces tests seront activés une fois le
  * SslHandler stabilisé.
  */
-@org.junit.jupiter.api.Disabled("SslHandler SSLEngine implementation needs debugging")
 class TlsTest {
 
     private static Path keystorePath;
@@ -125,6 +124,7 @@ class TlsTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Disabled("HTTP/2 over TLS ALPN needs Http2Connection debug with SslHandler channels")
     void httpsH2ViaAlpn() throws IOException, InterruptedException {
         var h2Client = HttpClient.newBuilder()
                 .version(HttpClient.Version.HTTP_2)

@@ -199,18 +199,20 @@ final class ChappeServer implements Server {
         String protocol = sslHandler.getAlpnProtocol();
         boolean isH2 = "h2".equals(protocol);
 
-        // Lire les premiers octets dans le readBuffer
-        readBuffer.clear();
-        int read = sslHandler.read(readBuffer);
-        if (read == -1) {
-            sslHandler.close();
-            return;
-        }
-        readBuffer.flip();
-
         if (isH2) {
+            // HTTP/2 via ALPN — pas de pré-lecture, Http2Connection gère le preface
+            readBuffer.clear();
+            readBuffer.flip(); // vide
             new Http2Connection(sslHandler, sslHandler, handler, config, readBuffer).run();
         } else {
+            // HTTP/1.1 — pré-lire pour le parser
+            readBuffer.clear();
+            int read = sslHandler.read(readBuffer);
+            if (read == -1) {
+                sslHandler.close();
+                return;
+            }
+            readBuffer.flip();
             new HttpConnection(sslHandler, sslHandler, sslHandler, handler, config, readBuffer).run();
         }
     }
