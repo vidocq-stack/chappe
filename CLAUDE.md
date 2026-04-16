@@ -9,26 +9,24 @@
 Serveur HTTP haute performance en Java 25 pur (zéro dépendance hors JDK), conçu pour servir
 de fondation aux futurs projets JAX-RS et Servlet de l'écosystème Vidocq.
 
-### Protocoles cibles
-- **HTTP/1.1** — RFC 9110/9112, implémentation complète
-- **HTTP/2** — RFC 9113, multiplexage, HPACK, server push
+### Protocoles implémentés
+- **HTTP/1.1** — RFC 9110/9112 (keep-alive, chunked, pipelining, conformité testée)
+- **HTTP/2** — RFC 9113 (multiplexage, HPACK Huffman, flow control, CONTINUATION)
+- **HTTPS** — TLS via SSLContext/SSLEngine, ALPN h2 + http/1.1
 - **HTTP/3** — RFC 9114 (objectif futur, QUIC via JDK 26+)
 
 ### Architecture
 - Virtual Threads (Project Loom) — un thread virtuel par connexion
-- Structured Concurrency (JEP 505, preview) — gestion du cycle de vie des requêtes
-- Scoped Values (JEP 506) — propagation du contexte requête
-- Zero-copy I/O via `java.nio` channels et `Foreign Function & Memory API`
-- Java Modules (JPMS) — chaque module est un `module-info.java`
+- Scoped Values (JEP 506) — `RequestContext.CURRENT` propagé avant chaque handler
+- Zero-copy I/O — `FileChannel.transferTo()` pour fichiers statiques
+- Java Modules (JPMS) — chaque module a un `module-info.java`
+- ServiceLoader SPI — `ServerProvider` pour découvrir l'implémentation
 
-### Intégration Vauban
-Chappe utilise **Vauban** (`fr.vidocq.vauban`) comme conteneur CDI 4.1.
-Vauban gère l'injection de dépendances, le lifecycle des composants et le chargement modulaire.
-- Chappe dépend de `vauban-api` pour les annotations CDI et le SPI
-- Chappe dépend de `vauban-core` à l'exécution pour le conteneur
-- Les handlers, routers et filtres sont des beans CDI gérés par Vauban
-- Le serveur démarre via un événement CDI (`@Observes @Initialized(ApplicationScoped.class)`)
-- Les extensions (Servlet, JAX-RS) s'intègrent via les CDI Portable Extensions / Build Compatible Extensions de Vauban
+### Intégration Vauban (prévue, pas encore active)
+Chappe fonctionne **de manière autonome sans Vauban**. L'intégration CDI se fera
+via les extensions `vidocq-servlet` et `vidocq-jaxrs` qui utiliseront Vauban pour
+le lifecycle des composants. Chappe lui-même utilise `ServiceLoader` (pas CDI).
+- `vauban-api`/`vauban-core` sont déclarés dans le parent POM mais non utilisés par les modules
 - Source Vauban : `../vauban/` (projet frère dans le monorepo)
 
 ### Modules
