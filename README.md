@@ -31,6 +31,7 @@ JAX-RS se montent par-dessus via un SPI dédié, sans couplage.
 
 ```java
 import fr.vidocq.chappe.api.*;
+import java.nio.charset.StandardCharsets;
 
 void main() {
     var router = Router.builder()
@@ -39,6 +40,19 @@ void main() {
             var id = req.pathParams().get("id");
             return Response.ok("User " + id);
         })
+        .post("/users", req -> {
+            var body = new String(req.body().asInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            return Response.builder()
+                .status(StatusCode.CREATED)
+                .header("Content-Type", "application/json")
+                .body("{\"received\": " + body + "}")
+                .build();
+        })
+        .put("/users/{id}", req -> {
+            var body = new String(req.body().asInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            return Response.ok("Updated " + req.pathParams().get("id") + ": " + body);
+        })
+        .delete("/users/{id}", req -> Response.of(StatusCode.NO_CONTENT))
         .build();
 
     try (var server = Server.builder()
@@ -61,8 +75,13 @@ void main() {
 ### Routage
 ```java
 Router.builder()
-    .get("/api/users", handler)          // route exacte
-    .get("/api/users/{id}", handler)     // paramètres capturés
+    .get("/api/users", handler)          // GET
+    .post("/api/users", handler)         // POST
+    .put("/api/users/{id}", handler)     // PUT avec path param
+    .delete("/api/users/{id}", handler)  // DELETE
+    .patch("/api/users/{id}", handler)   // PATCH
+    .head("/api/health", handler)        // HEAD (auto pour GET aussi)
+    .options("/api/users", handler)      // OPTIONS
     .get("/static/*", handler)           // wildcard
     .group("/v1", api -> api             // groupe avec préfixe
         .filter(authFilter)              // filtre par scope
@@ -71,6 +90,44 @@ Router.builder()
     .mount("/admin", adminApp)           // mount d'une sous-app (path stripping)
     .notFound(custom404)                 // 404 personnalisé
     .build()
+```
+
+- **405 automatique** : si le path matche mais pas la méthode → `405 Method Not Allowed` avec header `Allow`
+- **HEAD auto** : un GET route répond aussi au HEAD (body supprimé automatiquement)
+- **Trailing slash** : `/users` et `/users/` matchent la même route
+- **Percent-decoding** : `/users/John%20Doe` → pathParam = `"John Doe"`
+
+### Request & Response
+```java
+// Lire le body d'une requête POST/PUT
+.post("/api/data", req -> {
+    byte[] raw = req.body().asInputStream().readAllBytes();
+    String text = new String(raw, StandardCharsets.UTF_8);
+    // req.method(), req.path(), req.headers(), req.queryParams()
+    // req.pathParams(), req.header("Content-Type"), req.body()
+    return Response.ok(text);
+})
+
+// Construire une réponse avec le builder
+.get("/api/user", _ -> Response.builder()
+    .status(StatusCode.OK)
+    .header("Content-Type", "application/json")
+    .header("X-Custom", "value")
+    .body("{\"name\": \"Chappe\"}")
+    .build())
+
+// Réponses courantes
+Response.ok("text")                    // 200 + text/plain
+Response.ok(Body.ofFile(path))         // 200 + zero-copy file
+Response.of(StatusCode.NOT_FOUND)      // 404 sans body
+Response.of(StatusCode.NO_CONTENT)     // 204
+Response.of(StatusCode.CREATED, body)  // 201 + body
+
+// Body streaming (pour Servlet OutputStream compat)
+Body.ofOutputStream(out -> {
+    out.write("chunk 1".getBytes());
+    out.write("chunk 2".getBytes());
+})
 ```
 
 ### Fichiers statiques
