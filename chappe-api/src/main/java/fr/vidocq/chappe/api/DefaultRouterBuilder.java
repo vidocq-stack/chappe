@@ -1,6 +1,8 @@
 package fr.vidocq.chappe.api;
 
 import java.net.URI;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -100,17 +102,28 @@ final class DefaultRouterBuilder implements Router.Builder {
         var fallback = notFoundHandler;
 
         return request -> {
-            // Chercher une route qui matche path + method
+            // Normalisation trailing slash : /users/ → /users (sauf /)
+            String path = request.path();
+            if (path.length() > 1 && path.endsWith("/")) {
+                path = path.substring(0, path.length() - 1);
+            }
+
             boolean pathMatched = false;
             var allowedMethods = new java.util.LinkedHashSet<HttpMethod>();
+            HttpMethod method = request.method();
+            // Auto HEAD pour routes GET (RFC 9110 §9.3.2)
+            boolean tryHeadAsGet = (method == HttpMethod.HEAD);
 
             for (var route : snapshot) {
-                var params = matchPath(route.pattern(), request.path());
+                var params = matchPath(route.pattern(), path);
                 if (params != null) {
                     pathMatched = true;
                     allowedMethods.add(route.method());
 
-                    if (route.method() == request.method()) {
+                    boolean methodMatch = (route.method() == method)
+                            || (tryHeadAsGet && route.method() == HttpMethod.GET);
+
+                    if (methodMatch) {
                         var routedRequest = params.isEmpty() ? request : withPathParams(request, params);
                         Handler h = route.handler();
                         var routeFilters = route.filters();
@@ -126,6 +139,9 @@ final class DefaultRouterBuilder implements Router.Builder {
                     }
                 }
             }
+
+            // Auto HEAD : ajouter GET dans les méthodes autorisées si applicable
+            if (tryHeadAsGet) allowedMethods.add(HttpMethod.HEAD);
 
             // 405 Method Not Allowed si le path matche mais pas la méthode (RFC 9110 §15.5.6)
             if (pathMatched) {
@@ -144,17 +160,20 @@ final class DefaultRouterBuilder implements Router.Builder {
      * Matche un pattern contre un path. Retourne les params capturés, ou null si pas de match.
      */
     private static Map<String, String> matchPath(String pattern, String path) {
-        if (pattern.equals(path)) return Collections.emptyMap();
+        // Normalisation trailing slash sur le pattern aussi
+        String normPattern = (pattern.length() > 1 && pattern.endsWith("/"))
+                ? pattern.substring(0, pattern.length() - 1) : pattern;
+        if (normPattern.equals(path)) return Collections.emptyMap();
 
-        if (pattern.endsWith("/*")) {
-            var base = pattern.substring(0, pattern.length() - 2);
+        if (normPattern.endsWith("/*")) {
+            var base = normPattern.substring(0, normPattern.length() - 2);
             if (path.equals(base) || path.startsWith(base + "/")) {
                 return Collections.emptyMap();
             }
             return null;
         }
 
-        var patternParts = pattern.split("/", -1);
+        var patternParts = normPattern.split("/", -1);
         var pathParts = path.split("/", -1);
         if (patternParts.length != pathParts.length) return null;
 
@@ -163,7 +182,8 @@ final class DefaultRouterBuilder implements Router.Builder {
             var pp = patternParts[i];
             if (pp.startsWith("{") && pp.endsWith("}")) {
                 if (params == null) params = new LinkedHashMap<>();
-                params.put(pp.substring(1, pp.length() - 1), pathParts[i]);
+                params.put(pp.substring(1, pp.length() - 1),
+                        URLDecoder.decode(pathParts[i], StandardCharsets.UTF_8));
             } else if (!pp.equals(pathParts[i])) {
                 return null;
             }
