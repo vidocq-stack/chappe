@@ -5,10 +5,14 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.EnumMap;
+import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Consumer;
 
 /**
@@ -111,6 +115,23 @@ final class DefaultRouterBuilder implements Router.Builder {
         var globalFilters = List.copyOf(filters);
         var fallback = notFoundHandler;
 
+        // Fast path : routes statiques (sans {param} ni /*) indexées par (path → method → route).
+        // O(1) pour le cas fréquent. Les patterns paramétriques vont dans dynamicRoutes.
+        var staticByPath = new HashMap<String, EnumMap<HttpMethod, Route>>();
+        var dynamicRoutes = new ArrayList<Route>();
+        for (var r : snapshot) {
+            String normPattern = normalize(r.pattern());
+            if (isStaticPattern(normPattern)) {
+                staticByPath
+                        .computeIfAbsent(normPattern, _ -> new EnumMap<>(HttpMethod.class))
+                        .putIfAbsent(r.method(), r); // premier gagnant, cohérent avec scan linéaire
+            } else {
+                dynamicRoutes.add(r);
+            }
+        }
+        Map<String, EnumMap<HttpMethod, Route>> staticIndex = Map.copyOf(staticByPath);
+        List<Route> dynamicSnapshot = List.copyOf(dynamicRoutes);
+
         return request -> {
             // Normalisation trailing slash : /users/ → /users (sauf /)
             String path = request.path();
@@ -118,43 +139,51 @@ final class DefaultRouterBuilder implements Router.Builder {
                 path = path.substring(0, path.length() - 1);
             }
 
-            boolean pathMatched = false;
-            var allowedMethods = new java.util.LinkedHashSet<HttpMethod>();
             HttpMethod method = request.method();
             // Auto HEAD pour routes GET (RFC 9110 §9.3.2)
             boolean tryHeadAsGet = (method == HttpMethod.HEAD);
 
-            for (var route : snapshot) {
+            // ── Fast path : routes statiques ──
+            var methodsForPath = staticIndex.get(path);
+            if (methodsForPath != null) {
+                Route route = methodsForPath.get(method);
+                if (route == null && tryHeadAsGet) {
+                    route = methodsForPath.get(HttpMethod.GET);
+                }
+                if (route != null) {
+                    return invoke(route, request, Collections.emptyMap(), globalFilters);
+                }
+                // Path matché mais pas la méthode → 405, on continue pour agréger avec dynamic
+            }
+
+            // ── Scan dynamique : patterns paramétriques ──
+            boolean pathMatched = (methodsForPath != null);
+            Set<HttpMethod> allowedMethods = null;
+            if (pathMatched) {
+                allowedMethods = EnumSet.copyOf(methodsForPath.keySet());
+            }
+
+            for (var route : dynamicSnapshot) {
                 var params = matchPath(route.pattern(), path);
                 if (params != null) {
-                    pathMatched = true;
+                    if (!pathMatched) {
+                        pathMatched = true;
+                        allowedMethods = EnumSet.noneOf(HttpMethod.class);
+                    }
                     allowedMethods.add(route.method());
 
                     boolean methodMatch = (route.method() == method)
                             || (tryHeadAsGet && route.method() == HttpMethod.GET);
 
                     if (methodMatch) {
-                        var routedRequest = params.isEmpty() ? request : withPathParams(request, params);
-                        Handler h = route.handler();
-                        var routeFilters = route.filters();
-                        for (int i = routeFilters.size() - 1; i >= 0; i--) {
-                            h = routeFilters.get(i).apply(h);
-                        }
-                        for (int i = globalFilters.size() - 1; i >= 0; i--) {
-                            if (!routeFilters.contains(globalFilters.get(i))) {
-                                h = globalFilters.get(i).apply(h);
-                            }
-                        }
-                        return h.handle(routedRequest);
+                        return invoke(route, request, params, globalFilters);
                     }
                 }
             }
 
-            // Auto HEAD : ajouter GET dans les méthodes autorisées si applicable
-            if (tryHeadAsGet) allowedMethods.add(HttpMethod.HEAD);
-
             // 405 Method Not Allowed si le path matche mais pas la méthode (RFC 9110 §15.5.6)
             if (pathMatched) {
+                if (tryHeadAsGet) allowedMethods.add(HttpMethod.HEAD);
                 var allow = String.join(", ", allowedMethods.stream().map(Enum::name).toList());
                 return Response.builder()
                         .status(StatusCode.METHOD_NOT_ALLOWED)
@@ -174,6 +203,31 @@ final class DefaultRouterBuilder implements Router.Builder {
 
             return fallback.handle(request);
         };
+    }
+
+    private static Response invoke(Route route, Request request, Map<String, String> params,
+                                    List<Filter> globalFilters) throws Exception {
+        var routedRequest = params.isEmpty() ? request : withPathParams(request, params);
+        Handler h = route.handler();
+        var routeFilters = route.filters();
+        for (int i = routeFilters.size() - 1; i >= 0; i--) {
+            h = routeFilters.get(i).apply(h);
+        }
+        for (int i = globalFilters.size() - 1; i >= 0; i--) {
+            if (!routeFilters.contains(globalFilters.get(i))) {
+                h = globalFilters.get(i).apply(h);
+            }
+        }
+        return h.handle(routedRequest);
+    }
+
+    private static String normalize(String pattern) {
+        return (pattern.length() > 1 && pattern.endsWith("/"))
+                ? pattern.substring(0, pattern.length() - 1) : pattern;
+    }
+
+    private static boolean isStaticPattern(String pattern) {
+        return pattern.indexOf('{') < 0 && !pattern.endsWith("/*");
     }
 
     /**

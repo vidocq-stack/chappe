@@ -17,9 +17,14 @@ import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collections;
+import java.util.Enumeration;
+import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -250,17 +255,40 @@ public final class StaticFileHandler implements Handler {
         public ResolvedResource resolve(String relative, String indexFile) {
             String resourcePath = basePath.isEmpty() ? relative : basePath + "/" + relative;
 
-            // Essayer le path direct
+            // Fast path : entrée précalculée au build par chappe-static-index-maven-plugin.
+            // Skip URLConnection.openConnection() entièrement — tout est déjà connu.
+            IndexedEntry idx = StaticIndex.lookup(loader, resourcePath);
+            if (idx == null) {
+                String indexPath = resourcePath.endsWith("/")
+                        ? resourcePath + indexFile
+                        : resourcePath + "/" + indexFile;
+                idx = StaticIndex.lookup(loader, indexPath);
+                if (idx != null) resourcePath = indexPath;
+            }
+            if (idx != null) {
+                String name = lastSegment(resourcePath);
+                String path = resourcePath;
+                Instant lastMod = idx.mtime() > 0
+                        ? Instant.ofEpochMilli(idx.mtime()).truncatedTo(ChronoUnit.SECONDS)
+                        : null;
+                return new ResolvedResource(name, idx.size(), lastMod,
+                        () -> {
+                            InputStream in = loader.getResourceAsStream(path);
+                            if (in == null) throw new UncheckedIOException(
+                                    new IOException("Indexed resource vanished: " + path));
+                            return in;
+                        },
+                        null);
+            }
+
+            // Slow path : lookup classique via URL.openConnection (hors index).
             URL url = loader.getResource(resourcePath);
             if (url == null) {
-                // Essayer avec le fichier index (pour les "répertoires" classpath)
                 String indexPath = resourcePath.endsWith("/")
                         ? resourcePath + indexFile
                         : resourcePath + "/" + indexFile;
                 url = loader.getResource(indexPath);
-                if (url != null) {
-                    resourcePath = indexPath;
-                }
+                if (url != null) resourcePath = indexPath;
             }
             if (url == null) return null;
 
@@ -273,9 +301,7 @@ public final class StaticFileHandler implements Handler {
                         ? Instant.ofEpochMilli(lastMod).truncatedTo(ChronoUnit.SECONDS)
                         : null;
 
-                String name = resourcePath.contains("/")
-                        ? resourcePath.substring(resourcePath.lastIndexOf('/') + 1)
-                        : resourcePath;
+                String name = lastSegment(resourcePath);
 
                 URL finalUrl = url;
                 return new ResolvedResource(name, size, lastModified,
@@ -285,6 +311,60 @@ public final class StaticFileHandler implements Handler {
             } catch (IOException _) {
                 return null;
             }
+        }
+
+        private static String lastSegment(String path) {
+            int slash = path.lastIndexOf('/');
+            return slash < 0 ? path : path.substring(slash + 1);
+        }
+    }
+
+    /** Métadonnées d'une ressource classpath précalculées par le plugin Maven. */
+    private record IndexedEntry(long size, long mtime, String mime, String etag) {}
+
+    /**
+     * Index chargé 1× par ClassLoader depuis {@code META-INF/chappe-static-index.properties}.
+     * Absent ⇒ map vide ⇒ fallback sur le chemin runtime classique (aucune régression).
+     */
+    private static final class StaticIndex {
+        private static final String RESOURCE = "META-INF/chappe-static-index.properties";
+        private static final ConcurrentHashMap<ClassLoader, Map<String, IndexedEntry>> PER_LOADER
+                = new ConcurrentHashMap<>();
+
+        static IndexedEntry lookup(ClassLoader loader, String path) {
+            ClassLoader key = loader == null ? ClassLoader.getSystemClassLoader() : loader;
+            Map<String, IndexedEntry> map = PER_LOADER.computeIfAbsent(key, StaticIndex::load);
+            return map.get(path);
+        }
+
+        private static Map<String, IndexedEntry> load(ClassLoader loader) {
+            Map<String, IndexedEntry> merged = new HashMap<>();
+            try {
+                Enumeration<URL> urls = loader.getResources(RESOURCE);
+                if (!urls.hasMoreElements()) return Collections.emptyMap();
+                for (URL url : Collections.list(urls)) {
+                    Properties p = new Properties();
+                    try (InputStream in = url.openStream()) {
+                        p.load(in);
+                    }
+                    for (String key : p.stringPropertyNames()) {
+                        String[] parts = p.getProperty(key).split("\\|", 4);
+                        if (parts.length != 4) continue;
+                        try {
+                            merged.putIfAbsent(key, new IndexedEntry(
+                                    Long.parseLong(parts[0]),
+                                    Long.parseLong(parts[1]),
+                                    parts[2],
+                                    parts[3]));
+                        } catch (NumberFormatException _) {
+                            // entrée corrompue, on ignore
+                        }
+                    }
+                }
+            } catch (IOException _) {
+                return Collections.emptyMap();
+            }
+            return merged.isEmpty() ? Collections.emptyMap() : Map.copyOf(merged);
         }
     }
 

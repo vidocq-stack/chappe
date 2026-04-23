@@ -23,6 +23,10 @@
             <groupId>fr.vidocq.chappe</groupId>
             <artifactId>chappe-core</artifactId>
         </dependency>
+        <dependency>
+            <groupId>fr.vidocq.chappe</groupId>
+            <artifactId>chappe-http</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>org.openjdk.jmh</groupId>
@@ -53,4 +57,22 @@
             <version>12.0.21</version>
         </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.openjdk.jmh</groupId>
+                            <artifactId>jmh-generator-annprocess</artifactId>
+                            <version>${jmh.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>

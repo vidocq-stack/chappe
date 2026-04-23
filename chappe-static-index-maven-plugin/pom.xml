@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.1.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.1.0 http://maven.apache.org/xsd/maven-4.1.0.xsd">
+    <modelVersion>4.1.0</modelVersion>
+
+    <parent>
+        <groupId>fr.vidocq.chappe</groupId>
+        <artifactId>chappe-parent</artifactId>
+    </parent>
+
+    <artifactId>chappe-static-index-maven-plugin</artifactId>
+    <packaging>maven-plugin</packaging>
+
+    <name>Chappe Static Index Maven Plugin</name>
+    <description>
+        Génère META-INF/chappe-static-index.properties au build pour accélérer
+        StaticFileHandler (lookup O(1) vs URLConnection.openConnection()).
+    </description>
+
+    <properties>
+        <!-- Cible Java 21 pour compat avec maven-plugin-plugin (ASM lit pas major 69 = Java 25). -->
+        <maven.compiler.release>21</maven.compiler.release>
+        <maven.compiler.enablePreview>false</maven.compiler.enablePreview>
+        <maven.plugin.tools.version>3.15.1</maven.plugin.tools.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.apache.maven</groupId>
+            <artifactId>maven-plugin-api</artifactId>
+            <version>3.9.9</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.maven.plugin-tools</groupId>
+            <artifactId>maven-plugin-annotations</artifactId>
+            <version>${maven.plugin.tools.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.maven</groupId>
+            <artifactId>maven-core</artifactId>
+            <version>3.9.9</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration combine.self="override">
+                    <release>21</release>
+                    <enablePreview>false</enablePreview>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration combine.self="override">
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-plugin-plugin</artifactId>
+                <version>${maven.plugin.tools.version}</version>
+            </plugin>
+        </plugins>
+    </build>
+</project>

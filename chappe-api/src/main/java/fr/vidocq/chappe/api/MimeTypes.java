@@ -1,7 +1,6 @@
 package fr.vidocq.chappe.api;
 
 import java.nio.file.Path;
-import java.util.Map;
 
 /**
  * Détection de type MIME basée sur l'extension de fichier.
@@ -23,36 +22,36 @@ public final class MimeTypes {
     public static final String IMAGE_JPEG = "image/jpeg";
     public static final String IMAGE_SVG = "image/svg+xml";
 
-    // ---- Extension → MIME mapping ----
-
-    private static final Map<String, String> TYPES = Map.ofEntries(
-            Map.entry("html", TEXT_HTML),
-            Map.entry("htm", TEXT_HTML),
-            Map.entry("css", TEXT_CSS),
-            Map.entry("js", TEXT_JAVASCRIPT),
-            Map.entry("mjs", TEXT_JAVASCRIPT),
-            Map.entry("json", APPLICATION_JSON),
-            Map.entry("xml", APPLICATION_XML),
-            Map.entry("png", IMAGE_PNG),
-            Map.entry("jpg", IMAGE_JPEG),
-            Map.entry("jpeg", IMAGE_JPEG),
-            Map.entry("svg", IMAGE_SVG),
-            Map.entry("gif", "image/gif"),
-            Map.entry("webp", "image/webp"),
-            Map.entry("ico", "image/x-icon"),
-            Map.entry("woff", "font/woff"),
-            Map.entry("woff2", "font/woff2"),
-            Map.entry("ttf", "font/ttf"),
-            Map.entry("otf", "font/otf"),
-            Map.entry("txt", "text/plain"),
-            Map.entry("csv", "text/csv"),
-            Map.entry("pdf", "application/pdf"),
-            Map.entry("zip", "application/zip"),
-            Map.entry("gz", "application/gzip"),
-            Map.entry("wasm", "application/wasm"),
-            Map.entry("mp4", "video/mp4"),
-            Map.entry("webm", "video/webm")
-    );
+    // Ordonné par fréquence approximative sur le web (hit rapide sur html/css/js/png/jpg).
+    // Lookup zero-alloc via String.regionMatches(true, ...) — évite substring + toLowerCase.
+    private static final String[][] ENTRIES = {
+            { "html",  TEXT_HTML },
+            { "css",   TEXT_CSS },
+            { "js",    TEXT_JAVASCRIPT },
+            { "png",   IMAGE_PNG },
+            { "jpg",   IMAGE_JPEG },
+            { "svg",   IMAGE_SVG },
+            { "json",  APPLICATION_JSON },
+            { "woff2", "font/woff2" },
+            { "ico",   "image/x-icon" },
+            { "webp",  "image/webp" },
+            { "htm",   TEXT_HTML },
+            { "mjs",   TEXT_JAVASCRIPT },
+            { "jpeg",  IMAGE_JPEG },
+            { "gif",   "image/gif" },
+            { "woff",  "font/woff" },
+            { "ttf",   "font/ttf" },
+            { "otf",   "font/otf" },
+            { "xml",   APPLICATION_XML },
+            { "txt",   "text/plain" },
+            { "csv",   "text/csv" },
+            { "pdf",   "application/pdf" },
+            { "zip",   "application/zip" },
+            { "gz",    "application/gzip" },
+            { "wasm",  "application/wasm" },
+            { "mp4",   "video/mp4" },
+            { "webm",  "video/webm" },
+    };
 
     /**
      * Détecte le type MIME d'un fichier à partir de son chemin.
@@ -69,11 +68,20 @@ public final class MimeTypes {
      * @return le type MIME détecté, ou {@code application/octet-stream} par défaut
      */
     public static String detect(String filename) {
+        int len = filename.length();
         int dot = filename.lastIndexOf('.');
-        if (dot < 0 || dot == filename.length() - 1) {
+        if (dot < 0 || dot == len - 1) {
             return APPLICATION_OCTET_STREAM;
         }
-        String ext = filename.substring(dot + 1).toLowerCase();
-        return TYPES.getOrDefault(ext, APPLICATION_OCTET_STREAM);
+        int off = dot + 1;
+        int extLen = len - off;
+        for (String[] e : ENTRIES) {
+            String ext = e[0];
+            if (ext.length() == extLen
+                    && filename.regionMatches(true, off, ext, 0, extLen)) {
+                return e[1];
+            }
+        }
+        return APPLICATION_OCTET_STREAM;
     }
 }

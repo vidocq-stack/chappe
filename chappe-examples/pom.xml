@@ -20,4 +20,24 @@
             <artifactId>chappe-core</artifactId>
         </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Indexe src/main/resources/static/** → META-INF/chappe-static-index.properties
+                 pour que StaticFileHandler résolve en O(1) sans URLConnection.openConnection(). -->
+            <plugin>
+                <groupId>fr.vidocq.chappe</groupId>
+                <artifactId>chappe-static-index-maven-plugin</artifactId>
+                <version>${project.version}</version>
+                <executions>
+                    <execution>
+                        <goals><goal>index</goal></goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <rootPrefix>static</rootPrefix>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>

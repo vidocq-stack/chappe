@@ -1,0 +1,8 @@
+**/target/
+**/.git/
+**/.idea/
+**/.settings/
+**/.project
+**/.classpath
+**/*.iml
+**/node_modules/

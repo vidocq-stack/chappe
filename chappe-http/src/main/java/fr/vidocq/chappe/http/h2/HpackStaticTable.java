@@ -1,5 +1,8 @@
 package fr.vidocq.chappe.http.h2;
 
+import java.util.HashMap;
+import java.util.Map;
+
 /**
  * HPACK Static Table — RFC 7541 Appendix A.
  *
@@ -102,18 +105,32 @@ public final class HpackStaticTable {
         return ENTRIES[index][1];
     }
 
+    private static final Map<String, Integer> NAME_FIRST_INDEX;
+    private static final Map<Key, Integer> EXACT_INDEX;
+
+    static {
+        Map<String, Integer> byName = new HashMap<>(128);
+        Map<Key, Integer> byExact = new HashMap<>(128);
+        for (int i = 1; i <= 61; i++) {
+            String n = ENTRIES[i][0];
+            String v = ENTRIES[i][1];
+            byName.putIfAbsent(n, i);
+            byExact.putIfAbsent(new Key(n, v), i);
+        }
+        NAME_FIRST_INDEX = Map.copyOf(byName);
+        EXACT_INDEX = Map.copyOf(byExact);
+    }
+
+    private record Key(String name, String value) {}
+
     /**
      * Finds the 1-based index of the entry whose name and value both match exactly.
      *
      * @return 1-based index, or 0 if not found
      */
     public static int findExact(String name, String value) {
-        for (int i = 1; i <= 61; i++) {
-            if (ENTRIES[i][0].equals(name) && ENTRIES[i][1].equals(value)) {
-                return i;
-            }
-        }
-        return 0;
+        Integer idx = EXACT_INDEX.get(new Key(name, value));
+        return idx == null ? 0 : idx;
     }
 
     /**
@@ -122,12 +139,8 @@ public final class HpackStaticTable {
      * @return 1-based index, or 0 if not found
      */
     public static int findByName(String name) {
-        for (int i = 1; i <= 61; i++) {
-            if (ENTRIES[i][0].equals(name)) {
-                return i;
-            }
-        }
-        return 0;
+        Integer idx = NAME_FIRST_INDEX.get(name);
+        return idx == null ? 0 : idx;
     }
 
     private static void checkIndex(int index) {
