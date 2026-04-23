@@ -123,12 +123,43 @@ public final class HpackStaticTable {
 
     private record Key(String name, String value) {}
 
+    // Références cachées des noms ultra-chauds pour permettre un compare par identity.
+    // Comparer avec `==` avant `equals()` : coûteux 0 quand l'appelant passe la String
+    // internée (ce qui est le cas dans HpackEncoder qui utilise les constantes de cette classe).
+    private static final String N_METHOD    = ENTRIES[2][0];  // ":method"
+    private static final String N_PATH      = ENTRIES[4][0];  // ":path"
+    private static final String N_SCHEME    = ENTRIES[6][0];  // ":scheme"
+    private static final String N_STATUS    = ENTRIES[8][0];  // ":status"
+
     /**
      * Finds the 1-based index of the entry whose name and value both match exactly.
      *
      * @return 1-based index, or 0 if not found
      */
     public static int findExact(String name, String value) {
+        // Fast path inline pour les pseudo-headers (>90 % du trafic HTTP/2).
+        // Évite l'allocation du Key record + la traversée HashMap pour le cas chaud.
+        if (name == N_METHOD || ":method".equals(name)) {
+            if ("GET".equals(value)) return 2;
+            if ("POST".equals(value)) return 3;
+        } else if (name == N_PATH || ":path".equals(name)) {
+            if ("/".equals(value)) return 4;
+            if ("/index.html".equals(value)) return 5;
+        } else if (name == N_SCHEME || ":scheme".equals(name)) {
+            if ("http".equals(value)) return 6;
+            if ("https".equals(value)) return 7;
+        } else if (name == N_STATUS || ":status".equals(name)) {
+            return switch (value) {
+                case "200" -> 8;
+                case "204" -> 9;
+                case "206" -> 10;
+                case "304" -> 11;
+                case "400" -> 12;
+                case "404" -> 13;
+                case "500" -> 14;
+                default -> 0;
+            };
+        }
         Integer idx = EXACT_INDEX.get(new Key(name, value));
         return idx == null ? 0 : idx;
     }
@@ -139,6 +170,11 @@ public final class HpackStaticTable {
      * @return 1-based index, or 0 if not found
      */
     public static int findByName(String name) {
+        // Fast path inline pour les pseudo-headers (>90 % du trafic HTTP/2).
+        if (name == N_METHOD || ":method".equals(name)) return 2;
+        if (name == N_PATH   || ":path".equals(name))   return 4;
+        if (name == N_SCHEME || ":scheme".equals(name)) return 6;
+        if (name == N_STATUS || ":status".equals(name)) return 8;
         Integer idx = NAME_FIRST_INDEX.get(name);
         return idx == null ? 0 : idx;
     }

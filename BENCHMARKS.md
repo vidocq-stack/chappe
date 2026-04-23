@@ -176,25 +176,26 @@ saute désormais `loader.getResource()` + `URLConnection.openConnection()`.
 **Gain ×548** sur la dernière route statique, **×6** sur les misses (scan dynamique
 uniquement). Break-even sur la route #1 (cas le plus trivial pour le scan linéaire).
 
-#### 3. HPACK static table (map lookup vs scan O(61))
+#### 3. HPACK static table (fast-path inline + map vs scan O(61))
 
-| Nom / Valeur                  | `oldLinear` | `current` |
-|:------------------------------|------------:|----------:|
-| `findByName(":method")`       |     6,6 ns  |   13,2 ns |
-| `findByName("vary")`          |      70 ns  |    8,9 ns |
-| `findByName("x-custom")`      |      70 ns  |   10,8 ns |
-| `findExact(":method","GET")`  |     9,2 ns  |   18,5 ns |
-| `findExact(":method","")`     |     139 ns  |    8,2 ns |
-| `findExact("x-custom", *)`    |      70 ns  |    3,7 ns |
+Itération 1 (HashMap seule) montrait une régression sur le `:method/GET` ultra-chaud
+(13 ns vs 6,6 ns). Itération 2 ajoute un **fast-path inline** sur les pseudo-headers
+(`:method`, `:path`, `:scheme`, `:status`) avec `==` identity-check d'abord puis
+`equals`. Les chiffres reportés ici sont post-fix.
 
-Le pré-hash gagne dès qu'on quitte les **premières entrées** de la table : ×8 à ×17 sur
-les lookups tardifs et les misses. **Le `:method`/`GET`, qui est l'entrée la plus chaude
-du hot path HTTP/2, est cependant 2× plus lent** (13 ns vs 6,6 ns) à cause de l'overhead
-HashMap vs deux comparaisons inlinées.
+| Nom / Valeur                  | `oldLinear` | `current` | Gain    |
+|:------------------------------|------------:|----------:|--------:|
+| `findByName(":method")` / GET |     6,6 ns  |   5,1 ns  |  ×1,3   |
+| `findByName("vary")`          |      60 ns  |  11,7 ns  |  ×5     |
+| `findByName("x-custom")`      |      70 ns  |   7,3 ns  | ×10     |
+| `findExact(":method", "GET")` |     8,8 ns  |   8,0 ns  | ×1,1    |
+| `findExact(":method", "")`    |     124 ns  |  17,8 ns  | ×7      |
+| `findExact("vary", "GET")`    |     267 ns  |  25,7 ns  | ×10     |
+| `findExact("x-custom", *)`    |     160 ns  |   7,1 ns  | ×22     |
 
-> **Action à considérer** : ajouter un fast-path explicite pour les 7 entrées les plus
-> fréquentes (:method GET/POST, :path /, :scheme http/https, :status 200/404) avant le
-> lookup HashMap, pour récupérer le break-even sur le cas ultra-chaud.
+Toutes les entrées profitent de l'optimisation, y compris `:method/GET` qui gagne
+maintenant 20 % vs le scan linéaire tout en conservant le gain massif sur les misses
+et les lookups tardifs.
 
 #### 4. MimeTypes.detect (regionMatches vs substring+toLowerCase)
 
@@ -217,7 +218,7 @@ ici sans `-prof gc`, mais structurellement garanti.
 |:---------------------------|---------------:|----------------:|:---------------------|
 | Static index (classpath)   | **×7 770**     | ×5+             | ✅ Gain massif         |
 | Router fast-path           | **×6 à ×548**  | ×3+             | ✅ Gain massif          |
-| HPACK pré-hashé            | ×8 à ×17 (tail)| 0               | ⚠️ Régression sur cas chaud → voir action suggérée |
+| HPACK pré-hashé + fast-path| ×1,1 à ×22     | 0               | ✅ Gain partout après fix inline                    |
 | MimeTypes zéro-alloc       | break-even     | ×3+             | ✅ Gain alloc, neutre latence |
 
 ### Reproductibilité
