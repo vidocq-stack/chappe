@@ -133,9 +133,31 @@ public final class HttpRequestImpl implements Request {
     @Override
     public URI uri() {
         if (uri == null) {
-            uri = URI.create(rawUri);
+            uri = buildUri();
         }
         return uri;
+    }
+
+    private URI buildUri() {
+        if (rawUri == null) return URI.create("/");
+        // Absolute-form (ex. proxy) : on prend la request-target telle quelle.
+        if (rawUri.regionMatches(true, 0, "http://", 0, 7)
+                || rawUri.regionMatches(true, 0, "https://", 0, 8)) {
+            return URI.create(rawUri);
+        }
+        // Origin-form (RFC 9112 §3.2.1) ou :path HTTP/2 : reconstruire via Host.
+        String host = null;
+        for (int i = 0; i < headerCount; i++) {
+            if (headerNames[i] != null && headerNames[i].equalsIgnoreCase("Host")) {
+                host = headerValues[i];
+                break;
+            }
+        }
+        if (host == null || host.isEmpty()) {
+            return URI.create(rawUri);
+        }
+        String path = rawUri.isEmpty() ? "/" : (rawUri.charAt(0) == '/' ? rawUri : "/" + rawUri);
+        return URI.create(scheme + "://" + host + path);
     }
 
     @Override

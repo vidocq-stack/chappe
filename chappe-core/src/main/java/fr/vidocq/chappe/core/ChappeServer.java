@@ -54,14 +54,32 @@ final class ChappeServer implements Server {
             throw new ChappeException.ServerException("Server is already running");
         }
 
-        try {
-            serverChannel = ServerSocketChannel.open();
-            serverChannel.bind(new InetSocketAddress(config.host(), config.port()), config.backlog());
-            serverChannel.configureBlocking(true);
-        } catch (IOException e) {
+        IOException lastBindEx = null;
+        for (int attempt = 0; attempt < 5; attempt++) {
+            try {
+                serverChannel = ServerSocketChannel.open();
+                serverChannel.setOption(java.net.StandardSocketOptions.SO_REUSEADDR, true);
+                try {
+                    serverChannel.setOption(java.net.StandardSocketOptions.SO_REUSEPORT, true);
+                } catch (UnsupportedOperationException ignored) {}
+                serverChannel.bind(new InetSocketAddress(config.host(), config.port()), config.backlog());
+                serverChannel.configureBlocking(true);
+                lastBindEx = null;
+                break;
+            } catch (IOException e) {
+                lastBindEx = e;
+                try { serverChannel.close(); } catch (IOException ignored) {}
+                if (attempt < 4) {
+                    try { Thread.sleep(100L * (attempt + 1)); } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt(); break;
+                    }
+                }
+            }
+        }
+        if (lastBindEx != null) {
             running.set(false);
             throw new ChappeException.ServerException(
-                    "Failed to bind to " + config.host() + ":" + config.port(), e);
+                    "Failed to bind to " + config.host() + ":" + config.port(), lastBindEx);
         }
 
         executor = Executors.newVirtualThreadPerTaskExecutor();

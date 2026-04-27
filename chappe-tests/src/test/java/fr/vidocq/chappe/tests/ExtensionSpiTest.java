@@ -353,4 +353,74 @@ class ExtensionSpiTest {
         assertThrows(IllegalStateException.class, () ->
                 StaticFileHandler.builder().build());
     }
+
+    // ── Bugs upstream signalés par vidocq-rest-cassini-extension ──
+
+    /** Bug #5 : query() doit rester accessible après mount() avec path stripping. */
+    @Test
+    void mountPreservesQueryString() throws Exception {
+        var router = Router.builder()
+                .mount("/ctx", req -> Response.ok(
+                        "path=" + req.path()
+                                + " query=" + req.query()
+                                + " bpe=" + req.queryParams().get("bpeQuery")))
+                .build();
+        startServer(router);
+
+        var resp = get("/ctx/resource/queryfield?bpeQuery=FIRST&innerQuery=SECOND");
+        assertEquals(200, resp.statusCode());
+        assertEquals("path=/resource/queryfield query=bpeQuery=FIRST&innerQuery=SECOND bpe=FIRST",
+                resp.body());
+    }
+
+    /** Bug #5 bis : query() via wrapper externe qui ne réécrit que path(). */
+    @Test
+    void externalWrapperPreservesQueryString() throws Exception {
+        Handler inner = req -> Response.ok(
+                "path=" + req.path() + " query=" + req.query());
+        // Wrapper qui réécrit path() mais délègue query() à delegate
+        Handler wrapper = req -> {
+            String stripped = req.path().substring("/ctx".length());
+            final String newPath = stripped.isEmpty() ? "/" : stripped;
+            return inner.handle(new Request() {
+                @Override public HttpMethod method() { return req.method(); }
+                @Override public java.net.URI uri() { return req.uri(); }
+                @Override public String path() { return newPath; }
+                @Override public String query() { return req.query(); }
+                @Override public HttpVersion version() { return req.version(); }
+                @Override public Headers headers() { return req.headers(); }
+                @Override public Body body() { return req.body(); }
+                @Override public java.util.Map<String, String> pathParams() { return req.pathParams(); }
+                @Override public java.util.Map<String, String> queryParams() { return req.queryParams(); }
+                @Override public String contextPath() { return "/ctx"; }
+                @Override public String pathInfo() { return newPath; }
+            });
+        };
+        startServer(wrapper);
+
+        var resp = get("/ctx/resource/queryfield?bpeQuery=FIRST&innerQuery=SECOND");
+        assertEquals(200, resp.statusCode());
+        assertEquals("path=/resource/queryfield query=bpeQuery=FIRST&innerQuery=SECOND",
+                resp.body());
+    }
+
+    /** Bug #4 : uri() doit renvoyer une URI absolue (authority = Host header). */
+    @Test
+    void requestUriHasAuthorityFromHostHeader() throws Exception {
+        startServer(req -> {
+            var u = req.uri();
+            return Response.ok("authority=" + u.getAuthority()
+                    + " scheme=" + u.getScheme()
+                    + " path=" + u.getPath()
+                    + " query=" + u.getRawQuery());
+        });
+
+        var resp = get("/foo?a=1&b=2");
+        assertEquals(200, resp.statusCode());
+        String body = resp.body();
+        assertTrue(body.startsWith("authority=127.0.0.1:"), "authority manquant: " + body);
+        assertTrue(body.contains("scheme=http"), "scheme manquant: " + body);
+        assertTrue(body.contains("path=/foo"), "path manquant: " + body);
+        assertTrue(body.contains("query=a=1&b=2"), "query manquant: " + body);
+    }
 }
