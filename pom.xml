@@ -5,7 +5,7 @@
          root="true">
     <modelVersion>4.1.0</modelVersion>
 
-    <groupId>fr.vidocq.chappe</groupId>
+    <groupId>io.vidocq.chappe</groupId>
     <artifactId>chappe-parent</artifactId>
     <version>0.1.0-SNAPSHOT</version>
     <packaging>pom</packaging>
@@ -80,17 +80,17 @@
 
             <!-- Inter-project dependencies -->
             <dependency>
-                <groupId>fr.vidocq.chappe</groupId>
+                <groupId>io.vidocq.chappe</groupId>
                 <artifactId>chappe-api</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>fr.vidocq.chappe</groupId>
+                <groupId>io.vidocq.chappe</groupId>
                 <artifactId>chappe-http</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>fr.vidocq.chappe</groupId>
+                <groupId>io.vidocq.chappe</groupId>
                 <artifactId>chappe-core</artifactId>
                 <version>${project.version}</version>
             </dependency>

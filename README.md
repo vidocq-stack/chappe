@@ -30,7 +30,7 @@ JAX-RS se montent par-dessus via un SPI dédié, sans couplage.
 ## Quick Start
 
 ```java
-import fr.vidocq.chappe.api.*;
+import io.vidocq.chappe.api.*;
 import java.nio.charset.StandardCharsets;
 
 void main() {

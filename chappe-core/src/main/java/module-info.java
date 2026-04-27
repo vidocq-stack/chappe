@@ -1,12 +1,12 @@
 /**
  * Moteur serveur HTTP Chappe — virtual threads, lifecycle, configuration.
  */
-module fr.vidocq.chappe.core {
-    requires fr.vidocq.chappe.api;
-    requires fr.vidocq.chappe.http;
+module io.vidocq.chappe.core {
+    requires io.vidocq.chappe.api;
+    requires io.vidocq.chappe.http;
 
-    exports fr.vidocq.chappe.core;
+    exports io.vidocq.chappe.core;
 
-    provides fr.vidocq.chappe.api.ServerProvider
-            with fr.vidocq.chappe.core.ChappeServerProvider;
+    provides io.vidocq.chappe.api.ServerProvider
+            with io.vidocq.chappe.core.ChappeServerProvider;
 }

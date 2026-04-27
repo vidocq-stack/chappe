@@ -4,8 +4,8 @@
  * Définit les interfaces principales : {@code Server}, {@code Handler},
  * {@code Request}, {@code Response}, {@code Router}.
  */
-module fr.vidocq.chappe.api {
-    exports fr.vidocq.chappe.api;
+module io.vidocq.chappe.api {
+    exports io.vidocq.chappe.api;
 
-    uses fr.vidocq.chappe.api.ServerProvider;
+    uses io.vidocq.chappe.api.ServerProvider;
 }

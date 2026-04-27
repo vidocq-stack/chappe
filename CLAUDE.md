@@ -128,9 +128,9 @@ Le serveur doit être validé sur trois axes :
 ## Conventions de Code
 
 ### Nommage
-- Packages : `fr.vidocq.chappe.*`
-- GroupId Maven : `fr.vidocq.chappe`
-- Modules JPMS : `fr.vidocq.chappe.*`
+- Packages : `io.vidocq.chappe.*`
+- GroupId Maven : `io.vidocq.chappe`
+- Modules JPMS : `io.vidocq.chappe.*`
 
 ### Standards
 - Zéro dépendance hors JDK — c'est la règle absolue du projet

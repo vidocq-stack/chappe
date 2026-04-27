@@ -104,7 +104,7 @@ chappe-static-index-maven-plugin/
 ### `IndexMojo.java` — squelette
 
 ```java
-package fr.vidocq.chappe.maven;
+package io.vidocq.chappe.maven;
 
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
@@ -177,7 +177,7 @@ public final class IndexMojo extends AbstractMojo {
 <build>
   <plugins>
     <plugin>
-      <groupId>fr.vidocq.chappe</groupId>
+      <groupId>io.vidocq.chappe</groupId>
       <artifactId>chappe-static-index-maven-plugin</artifactId>
       <version>${chappe.version}</version>
       <executions>
