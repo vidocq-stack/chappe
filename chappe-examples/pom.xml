@@ -11,6 +11,10 @@
 
     <artifactId>chappe-examples</artifactId>
 
+    <properties>
+        <maven.deploy.skip>true</maven.deploy.skip>
+    </properties>
+
     <name>Chappe Examples</name>
     <description>Exemples d'utilisation du serveur HTTP Chappe</description>
 

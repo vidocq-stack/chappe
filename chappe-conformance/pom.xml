@@ -11,6 +11,10 @@
 
     <artifactId>chappe-conformance</artifactId>
 
+    <properties>
+        <maven.deploy.skip>true</maven.deploy.skip>
+    </properties>
+
     <name>Chappe Conformance</name>
     <description>Suite de conformité HTTP — validation RFC 9110/9112 (HTTP/1.1) et RFC 9113 (HTTP/2)</description>
 

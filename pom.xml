@@ -12,12 +12,16 @@
 
     <name>Chappe</name>
     <description>Serveur HTTP haute performance en Java 25 pur — zéro dépendance, virtual threads</description>
-    <url>https://github.com/VidocqMP/chappe</url>
+    <url>https://forge.vidocq.dev/vidocq/chappe</url>
 
     <developers>
         <developer>
             <name>Yann Blazart</name>
             <email>yann.blazart@gmail.com</email>
+        </developer>
+        <developer>
+            <name>Antoine Sabot Durand</name>
+            <email>antoine@sabot-durand.net</email>
         </developer>
     </developers>
 
@@ -141,6 +145,11 @@
                     <version>3.1.3</version>
                 </plugin>
                 <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-deploy-plugin</artifactId>
+                    <version>3.1.3</version>
+                </plugin>
+                <plugin>
                     <groupId>org.jacoco</groupId>
                     <artifactId>jacoco-maven-plugin</artifactId>
                     <version>${jacoco.version}</version>
@@ -164,6 +173,17 @@
             </plugins>
         </pluginManagement>
     </build>
+
+    <distributionManagement>
+        <repository>
+            <id>forgejo</id>
+            <url>https://forge.vidocq.dev/api/packages/vidocq/maven</url>
+        </repository>
+        <snapshotRepository>
+            <id>forgejo</id>
+            <url>https://forge.vidocq.dev/api/packages/vidocq/maven</url>
+        </snapshotRepository>
+    </distributionManagement>
 
     <profiles>
         <profile>

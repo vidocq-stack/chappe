@@ -11,6 +11,10 @@
 
     <artifactId>chappe-tests</artifactId>
 
+    <properties>
+        <maven.deploy.skip>true</maven.deploy.skip>
+    </properties>
+
     <name>Chappe Tests</name>
     <description>Tests d'intégration du serveur HTTP Chappe</description>
 
