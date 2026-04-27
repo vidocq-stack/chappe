@@ -34,16 +34,26 @@ jobs:
         run: |
           mkdir -p ~/.m2
           cat > ~/.m2/settings.xml <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
           <settings>
             <servers>
               <server>
                 <id>forgejo</id>
                 <username>${{ github.actor }}</username>
-                <password>${{ secrets.FORGEJO_TOKEN }}</password>
+                <password>${{ secrets.MAVEN_DEPLOY_TOKEN }}</password>
+                <configuration>
+                  <httpConfiguration>
+                    <all>
+                      <usePreemptive>true</usePreemptive>
+                    </all>
+                  </httpConfiguration>
+                </configuration>
               </server>
             </servers>
           </settings>
           EOF
 
+
+
       - name: Deploy to Forgejo Maven registry
-        run: mvn --no-transfer-progress deploy -DskipTests
+        run: mvn -B -ntp deploy -DskipTests
