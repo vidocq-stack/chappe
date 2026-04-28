@@ -38,8 +38,20 @@ jobs:
           <settings>
             <servers>
               <server>
-                <id>forgejo</id>
-                <username>${{ github.actor }}</username>
+                <id>vidocq-snapshots</id>
+                <username>vidocq-ci-deploy</username>
+                <password>${{ secrets.MAVEN_DEPLOY_TOKEN }}</password>
+                <configuration>
+                  <httpConfiguration>
+                    <all>
+                      <usePreemptive>true</usePreemptive>
+                    </all>
+                  </httpConfiguration>
+                </configuration>
+              </server>
+              <server>
+                <id>vidocq-releases</id>
+                <username>vidocq-ci-deploy</username>
                 <password>${{ secrets.MAVEN_DEPLOY_TOKEN }}</password>
                 <configuration>
                   <httpConfiguration>

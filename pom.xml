@@ -175,33 +175,45 @@
     </build>
 
     <distributionManagement>
-        <repository>
-            <id>forgejo</id>
-            <url>https://forge.vidocq.dev/api/packages/vidocq/maven</url>
-        </repository>
         <snapshotRepository>
-            <id>forgejo</id>
-            <url>https://forge.vidocq.dev/api/packages/vidocq/maven</url>
+            <id>vidocq-snapshots</id>
+            <url>https://repo.vidocq.dev/snapshots</url>
         </snapshotRepository>
+        <repository>
+            <id>vidocq-releases</id>
+            <url>https://repo.vidocq.dev/releases</url>
+        </repository>
     </distributionManagement>
 
 
 
     <repositories>
         <repository>
-            <id>forgejo-vidocq</id>
-            <url>https://forge.vidocq.dev/api/packages/vidocq/maven</url>
-            <releases><enabled>true</enabled></releases>
+            <id>vidocq-snapshots</id>
+            <url>https://repo.vidocq.dev/snapshots</url>
+            <releases><enabled>false</enabled></releases>
             <snapshots><enabled>true</enabled></snapshots>
+        </repository>
+        <repository>
+            <id>vidocq-releases</id>
+            <url>https://repo.vidocq.dev/releases</url>
+            <releases><enabled>true</enabled></releases>
+            <snapshots><enabled>false</enabled></snapshots>
         </repository>
     </repositories>
 
     <pluginRepositories>
         <pluginRepository>
-            <id>forgejo-vidocq</id>
-            <url>https://forge.vidocq.dev/api/packages/vidocq/maven</url>
-            <releases><enabled>true</enabled></releases>
+            <id>vidocq-snapshots</id>
+            <url>https://repo.vidocq.dev/snapshots</url>
+            <releases><enabled>false</enabled></releases>
             <snapshots><enabled>true</enabled></snapshots>
+        </pluginRepository>
+        <pluginRepository>
+            <id>vidocq-releases</id>
+            <url>https://repo.vidocq.dev/releases</url>
+            <releases><enabled>true</enabled></releases>
+            <snapshots><enabled>false</enabled></snapshots>
         </pluginRepository>
     </pluginRepositories>
 
