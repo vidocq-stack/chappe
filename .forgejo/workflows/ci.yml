@@ -30,15 +30,6 @@ jobs:
       - name: Build & test
         run: mvn --no-transfer-progress verify
 
-      - name: Debug auth (sans afficher le token)
-        run: |
-          echo "User length: ${#MAVEN_USER}"
-          echo "Token length: ${#MAVEN_TOKEN}"
-          echo "User: $MAVEN_USER"
-        env:
-          MAVEN_USER: ${{ vars.MAVEN_DEPLOY_USER }}
-          MAVEN_TOKEN: ${{ secrets.MAVEN_DEPLOY_TOKEN }}
-
       - name: Configure Maven credentials
         run: |
           mkdir -p ~/.m2
