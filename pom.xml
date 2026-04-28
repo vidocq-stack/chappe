@@ -185,6 +185,26 @@
         </snapshotRepository>
     </distributionManagement>
 
+
+
+    <repositories>
+        <repository>
+            <id>forgejo-vidocq</id>
+            <url>https://forge.vidocq.dev/api/packages/vidocq/maven</url>
+            <releases><enabled>true</enabled></releases>
+            <snapshots><enabled>true</enabled></snapshots>
+        </repository>
+    </repositories>
+
+    <pluginRepositories>
+        <pluginRepository>
+            <id>forgejo-vidocq</id>
+            <url>https://forge.vidocq.dev/api/packages/vidocq/maven</url>
+            <releases><enabled>true</enabled></releases>
+            <snapshots><enabled>true</enabled></snapshots>
+        </pluginRepository>
+    </pluginRepositories>
+
     <profiles>
         <profile>
             <id>quality</id>
