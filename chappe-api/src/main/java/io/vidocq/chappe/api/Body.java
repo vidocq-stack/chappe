@@ -77,4 +77,25 @@ public interface Body {
     static Body ofOutputStream(java.util.function.Consumer<java.io.OutputStream> writer) {
         return new OutputStreamBody(writer);
     }
+
+    /**
+     * Corps streamé depuis un InputStream de longueur inconnue.
+     * <p>
+     * Chappe envoie ce body en chunked transfer (HTTP/1.1) ou en DATA frames successives
+     * (HTTP/2), sans bufferiser l'intégralité. EOF sur le stream ferme la réponse.
+     * <p>
+     * Usage SSE typique avec un PipedInputStream :
+     * <pre>{@code
+     *   var pis = new PipedInputStream(8192);
+     *   var pos = new PipedOutputStream(pis);
+     *   Thread.startVirtualThread(() -> { /* écrire les events SSE dans pos *\/ });
+     *   return Response.builder()
+     *       .header("Content-Type", "text/event-stream")
+     *       .body(Body.streaming(pis))
+     *       .build();
+     * }</pre>
+     */
+    static Body streaming(InputStream in) {
+        return of(in, -1);
+    }
 }

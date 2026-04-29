@@ -235,6 +235,8 @@ public final class HttpResponseWriter {
                 putBytes(CRLF, buffer, channel);
                 putBytes(bodyChunk, 0, read, buffer, channel);
                 putBytes(CRLF, buffer, channel);
+                // Flush après chaque chunk pour que les events SSE arrivent sans délai
+                flush(buffer, channel);
             }
         }
         putBytes(CHUNK_TERMINATOR, buffer, channel);
