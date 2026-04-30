@@ -27,9 +27,6 @@ jobs:
           tar -xzf apache-maven-4.0.0-rc-5-bin.tar.gz -C /opt
           echo "/opt/apache-maven-4.0.0-rc-5/bin" >> "$GITHUB_PATH"
 
-      - name: Build & test
-        run: mvn --no-transfer-progress verify
-
       - name: Configure Maven credentials
         run: |
           mkdir -p ~/.m2
@@ -65,7 +62,8 @@ jobs:
           </settings>
           EOF
 
-
+      - name: Build & test
+        run: mvn --no-transfer-progress verify
 
       - name: Deploy to Forgejo Maven registry
         run: mvn -B -ntp deploy -DskipTests
