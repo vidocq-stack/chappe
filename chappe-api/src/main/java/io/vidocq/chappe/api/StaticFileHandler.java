@@ -255,6 +255,16 @@ public final class StaticFileHandler implements Handler {
         public ResolvedResource resolve(String relative, String indexFile) {
             String resourcePath = basePath.isEmpty() ? relative : basePath + "/" + relative;
 
+            // Si la requête vise un répertoire (relative vide ou se termine par /),
+            // résoudre directement vers indexFile : sans ça, getResource() retourne
+            // l'URL du dir jar dans le slow path et URLConnection ne sait pas la
+            // servir (size = -1, openStream renvoie un listing texte).
+            if (relative.isEmpty() || relative.endsWith("/")) {
+                resourcePath = resourcePath.isEmpty() || resourcePath.endsWith("/")
+                        ? resourcePath + indexFile
+                        : resourcePath + "/" + indexFile;
+            }
+
             // Fast path : entrée précalculée au build par chappe-static-index-maven-plugin.
             // Skip URLConnection.openConnection() entièrement — tout est déjà connu.
             IndexedEntry idx = StaticIndex.lookup(loader, resourcePath);
