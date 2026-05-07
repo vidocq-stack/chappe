@@ -1,0 +1,67 @@
+= Migration
+:description: Depuis Jetty, Netty, Undertow ou JDK HttpServer.
+
+[CAUTION]
+Chappe est en **0.1.0-SNAPSHOT**. Une migration réelle est prématurée. Voir `chappe/BENCH.md` pour les comparatifs perf.
+
+== Depuis Jetty
+
+[cols="1,1,2"]
+|===
+| Jetty | Chappe | Note
+
+| `Server` + `ServerConnector`
+| `Server.builder().port(...).build()`
+| API plus serrée
+
+| `ServletContextHandler`
+| xref:foy::index.adoc[Foy] sur Chappe
+| Servlet via le pont Foy
+
+| `org.eclipse.jetty.util.thread.QueuedThreadPool`
+| `Executors.newVirtualThreadPerTaskExecutor()`
+| Pas de pool plateforme
+|===
+
+== Depuis Netty
+
+[cols="1,1,2"]
+|===
+| Netty | Chappe | Note
+
+| `EventLoopGroup`
+| Virtual threads
+| Pas de boucle d'événements
+
+| `ChannelHandler`
+| `Handler` Chappe (lambda)
+| Modèle synchrone — Loom le rend équivalent
+
+| ByteBuf
+| `Body` (InputStream / OutputStream)
+| Pas de pool de buffers exposé à l'utilisateur
+|===
+
+[NOTE]
+====
+Migrer un pipeline Netty complexe est un chantier — Chappe ne réplique pas l'extensibilité bas niveau de Netty. Si vous écrivez votre propre protocole binaire, Chappe n'est probablement pas le bon outil.
+====
+
+== Depuis Undertow
+
+[TODO]
+====
+* `Undertow.builder().addHttpListener(...)` → `Server.builder().port(...).build()`.
+* `RoutingHandler` → `Router.builder()...`.
+* `ResourceHandler` → `StaticFileHandler`.
+====
+
+== Depuis JDK 25 `HttpServer`
+
+`com.sun.net.httpserver.HttpServer` est minimal et n'est pas pensé pour la production. Avantage : sans dépendance. Désavantages : pas de HTTP/2, pas de virtual threads par défaut, gestion du multiplexage limitée.
+
+Migration directe : remplacer `HttpServer.create(addr, backlog)` par `Server.builder().port(...).build()` et `createContext("/path", handler)` par `Router.builder().get("/path", req -> ...)`.
+
+== Manques connus
+
+Voir xref:reference.adoc[Référence] : pas de CLI native, pas de gzip négocié exposé, pas de fallback SPA configurable. À traiter si vous attendez ces capacités prêtes à l'emploi.

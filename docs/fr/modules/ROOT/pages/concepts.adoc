@@ -1,0 +1,87 @@
+= Concepts
+:description: Server, Router, Handler, Request/Response, RequestContext, ServerProvider SPI.
+
+== Boucle de connexion
+
+Chappe applique une règle simple : **un thread virtuel par connexion**. À l'acceptation d'une socket :
+
+. `chappe-core` lance un nouveau virtual thread via `Executors.newVirtualThreadPerTaskExecutor()`.
+. Le thread lit le préambule (négociation HTTP/1.1 vs HTTP/2 vs TLS).
+. Le `Router` est invoqué avec le `Request` immutable.
+. Le `Handler` retourne un `Response` ; le serveur l'écrit dans la connexion.
+
+Pas de `Selector`, pas de `EventLoopGroup`. La VM Java 25 gère la multiplication des virtual threads sur quelques carrier threads plateforme.
+
+== `RequestContext` et Scoped Values
+
+`RequestContext.CURRENT` est un `ScopedValue<RequestContext>` (JEP 506, finalisé Java 25). Il porte les attributs de requête, le tenant, l'utilisateur authentifié — tout ce que `ThreadLocal` portait dans les serveurs traditionnels, en plus propre :
+
+* propagation explicite via `ScopedValue.where(...).run(...)` ;
+* nettoyage automatique en sortie de scope ;
+* compatibilité virtual threads sans risque de pinning.
+
+== `Router`
+
+API fluente :
+
+[source,java]
+----
+Router.builder()
+    .get("/items/{id}", req -> ...)
+    .post("/items", req -> ...)
+    .mount("/admin", adminRouter)        // sub-router avec context path
+    .build();
+----
+
+`Router#mount` strippe automatiquement le prefix : depuis `adminRouter`, `req.path()` est relatif au mount point.
+
+== `StaticFileHandler`
+
+[source,java]
+----
+StaticFileHandler.builder()
+    .addPath(Path.of("./public"))             // filesystem (zero-copy sendfile)
+    .addClasspath("static")                    // classpath (jar, module)
+    .addClasspath("META-INF/resources")        // Servlet web fragments, webjars
+    .cacheInMemory(true)
+    .cacheControl("max-age=3600, public")
+    .build()
+----
+
+Capacités :
+
+* MIME auto-detection (26+ types)
+* `Last-Modified` / `If-Modified-Since` → 304
+* `ETag` / `If-None-Match` → 304 (cache mémoire pour ressources classpath)
+* path traversal protection
+* directory index automatique
+
+[NOTE]
+====
+La compression (`Content-Encoding: gzip` négociée avec `Accept-Encoding`) n'est pas encore exposée dans l'API publique — voir xref:reference.adoc[Référence] pour le statut.
+====
+
+== `Body` streaming
+
+[source,java]
+----
+Body.ofOutputStream(out -> {
+    out.write("chunk 1".getBytes());
+    out.write("chunk 2".getBytes());
+})
+----
+
+Utilisé par Foy pour exposer un `ServletOutputStream` natif sans copie.
+
+== Extension SPI
+
+* `Router.mount(prefix, handler)` — enregistrement par path prefix.
+* `Request.contextPath()` / `pathInfo()` — relatifs au mount point.
+* `Request.attribute(key, value)` — attributs mutables per-request (compat Servlet).
+* `RequestContext.CURRENT` — ScopedValue propagé.
+* `ServerProvider` — `ServiceLoader` SPI pour brancher une implémentation alternative (utilisé par `cassini-jdk-http`).
+
+== Conformité
+
+* `chappe-conformance` — 45 tests RFC 9110/9112/9113.
+* `chappe-tests` — 62 tests d'intégration (verbes HTTP, headers, async, virtual threads).

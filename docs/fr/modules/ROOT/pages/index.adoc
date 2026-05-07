@@ -1,0 +1,24 @@
+= Chappe
+:description: Serveur HTTP/1.1 + HTTP/2 pur Java 25, virtual threads, zéro dépendance.
+
+[.lead]
+Chappe est un serveur HTTP haute performance écrit en Java 25 pur. HTTP/1.1, HTTP/2, TLS 1.3, virtual threads, zéro dépendance runtime. Le télégraphe optique d'origine atteignait Strasbourg depuis Paris en 36 minutes ; le moteur Chappe vise des chiffres comparables, à son échelle.
+
+== Pourquoi ?
+
+Claude Chappe (1763-1805), inventeur du télégraphe optique français en 1794 — un réseau de 556 stations, sémaphores articulés sur des collines, capable de transmettre un message de Paris à Toulon en moins de 12 minutes là où la poste à cheval mettait trois jours. Le succès ne tenait pas à la complexité : il tenait au fait que chaque station ne faisait qu'une chose, le faisait vite, et que le protocole entre les stations était trivial à observer et à dépanner.
+
+Chappe, le serveur, suit la même règle. Pas de framework de framework. Une `Request`, une `Response`, un `Router`. Un `StaticFileHandler` pour servir des répertoires en zero-copy. Une couche `chappe-http` pour HTTP/1.1 et HTTP/2, partagée par toute l'écosystème Vidocq (Cassini pour REST, Foy pour Servlet).
+
+== En bref
+
+* **HTTP/1.1, HTTP/2, TLS 1.3** — couche `chappe-http`, pas de Netty, pas de Jetty.
+* **Virtual Threads (Project Loom)** — un thread virtuel par connexion, pas de pool plateforme.
+* **Scoped Values (JEP 506)** — `RequestContext.CURRENT` propagé avant chaque handler, pas de `ThreadLocal`.
+* **Zero-copy I/O** — `FileChannel.transferTo()` pour les fichiers statiques.
+* **JPMS** — `chappe-api`, `chappe-http`, `chappe-core`, chacun avec son `module-info.java`.
+* **45 tests RFC 9110/9112/9113** — module `chappe-conformance`.
+* **62 tests d'intégration** — module `chappe-tests`.
+* **Zéro dépendance** — pas de logger transitif, pas de bibliothèque utilitaire externe.
+
+xref:getting-started.adoc[Démarrer →]

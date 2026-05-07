@@ -1,0 +1,100 @@
+= Démarrage rapide
+:description: Premier serveur Chappe en moins de 30 lignes.
+
+== Pré-requis
+
+* **Java 25** — Temurin recommandé.
+* **Maven 4.0.0-rc-5** — épinglé via `.sdkmanrc` à la racine du repo.
+* `sdk env` au niveau du repo charge la bonne version JDK et Maven.
+
+== Coordonnées Maven
+
+[source,xml]
+----
+<dependency>
+    <groupId>io.vidocq.chappe</groupId>
+    <artifactId>chappe-api</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+</dependency>
+<dependency>
+    <groupId>io.vidocq.chappe</groupId>
+    <artifactId>chappe-core</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <scope>runtime</scope>
+</dependency>
+<dependency>
+    <groupId>io.vidocq.chappe</groupId>
+    <artifactId>chappe-http</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <scope>runtime</scope>
+</dependency>
+----
+
+== Hello world
+
+[source,java]
+----
+import io.vidocq.chappe.api.*;
+import java.nio.charset.StandardCharsets;
+
+void main() {
+    var router = Router.builder()
+        .get("/", _ -> Response.ok("Hello, Chappe!"))
+        .get("/users/{id}", req -> {
+            var id = req.pathParams().get("id");
+            return Response.ok("User " + id);
+        })
+        .post("/users", req -> {
+            var body = new String(
+                req.body().asInputStream().readAllBytes(),
+                StandardCharsets.UTF_8
+            );
+            return Response.builder()
+                .status(StatusCode.CREATED)
+                .header("Content-Type", "application/json")
+                .body("{\"received\": " + body + "}")
+                .build();
+        })
+        .build();
+
+    try (var server = Server.builder()
+            .port(8080)
+            .handler(router)
+            .build()) {
+        server.start();
+        Thread.currentThread().join();
+    }
+}
+----
+
+== Servir un répertoire statique
+
+[source,java]
+----
+var staticHandler = StaticFileHandler.builder()
+    .addPath(Path.of("./public"))             // filesystem (zero-copy sendfile)
+    .addClasspath("static")                    // classpath fallback (jar, module)
+    .cacheInMemory(true)                       // cache ETag pour le classpath
+    .cacheControl("max-age=3600, public")
+    .build();
+
+Server.builder().port(8080).handler(staticHandler).build().start();
+----
+
+`StaticFileHandler` détecte automatiquement le MIME (26+ types), répond `304 Not Modified` sur `If-Modified-Since` et `If-None-Match`, et protège contre le path traversal.
+
+== Build et lancement
+
+[source,bash]
+----
+sdk env                       # charge JDK 25 + Maven 4.0.0-rc-5
+./mvnw -ntp install -DskipTests
+java --enable-preview \
+     --module-path target/lib:target/myapp.jar \
+     --module myapp/io.example.Main
+----
+
+[NOTE]
+====
+Plus d'exemples dans `chappe-examples/` à la racine du repo `chappe`.
+====

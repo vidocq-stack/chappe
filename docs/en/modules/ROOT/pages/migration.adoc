@@ -1,0 +1,67 @@
+= Migration
+:description: From Jetty, Netty, Undertow or JDK HttpServer.
+
+[CAUTION]
+Chappe is at **0.1.0-SNAPSHOT**. Real migration is premature. See `chappe/BENCH.md` for performance comparisons.
+
+== From Jetty
+
+[cols="1,1,2"]
+|===
+| Jetty | Chappe | Note
+
+| `Server` + `ServerConnector`
+| `Server.builder().port(...).build()`
+| Tighter API
+
+| `ServletContextHandler`
+| xref:foy::index.adoc[Foy] on top of Chappe
+| Servlet via the Foy bridge
+
+| `org.eclipse.jetty.util.thread.QueuedThreadPool`
+| `Executors.newVirtualThreadPerTaskExecutor()`
+| No platform pool
+|===
+
+== From Netty
+
+[cols="1,1,2"]
+|===
+| Netty | Chappe | Note
+
+| `EventLoopGroup`
+| Virtual threads
+| No event loop
+
+| `ChannelHandler`
+| Chappe `Handler` (lambda)
+| Synchronous model — Loom makes it equivalent
+
+| ByteBuf
+| `Body` (InputStream / OutputStream)
+| No user-exposed buffer pool
+|===
+
+[NOTE]
+====
+Migrating a complex Netty pipeline is a major effort — Chappe does not replicate Netty's low-level extensibility. If you build your own binary protocol, Chappe is probably not the right tool.
+====
+
+== From Undertow
+
+[TODO]
+====
+* `Undertow.builder().addHttpListener(...)` → `Server.builder().port(...).build()`.
+* `RoutingHandler` → `Router.builder()...`.
+* `ResourceHandler` → `StaticFileHandler`.
+====
+
+== From JDK 25 `HttpServer`
+
+`com.sun.net.httpserver.HttpServer` is minimal and not designed for production. Pro: dependency-free. Cons: no HTTP/2, no default virtual threads, limited multiplexing.
+
+Direct migration: replace `HttpServer.create(addr, backlog)` with `Server.builder().port(...).build()`, and `createContext("/path", handler)` with `Router.builder().get("/path", req -> ...)`.
+
+== Known gaps
+
+See xref:reference.adoc[Reference]: no native CLI, no exposed negotiated gzip, no configurable SPA fallback. Worth addressing if you expect these capabilities out of the box.

@@ -1,0 +1,76 @@
+= Référence
+:description: Artefacts Maven, packages publics, conformité HTTP, plugins.
+
+== Artefacts Maven
+
+[cols="1,3"]
+|===
+| Artefact | Rôle
+
+| `io.vidocq.chappe:chappe-api:0.1.0-SNAPSHOT`
+| API publique (`Server`, `Router`, `Handler`, `Request`, `Response`, `StaticFileHandler`, `MimeTypes`, `RequestContext`)
+
+| `io.vidocq.chappe:chappe-http:0.1.0-SNAPSHOT`
+| Couche HTTP/1.1 + HTTP/2, TLS, ByteBufferPool
+
+| `io.vidocq.chappe:chappe-core:0.1.0-SNAPSHOT`
+| Moteur serveur (virtual threads, protocol detection, lifecycle)
+
+| `io.vidocq.chappe:chappe-tests:0.1.0-SNAPSHOT`
+| Tests d'intégration (62 tests)
+
+| `io.vidocq.chappe:chappe-conformance:0.1.0-SNAPSHOT`
+| Conformité HTTP (45 tests RFC 9110/9112/9113)
+
+| `io.vidocq.chappe:chappe-bench:0.1.0-SNAPSHOT`
+| Benchmarks (Jetty, Helidon, JDK)
+
+| `io.vidocq.chappe:chappe-static-index-maven-plugin:0.1.0-SNAPSHOT`
+| Plugin Maven : génération d'un index statique au build
+
+| `io.vidocq.chappe:chappe-examples:0.1.0-SNAPSHOT`
+| Exemples
+|===
+
+== Packages publics (`chappe-api`)
+
+* `io.vidocq.chappe.api` — `Server`, `Router`, `Handler`, `Request`, `Response`, `Body`, `StatusCode`, `MimeTypes`, `StaticFileHandler`, `RequestContext`
+
+== Capacités HTTP
+
+* HTTP/1.1 — RFC 9110, RFC 9112
+* HTTP/2 — RFC 9113
+* TLS 1.3 (et 1.2)
+* HTTP/3 / QUIC — `[TODO]` planifié
+* WebSocket — `[TODO]` planifié
+
+== `StaticFileHandler` — capacités explicites
+
+* MIME auto-detection (26+ types)
+* `Last-Modified` / `If-Modified-Since` → 304
+* `ETag` / `If-None-Match` → 304
+* path traversal protection
+* directory index (`index.html`, `index.htm`)
+* fallback chain filesystem → classpath
+* zero-copy (`FileChannel.transferTo()`) sur filesystem
+
+== Manques connus
+
+[NOTE]
+====
+* Pas de mode CLI standalone — l'API est uniquement programmatique. Voir `vidocq-docs` pour un launcher type.
+* Compression `Content-Encoding: gzip` négociée — non exposée.
+* Header conditionnel `X-Robots-Tag` selon environnement — pas natif, à implémenter par filtre.
+* Fallback configurable type SPA (`/index.html`) — pas natif.
+====
+
+== Bugs et benchmarks
+
+* `chappe/BUG.md`
+* `chappe/BENCH.md`
+
+== Compatibilité
+
+* Java 25, Maven 4.0.0-rc-5
+* JPMS strict
+* Zéro dépendance runtime
