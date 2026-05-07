@@ -288,9 +288,9 @@ Benchmarks sur macOS, Java 25, NIO client ultra-léger ([détails](BENCHMARKS.md
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                 chappe-examples                       │
+│       chappe-cli  ·  chappe-examples                 │
 ├─────────────────────────────────────────────────────┤
-│  chappe-tests (62)   chappe-bench   chappe-conf (45) │
+│  chappe-tests (113)  chappe-bench  chappe-conf (45)  │
 ├─────────────────────────────────────────────────────┤
 │                    chappe-core                        │
 │   (moteur serveur, virtual threads, TLS, pooling)    │
@@ -300,7 +300,8 @@ Benchmarks sur macOS, Java 25, NIO client ultra-léger ([détails](BENCHMARKS.md
 ├─────────────────────────────────────────────────────┤
 │                    chappe-api                         │
 │  Server, Router, Handler, Request, Response, Body    │
-│  StaticFileHandler, MimeTypes, RequestContext         │
+│  Filter, StaticFileHandler, AcceptEncoding, MimeTypes │
+│  RequestContext                                       │
 ├─────────────────────────────────────────────────────┤
 │             Java 25 (Loom, ScopedValue, JPMS)        │
 └─────────────────────────────────────────────────────┘
@@ -310,12 +311,14 @@ Benchmarks sur macOS, Java 25, NIO client ultra-léger ([détails](BENCHMARKS.md
 
 | Module | Description |
 |---|---|
-| `chappe-api` | API publique : routing, handling, static files, extension SPI |
+| `chappe-api` | API publique : routing, handling, static files, filtres, négociation `Accept-Encoding`, extension SPI |
 | `chappe-http` | Protocoles HTTP/1.1 et HTTP/2, TLS, buffer pool |
 | `chappe-core` | Moteur serveur, virtual threads, protocol detection |
-| `chappe-tests` | 62 tests d'intégration |
+| `chappe-cli` | Launcher CLI standalone `chappe serve` (mini-YAML, fat jar, jlink) |
+| `chappe-tests` | 113 tests d'intégration |
 | `chappe-conformance` | 45 tests de conformité RFC |
 | `chappe-bench` | Benchmarks comparatifs |
+| `chappe-static-index-maven-plugin` | Plugin Maven : index O(1) + sidecars `.gz` au build |
 
 ## Prérequis
 
@@ -331,7 +334,61 @@ sdk use maven 4.0.0-rc-5
 
 ```bash
 mvn clean install           # build complet
-mvn test                    # 107 tests
+mvn test                    # 195 tests
+```
+
+## CLI standalone
+
+Pour servir un site statique sans launcher Java applicatif (cas d'usage Docker) :
+
+```bash
+mvn -ntp -pl chappe-cli -am package    # produit chappe-cli-*-shaded.jar
+java --enable-preview \
+     -jar chappe-cli/target/chappe-cli-*-shaded.jar \
+     serve --root /var/www/site --port 8080 --gzip
+```
+
+Ou via fichier YAML :
+
+```yaml
+# /etc/chappe/config.yml
+server: { port: 8080, bind: 0.0.0.0 }
+static:
+  root: /var/www/site
+  fallback: /404.html
+  cache-control: "max-age=3600, public"
+  gzip: true
+headers:
+  always: { X-Content-Type-Options: "nosniff" }
+  staging: { X-Robots-Tag: "noindex, nofollow" }   # actif si STAGING=true
+```
+
+Voir `chappe-cli/README.md` pour les recettes Docker (fat jar + jlink).
+
+### Compression
+
+`Filter.gzip()` négocie `Accept-Encoding`, compresse à la volée (skip si < 1 Ko, MIME
+non text-like, ou `Cache-Control: no-transform`). `StaticFileHandler.preferPrecompressed(true)`
+sert en priorité les sidecars `.br` / `.gz` (zero-copy). Les `.gz` peuvent être
+générés au build avec :
+
+```xml
+<plugin>
+  <groupId>io.vidocq.chappe</groupId>
+  <artifactId>chappe-static-index-maven-plugin</artifactId>
+  <configuration><compress>gzip</compress></configuration>
+</plugin>
+```
+
+### Filtres déclaratifs
+
+```java
+Router.builder()
+    .filter(Filter.addHeader("X-Content-Type-Options", "nosniff"))
+    .filter(Filter.addHeaderIfEnv("STAGING", "true",
+            "X-Robots-Tag", "noindex, nofollow"))
+    .filter(Filter.gzip())
+    .build();
 ```
 
 ## Conformité RFC

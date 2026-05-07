@@ -62,6 +62,11 @@ Migrer un pipeline Netty complexe est un chantier — Chappe ne réplique pas l'
 
 Migration directe : remplacer `HttpServer.create(addr, backlog)` par `Server.builder().port(...).build()` et `createContext("/path", handler)` par `Router.builder().get("/path", req -> ...)`.
 
-== Manques connus
+== Capacités prêtes pour la migration
 
-Voir xref:reference.adoc[Référence] : pas de CLI native, pas de gzip négocié exposé, pas de fallback SPA configurable. À traiter si vous attendez ces capacités prêtes à l'emploi.
+Pour les besoins « serveur statique production-ready » :
+
+* xref:cli.adoc[CLI standalone] (`chappe serve --config …`) — packaging Docker direct.
+* `Filter.gzip()` + `StaticFileHandler.preferPrecompressed(true)` — compression négociée + sidecars `.br` / `.gz`.
+* `StaticFileHandler.spaFallback("/index.html")` / `.notFoundFile("/404.html")` — routing SPA et 404 personnalisée.
+* `Filter.addHeaderIfEnv("STAGING", "true", "X-Robots-Tag", "noindex, nofollow")` — headers conditionnels par environnement.

@@ -75,6 +75,37 @@ final class IndexMojoTest {
         assertFalse(Files.exists(outputDir.resolve("META-INF/chappe-static-index.properties")));
     }
 
+    @Test
+    void compressGzipGeneratesSidecarsAndIndexesThem(@TempDir Path outputDir) throws Exception {
+        Path staticDir = Files.createDirectories(outputDir.resolve("static"));
+        // Repetitive content > threshold so it's compressed.
+        StringBuilder big = new StringBuilder();
+        for (int i = 0; i < 200; i++) big.append("hello world ");
+        Files.writeString(staticDir.resolve("page.html"), big.toString());
+        Files.writeString(staticDir.resolve("tiny.txt"), "x"); // < threshold, skipped
+        Files.write(staticDir.resolve("logo.png"), new byte[2048]); // image, skipped
+
+        IndexMojo mojo = new IndexMojo();
+        set(mojo, "outputDirectory", outputDir.toString());
+        set(mojo, "rootPrefix", "static");
+        set(mojo, "skip", false);
+        set(mojo, "compress", "gzip");
+        set(mojo, "compressThreshold", 1024);
+
+        mojo.execute();
+
+        assertTrue(Files.exists(staticDir.resolve("page.html.gz")), "sidecar generated");
+        assertFalse(Files.exists(staticDir.resolve("tiny.txt.gz")), "small skipped");
+        assertFalse(Files.exists(staticDir.resolve("logo.png.gz")), "binary skipped");
+
+        Properties props = new Properties();
+        try (var in = Files.newInputStream(outputDir.resolve("META-INF/chappe-static-index.properties"))) {
+            props.load(in);
+        }
+        assertNotNull(props.getProperty("static/page.html"));
+        assertNotNull(props.getProperty("static/page.html.gz"), "sidecar indexed");
+    }
+
     private static void set(IndexMojo mojo, String field, Object value) throws Exception {
         Field f = IndexMojo.class.getDeclaredField(field);
         f.setAccessible(true);

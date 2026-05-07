@@ -88,7 +88,7 @@ Server.builder().port(8080).handler(staticHandler).build().start();
 [source,bash]
 ----
 sdk env                       # charge JDK 25 + Maven 4.0.0-rc-5
-./mvnw -ntp install -DskipTests
+mvn -ntp install -DskipTests
 java --enable-preview \
      --module-path target/lib:target/myapp.jar \
      --module myapp/io.example.Main
@@ -98,3 +98,15 @@ java --enable-preview \
 ====
 Plus d'exemples dans `chappe-examples/` à la racine du repo `chappe`.
 ====
+
+== Servir un site sans launcher Java
+
+Si vous voulez juste servir un répertoire statique (cas d'usage Docker), utiliser
+la xref:cli.adoc[CLI standalone] :
+
+[source,bash]
+----
+mvn -ntp -pl chappe-cli -am package
+java --enable-preview -jar chappe-cli/target/chappe-cli-*-shaded.jar \
+     serve --root /var/www/site --port 8080 --gzip
+----

@@ -8,7 +8,7 @@
 | Artefact | Role
 
 | `io.vidocq.chappe:chappe-api:0.1.0-SNAPSHOT`
-| Public API (`Server`, `Router`, `Handler`, `Request`, `Response`, `StaticFileHandler`, `MimeTypes`, `RequestContext`)
+| Public API (`Server`, `Router`, `Handler`, `Filter`, `Request`, `Response`, `StaticFileHandler`, `AcceptEncoding`, `MimeTypes`, `RequestContext`)
 
 | `io.vidocq.chappe:chappe-http:0.1.0-SNAPSHOT`
 | HTTP/1.1 + HTTP/2 layer, TLS, ByteBufferPool
@@ -16,8 +16,11 @@
 | `io.vidocq.chappe:chappe-core:0.1.0-SNAPSHOT`
 | Server engine (virtual threads, protocol detection, lifecycle)
 
+| `io.vidocq.chappe:chappe-cli:0.1.0-SNAPSHOT`
+| Standalone CLI launcher `chappe serve` (fat jar + scripts) — see xref:cli.adoc[Standalone CLI]
+
 | `io.vidocq.chappe:chappe-tests:0.1.0-SNAPSHOT`
-| Integration tests (62 tests)
+| Integration tests (113 tests)
 
 | `io.vidocq.chappe:chappe-conformance:0.1.0-SNAPSHOT`
 | HTTP conformance (45 RFC 9110/9112/9113 tests)
@@ -26,7 +29,7 @@
 | Benchmarks (Jetty, Helidon, JDK)
 
 | `io.vidocq.chappe:chappe-static-index-maven-plugin:0.1.0-SNAPSHOT`
-| Maven plugin: build-time static index generation
+| Maven plugin: build-time static index, with `<compress>gzip</compress>` to emit `.gz` sidecars
 
 | `io.vidocq.chappe:chappe-examples:0.1.0-SNAPSHOT`
 | Examples
@@ -34,7 +37,7 @@
 
 == Public packages (`chappe-api`)
 
-* `io.vidocq.chappe.api` — `Server`, `Router`, `Handler`, `Request`, `Response`, `Body`, `StatusCode`, `MimeTypes`, `StaticFileHandler`, `RequestContext`
+* `io.vidocq.chappe.api` — `Server`, `Router`, `Handler`, `Filter`, `Request`, `Response`, `Body`, `StatusCode`, `MimeTypes`, `StaticFileHandler`, `AcceptEncoding`, `RequestContext`
 
 == HTTP capabilities
 
@@ -53,16 +56,43 @@
 * directory index (`index.html`, `index.htm`)
 * filesystem → classpath fallback chain
 * zero-copy (`FileChannel.transferTo()`) on filesystem
+* `notFoundFile(path)` — file served as 404 (mutually exclusive with `spaFallback`)
+* `spaFallback(path)` — SPA mode, serves the file as 200 on a missing resource
+* `preferPrecompressed(true)` — prefer `.br` / `.gz` sidecars when the client's `Accept-Encoding` allows them
 
-== Known gaps
+== `Filter` — declarative helpers
 
-[NOTE]
-====
-* No standalone CLI mode — API is programmatic only. See `vidocq-docs` for a sample launcher.
-* Negotiated `Content-Encoding: gzip` — not exposed.
-* Environment-conditional `X-Robots-Tag` header — not native, implement via filter.
-* SPA-style configurable fallback (`/index.html`) — not native.
-====
+* `Filter.addHeader(name, value)` — inject a header on every response.
+* `Filter.addHeaderIf(BooleanSupplier, name, value)` — conditional header (predicate evaluated per request).
+* `Filter.addHeaderIfEnv(envVar, expectedValue, name, value)` — gate on an env var (typical: `STAGING=true` → `X-Robots-Tag: noindex`).
+* `Filter.gzip()` / `Filter.gzip(threshold)` — on-the-fly compression negotiated via `Accept-Encoding`. Skip when already encoded, `Cache-Control: no-transform`, non-text-like MIME, or size below threshold (1024 by default).
+
+== `AcceptEncoding`
+
+* `AcceptEncoding.parse(header)` — list of `Entry(name, qvalue)`.
+* `AcceptEncoding.accepts(header, coding)` — RFC 9110 §12.5.3 rules (q-values, wildcard, implicit `identity`).
+
+== Maven plugin: pre-compression
+
+[source,xml]
+----
+<plugin>
+  <groupId>io.vidocq.chappe</groupId>
+  <artifactId>chappe-static-index-maven-plugin</artifactId>
+  <executions>
+    <execution>
+      <goals><goal>index</goal></goals>
+      <configuration>
+        <compress>gzip</compress>            <!-- default: none -->
+        <compressThreshold>1024</compressThreshold>
+      </configuration>
+    </execution>
+  </executions>
+</plugin>
+----
+
+Generated `.gz` sidecars are indexed in `META-INF/chappe-static-index.properties` —
+served zero-copy by `StaticFileHandler.preferPrecompressed(true)`.
 
 == Bugs and benchmarks
 

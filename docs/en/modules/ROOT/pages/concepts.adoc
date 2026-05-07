@@ -45,6 +45,8 @@ StaticFileHandler.builder()
     .addClasspath("META-INF/resources")        // Servlet web fragments, webjars
     .cacheInMemory(true)
     .cacheControl("max-age=3600, public")
+    .preferPrecompressed(true)                  // .br / .gz sidecars when Accept-Encoding allows
+    .spaFallback("/index.html")                 // or .notFoundFile("/404.html")
     .build()
 ----
 
@@ -55,11 +57,33 @@ Capabilities:
 * `ETag` / `If-None-Match` → 304 (memory cache for classpath resources)
 * path traversal protection
 * automatic directory index
+* `spaFallback(path)` — serves the file as 200 when the resource is missing (SPA)
+* `notFoundFile(path)` — serves the file as 404 (mutually exclusive with `spaFallback`)
+* `preferPrecompressed(true)` — zero-copy `.br` / `.gz` sidecars when the client accepts them
 
-[NOTE]
-====
-Compression (`Content-Encoding: gzip` negotiated with `Accept-Encoding`) is not yet exposed in the public API — see xref:reference.adoc[Reference] for status.
-====
+== Declarative filters and compression
+
+[source,java]
+----
+Router.builder()
+    .filter(Filter.addHeader("X-Content-Type-Options", "nosniff"))
+    .filter(Filter.addHeaderIfEnv("STAGING", "true",
+            "X-Robots-Tag", "noindex, nofollow"))
+    .filter(Filter.gzip())                       // negotiates Accept-Encoding
+    .build();
+----
+
+`Filter.gzip()` automatically skips when the response already has a `Content-Encoding`,
+carries `Cache-Control: no-transform`, has a non-text-like `Content-Type` (text/*,
+application/json, application/xml, application/javascript, +xml, +json...), or
+when the body is below 1 KB.
+
+`AcceptEncoding.parse()` / `accepts()` expose RFC 9110 §12.5.3 negotiation
+(q-values, wildcard, implicit `identity`).
+
+== Standalone CLI mode
+
+To serve a static site without a programmatic launcher: see xref:cli.adoc[Standalone CLI].
 
 == `Body` streaming
 
@@ -84,4 +108,4 @@ Used by Foy to expose a native `ServletOutputStream` without copying.
 == Conformance
 
 * `chappe-conformance` — 45 RFC 9110/9112/9113 tests.
-* `chappe-tests` — 62 integration tests (HTTP verbs, headers, async, virtual threads).
+* `chappe-tests` — 113 integration tests (HTTP verbs, headers, filters, compression, async, virtual threads).

@@ -32,13 +32,15 @@ le lifecycle des composants. Chappe lui-même utilise `ServiceLoader` (pas CDI).
 ### Modules
 | Module | Description |
 |---|---|
-| `chappe-api` | API publique : `Server`, `Router`, `Handler`, `Request`, `Response`, `StaticFileHandler`, `MimeTypes`, `RequestContext` |
+| `chappe-api` | API publique : `Server`, `Router`, `Handler`, `Request`, `Response`, `Filter`, `StaticFileHandler`, `MimeTypes`, `AcceptEncoding`, `RequestContext` |
 | `chappe-http` | Protocoles HTTP/1.1 et HTTP/2, SslHandler TLS, ByteBufferPool |
 | `chappe-core` | Moteur serveur, virtual threads, protocol detection, lifecycle |
-| `chappe-tests` | Tests d'intégration (62 tests) |
+| `chappe-cli` | Launcher CLI standalone `chappe serve` (mini-YAML, fat jar, jlink) — voir `chappe-cli/README.md` |
+| `chappe-tests` | Tests d'intégration |
 | `chappe-bench` | Benchmarks : comparatif Jetty/Helidon/JDK, throughput/latence |
 | `chappe-conformance` | Suite de conformité HTTP (45 tests RFC 9110/9112/9113) |
 | `chappe-examples` | Exemples d'utilisation |
+| `chappe-static-index-maven-plugin` | Plugin Maven : index O(1) + sidecars `.gz` au build (`<compress>gzip</compress>`) |
 
 ### Extension SPI
 Chappe fournit les hooks pour les extensions Servlet/JAX-RS/WebSocket :
@@ -49,7 +51,9 @@ Chappe fournit les hooks pour les extensions Servlet/JAX-RS/WebSocket :
 - **`RequestContext.CURRENT`** — ScopedValue propagé avant chaque handler
 - **`Body.ofOutputStream()`** — streaming body (Servlet OutputStream compat)
 - **`Body.ofFile()`** — zero-copy via `FileChannel.transferTo()` (sendfile)
-- **`StaticFileHandler.builder()`** — fichiers statiques avec fallback chain (filesystem → classpath), cache mémoire, ETag, Cache-Control
+- **`StaticFileHandler.builder()`** — fichiers statiques avec fallback chain (filesystem → classpath), cache mémoire, ETag, Cache-Control, `notFoundFile`/`spaFallback`, `preferPrecompressed` (sidecars `.br`/`.gz`)
+- **`Filter.addHeader()`/`addHeaderIf()`/`addHeaderIfEnv()`/`gzip()`** — middleware déclaratif headers + compression
+- **`AcceptEncoding.parse()`/`accepts()`** — négociation `Accept-Encoding` (RFC 9110 §12.5.3)
 - **`MimeTypes.detect()`** — détection MIME par extension (26+ types)
 
 ### Validation du Serveur

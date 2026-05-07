@@ -10,6 +10,7 @@ import org.apache.maven.project.MavenProject;
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -18,6 +19,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.Properties;
 import java.util.stream.Stream;
+import java.util.zip.GZIPOutputStream;
 
 /**
  * Scans a configured resource root under the project build output and writes an
@@ -58,6 +60,20 @@ public final class IndexMojo extends AbstractMojo {
     @Parameter(defaultValue = "false", property = "chappe.staticIndex.skip")
     private boolean skip;
 
+    /**
+     * Pre-compression scheme for compressible resources. Accepted values: {@code none}
+     * (default) or {@code gzip}. When {@code gzip}, a sidecar {@code <path>.gz} is
+     * generated next to each compressible resource and indexed in
+     * {@code chappe-static-index.properties}, allowing
+     * {@code StaticFileHandler.preferPrecompressed(true)} to serve it zero-copy.
+     */
+    @Parameter(defaultValue = "none", property = "chappe.staticIndex.compress")
+    private String compress;
+
+    /** Minimum size (bytes) below which a resource is not pre-compressed. */
+    @Parameter(defaultValue = "1024", property = "chappe.staticIndex.compressThreshold")
+    private int compressThreshold;
+
     @Override
     public void execute() throws MojoExecutionException {
         if (skip) {
@@ -72,21 +88,65 @@ public final class IndexMojo extends AbstractMojo {
             return;
         }
 
+        boolean doGzip = "gzip".equalsIgnoreCase(compress);
+
         Path indexFile = outputDir.resolve(INDEX_RESOURCE_PATH);
         try {
             Files.createDirectories(indexFile.getParent());
             Properties props = new Properties();
+            int[] gzCount = {0};
             try (Stream<Path> walk = Files.walk(root)) {
-                walk.filter(Files::isRegularFile).forEach(p -> indexEntry(props, outputDir, p));
+                walk.filter(Files::isRegularFile).forEach(p -> {
+                    indexEntry(props, outputDir, p);
+                    if (doGzip && shouldCompress(p, compressThreshold)) {
+                        Path sidecar = generateGzipSidecar(p);
+                        if (sidecar != null) {
+                            indexEntry(props, outputDir, sidecar);
+                            gzCount[0]++;
+                        }
+                    }
+                });
             }
             try (BufferedWriter out = Files.newBufferedWriter(indexFile)) {
                 props.store(out, "Chappe static resources index — generated at build time");
             }
+            String suffix = doGzip ? " (+" + gzCount[0] + " .gz sidecars)" : "";
             getLog().info("chappe-static-index: indexed " + props.size()
-                    + " resources → " + indexFile);
+                    + " resources" + suffix + " → " + indexFile);
         } catch (IOException e) {
             throw new MojoExecutionException("Failed to generate " + INDEX_RESOURCE_PATH, e);
         }
+    }
+
+    private static boolean shouldCompress(Path file, int threshold) {
+        try {
+            if (Files.size(file) < threshold) return false;
+        } catch (IOException ignored) {
+            return false;
+        }
+        String name = file.getFileName().toString().toLowerCase();
+        // Skip already-compressed sidecars and non-compressible types.
+        if (name.endsWith(".gz") || name.endsWith(".br") || name.endsWith(".zip")
+                || name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg")
+                || name.endsWith(".webp") || name.endsWith(".gif") || name.endsWith(".woff")
+                || name.endsWith(".woff2") || name.endsWith(".mp4") || name.endsWith(".webm")
+                || name.endsWith(".pdf") || name.endsWith(".wasm")) {
+            return false;
+        }
+        return true;
+    }
+
+    private Path generateGzipSidecar(Path source) {
+        Path target = source.resolveSibling(source.getFileName() + ".gz");
+        try (InputStream in = Files.newInputStream(source);
+             OutputStream out = Files.newOutputStream(target);
+             GZIPOutputStream gz = new GZIPOutputStream(out)) {
+            in.transferTo(gz);
+        } catch (IOException e) {
+            getLog().warn("Failed to gzip " + source + ": " + e.getMessage());
+            return null;
+        }
+        return target;
     }
 
     // Clés = path classpath (préfixe rootPrefix inclus), ex. "static/index.html".

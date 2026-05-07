@@ -57,6 +57,7 @@
         <subproject>chappe-conformance</subproject>
         <subproject>chappe-examples</subproject>
         <subproject>chappe-static-index-maven-plugin</subproject>
+        <subproject>chappe-cli</subproject>
     </subprojects>
 
     <dependencyManagement>

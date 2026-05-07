@@ -17,8 +17,10 @@ Chappe, le serveur, suit la même règle. Pas de framework de framework. Une `Re
 * **Scoped Values (JEP 506)** — `RequestContext.CURRENT` propagé avant chaque handler, pas de `ThreadLocal`.
 * **Zero-copy I/O** — `FileChannel.transferTo()` pour les fichiers statiques.
 * **JPMS** — `chappe-api`, `chappe-http`, `chappe-core`, chacun avec son `module-info.java`.
+* **CLI standalone** — `chappe serve --config …` (mini-YAML in-house, fat jar, jlink) — voir xref:cli.adoc[CLI standalone].
+* **Compression négociée** — `Filter.gzip()` à la volée + sidecars `.br`/`.gz` zero-copy.
 * **45 tests RFC 9110/9112/9113** — module `chappe-conformance`.
-* **62 tests d'intégration** — module `chappe-tests`.
+* **113 tests d'intégration** — module `chappe-tests`.
 * **Zéro dépendance** — pas de logger transitif, pas de bibliothèque utilitaire externe.
 
 xref:getting-started.adoc[Démarrer →]

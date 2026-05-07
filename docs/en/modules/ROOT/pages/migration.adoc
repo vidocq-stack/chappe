@@ -62,6 +62,11 @@ Migrating a complex Netty pipeline is a major effort — Chappe does not replica
 
 Direct migration: replace `HttpServer.create(addr, backlog)` with `Server.builder().port(...).build()`, and `createContext("/path", handler)` with `Router.builder().get("/path", req -> ...)`.
 
-== Known gaps
+== Production-ready capabilities for migrations
 
-See xref:reference.adoc[Reference]: no native CLI, no exposed negotiated gzip, no configurable SPA fallback. Worth addressing if you expect these capabilities out of the box.
+For "production-ready static server" needs:
+
+* xref:cli.adoc[Standalone CLI] (`chappe serve --config …`) — direct Docker packaging.
+* `Filter.gzip()` + `StaticFileHandler.preferPrecompressed(true)` — negotiated compression + `.br` / `.gz` sidecars.
+* `StaticFileHandler.spaFallback("/index.html")` / `.notFoundFile("/404.html")` — SPA routing and custom 404.
+* `Filter.addHeaderIfEnv("STAGING", "true", "X-Robots-Tag", "noindex, nofollow")` — environment-conditional headers.

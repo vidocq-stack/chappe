@@ -1,5 +1,6 @@
 * xref:index.adoc[Chappe]
 ** xref:getting-started.adoc[Getting started]
 ** xref:concepts.adoc[Concepts]
+** xref:cli.adoc[Standalone CLI]
 ** xref:reference.adoc[Reference]
 ** xref:migration.adoc[Migration]

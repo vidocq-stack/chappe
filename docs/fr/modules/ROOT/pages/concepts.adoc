@@ -45,6 +45,8 @@ StaticFileHandler.builder()
     .addClasspath("META-INF/resources")        // Servlet web fragments, webjars
     .cacheInMemory(true)
     .cacheControl("max-age=3600, public")
+    .preferPrecompressed(true)                  // sidecars .br / .gz si Accept-Encoding
+    .spaFallback("/index.html")                 // ou .notFoundFile("/404.html")
     .build()
 ----
 
@@ -55,11 +57,33 @@ Capacités :
 * `ETag` / `If-None-Match` → 304 (cache mémoire pour ressources classpath)
 * path traversal protection
 * directory index automatique
+* `spaFallback(path)` — sert le fichier en 200 quand la ressource n'existe pas (SPA)
+* `notFoundFile(path)` — sert le fichier en 404 (mutuellement exclusif avec `spaFallback`)
+* `preferPrecompressed(true)` — sidecars `.br` / `.gz` zero-copy quand le client les accepte
 
-[NOTE]
-====
-La compression (`Content-Encoding: gzip` négociée avec `Accept-Encoding`) n'est pas encore exposée dans l'API publique — voir xref:reference.adoc[Référence] pour le statut.
-====
+== Filtres déclaratifs et compression
+
+[source,java]
+----
+Router.builder()
+    .filter(Filter.addHeader("X-Content-Type-Options", "nosniff"))
+    .filter(Filter.addHeaderIfEnv("STAGING", "true",
+            "X-Robots-Tag", "noindex, nofollow"))
+    .filter(Filter.gzip())                       // négocie Accept-Encoding
+    .build();
+----
+
+`Filter.gzip()` skip automatiquement si la réponse a déjà un `Content-Encoding`,
+porte un `Cache-Control: no-transform`, ou si le `Content-Type` n'est pas text-like
+(text/*, application/json, application/xml, application/javascript, +xml, +json…),
+ou si le body fait moins de 1 Ko.
+
+`AcceptEncoding.parse()` / `accepts()` exposent la négociation RFC 9110 §12.5.3
+(q-values, wildcard, `identity` implicite).
+
+== Mode CLI standalone
+
+Pour servir un site statique sans launcher applicatif : voir xref:cli.adoc[CLI standalone].
 
 == `Body` streaming
 
@@ -84,4 +108,4 @@ Utilisé par Foy pour exposer un `ServletOutputStream` natif sans copie.
 == Conformité
 
 * `chappe-conformance` — 45 tests RFC 9110/9112/9113.
-* `chappe-tests` — 62 tests d'intégration (verbes HTTP, headers, async, virtual threads).
+* `chappe-tests` — 113 tests d'intégration (verbes HTTP, headers, filtres, compression, async, virtual threads).

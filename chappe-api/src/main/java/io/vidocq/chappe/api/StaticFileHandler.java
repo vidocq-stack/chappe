@@ -57,14 +57,22 @@ public final class StaticFileHandler implements Handler {
     private final String indexFile;
     private final String cacheControl;
     private final boolean cacheInMemory;
+    private final String notFoundFile;
+    private final String spaFallback;
+    private final boolean preferPrecompressed;
     private final ConcurrentHashMap<String, CachedResource> cache;
 
     private StaticFileHandler(List<ResourceSource> sources, String indexFile,
-                              String cacheControl, boolean cacheInMemory) {
+                              String cacheControl, boolean cacheInMemory,
+                              String notFoundFile, String spaFallback,
+                              boolean preferPrecompressed) {
         this.sources = List.copyOf(sources);
         this.indexFile = indexFile;
         this.cacheControl = cacheControl;
         this.cacheInMemory = cacheInMemory;
+        this.notFoundFile = notFoundFile;
+        this.spaFallback = spaFallback;
+        this.preferPrecompressed = preferPrecompressed;
         this.cache = cacheInMemory ? new ConcurrentHashMap<>() : null;
     }
 
@@ -100,11 +108,27 @@ public final class StaticFileHandler implements Handler {
 
         String relative = requestPath.startsWith("/") ? requestPath.substring(1) : requestPath;
 
+        // Précompression : tente .br puis .gz si client compatible
+        if (preferPrecompressed && !relative.isEmpty() && !relative.endsWith("/")) {
+            String acceptEnc = request.header("Accept-Encoding").orElse(null);
+            String[][] sidecars = { {"br", ".br"}, {"gzip", ".gz"} };
+            for (var s : sidecars) {
+                if (!AcceptEncoding.accepts(acceptEnc, s[0])) continue;
+                String sidecarPath = relative + s[1];
+                for (var source : sources) {
+                    var resource = source.resolve(sidecarPath, indexFile);
+                    if (resource != null) {
+                        return serveEncoded(resource, relative, s[0]);
+                    }
+                }
+            }
+        }
+
         // Cache hit ?
         if (cache != null) {
             var cached = cache.get(relative);
             if (cached != null) {
-                return serveCached(request, cached);
+                return serveCached(request, cached, StatusCode.OK);
             }
         }
 
@@ -115,20 +139,57 @@ public final class StaticFileHandler implements Handler {
                 // Mettre en cache si applicable
                 if (cache != null && resource.size() >= 0 && resource.size() <= MAX_CACHE_ENTRY_SIZE) {
                     var cached = cacheResource(relative, resource);
-                    return serveCached(request, cached);
+                    return serveCached(request, cached, StatusCode.OK);
                 }
-                return serveResource(request, resource);
+                return serveResource(request, resource, StatusCode.OK);
             }
+        }
+
+        // Fallback (SPA ou 404 page)
+        if (spaFallback != null) {
+            Response fb = serveFallback(request, spaFallback, StatusCode.OK);
+            if (fb != null) return fb;
+        } else if (notFoundFile != null) {
+            Response fb = serveFallback(request, notFoundFile, StatusCode.NOT_FOUND);
+            if (fb != null) return fb;
         }
 
         return Response.of(StatusCode.NOT_FOUND);
     }
 
+    /** Sert un sidecar pré-compressé : Content-Type basé sur l'extension d'origine, ajoute Content-Encoding + Vary. */
+    private Response serveEncoded(ResolvedResource resource, String originalRelative, String encoding) {
+        var builder = Response.builder()
+                .status(StatusCode.OK)
+                .header("Content-Type", MimeTypes.detect(originalRelative))
+                .header("Content-Encoding", encoding)
+                .header("Vary", "Accept-Encoding");
+        if (resource.lastModified() != null) {
+            builder.header("Last-Modified", IMF_FIXDATE.format(resource.lastModified()));
+        }
+        if (cacheControl != null) {
+            builder.header("Cache-Control", cacheControl);
+        }
+        builder.body(resource.toBody());
+        return builder.build();
+    }
+
+    private Response serveFallback(Request request, String fallbackPath, StatusCode status) throws IOException {
+        String fb = fallbackPath.startsWith("/") ? fallbackPath.substring(1) : fallbackPath;
+        for (var source : sources) {
+            var resource = source.resolve(fb, indexFile);
+            if (resource != null) {
+                return serveResource(request, resource, status);
+            }
+        }
+        return null;
+    }
+
     // ── Serve helpers ──
 
-    private Response serveResource(Request request, ResolvedResource resource) throws IOException {
-        // If-Modified-Since
-        if (resource.lastModified() != null) {
+    private Response serveResource(Request request, ResolvedResource resource, StatusCode status) throws IOException {
+        // If-Modified-Since (only for OK responses — fallbacks always serve fresh)
+        if (status == StatusCode.OK && resource.lastModified() != null) {
             String ims = request.header("If-Modified-Since").orElse(null);
             if (ims != null) {
                 try {
@@ -141,7 +202,7 @@ public final class StaticFileHandler implements Handler {
         }
 
         var builder = Response.builder()
-                .status(StatusCode.OK)
+                .status(status)
                 .header("Content-Type", MimeTypes.detect(resource.name()));
 
         if (resource.lastModified() != null) {
@@ -155,15 +216,17 @@ public final class StaticFileHandler implements Handler {
         return builder.build();
     }
 
-    private Response serveCached(Request request, CachedResource cached) {
-        // ETag / If-None-Match
-        String inm = request.header("If-None-Match").orElse(null);
-        if (inm != null && inm.equals(cached.etag)) {
-            return Response.of(StatusCode.NOT_MODIFIED);
+    private Response serveCached(Request request, CachedResource cached, StatusCode status) {
+        // ETag / If-None-Match (only for OK responses)
+        if (status == StatusCode.OK) {
+            String inm = request.header("If-None-Match").orElse(null);
+            if (inm != null && inm.equals(cached.etag)) {
+                return Response.of(StatusCode.NOT_MODIFIED);
+            }
         }
 
         var builder = Response.builder()
-                .status(StatusCode.OK)
+                .status(status)
                 .header("Content-Type", cached.contentType)
                 .header("ETag", cached.etag);
 
@@ -385,6 +448,9 @@ public final class StaticFileHandler implements Handler {
         private String indexFile = "index.html";
         private String cacheControl;
         private boolean cacheInMemory;
+        private String notFoundFile;
+        private String spaFallback;
+        private boolean preferPrecompressed;
 
         private Builder() {}
 
@@ -427,12 +493,46 @@ public final class StaticFileHandler implements Handler {
             return this;
         }
 
+        /**
+         * Fichier servi avec status 404 quand la ressource demandée n'existe pas.
+         * Mutuellement exclusif avec {@link #spaFallback(String)}.
+         */
+        public Builder notFoundFile(String path) {
+            this.notFoundFile = path;
+            return this;
+        }
+
+        /**
+         * Fichier servi avec status 200 quand la ressource demandée n'existe pas
+         * (typiquement {@code /index.html} pour les SPA à routing client).
+         * Mutuellement exclusif avec {@link #notFoundFile(String)}.
+         */
+        public Builder spaFallback(String path) {
+            this.spaFallback = path;
+            return this;
+        }
+
+        /**
+         * Sert les sidecars pré-compressés ({@code path.br}, {@code path.gz}) en
+         * priorité sur l'original quand le client les accepte. Aucune génération
+         * runtime — les sidecars doivent exister sur le filesystem (typiquement
+         * produits par {@code chappe-static-index-maven-plugin}).
+         */
+        public Builder preferPrecompressed(boolean enabled) {
+            this.preferPrecompressed = enabled;
+            return this;
+        }
+
         /** Construit le handler. Au moins une source doit être configurée. */
         public Handler build() {
             if (sources.isEmpty()) {
                 throw new IllegalStateException("At least one source (addPath or addClasspath) is required");
             }
-            return new StaticFileHandler(sources, indexFile, cacheControl, cacheInMemory);
+            if (notFoundFile != null && spaFallback != null) {
+                throw new IllegalStateException("notFoundFile and spaFallback are mutually exclusive");
+            }
+            return new StaticFileHandler(sources, indexFile, cacheControl, cacheInMemory,
+                    notFoundFile, spaFallback, preferPrecompressed);
         }
     }
 }
