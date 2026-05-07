@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# chappe — launcher script for the Chappe CLI
+#
+# Usage:
+#   chappe serve [--config FILE] [flags...]
+#   chappe --help
+#
+# Resolves the shaded jar relative to this script when installed via Maven, or
+# from $CHAPPE_HOME/lib/chappe-cli-shaded.jar when packaged in a Docker image.
+
+set -euo pipefail
+
+# Resolve the directory containing this script (handles symlinks).
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+while [[ -L "$SCRIPT_PATH" ]]; do
+    SCRIPT_DIR=$(cd -P "$(dirname "$SCRIPT_PATH")" >/dev/null 2>&1 && pwd)
+    SCRIPT_PATH=$(readlink "$SCRIPT_PATH")
+    [[ "$SCRIPT_PATH" != /* ]] && SCRIPT_PATH="$SCRIPT_DIR/$SCRIPT_PATH"
+done
+SCRIPT_DIR=$(cd -P "$(dirname "$SCRIPT_PATH")" >/dev/null 2>&1 && pwd)
+
+# Locate the jar: prefer $CHAPPE_HOME, then the script's parent, then target/.
+locate_jar() {
+    if [[ -n "${CHAPPE_HOME:-}" && -f "$CHAPPE_HOME/lib/chappe-cli-shaded.jar" ]]; then
+        echo "$CHAPPE_HOME/lib/chappe-cli-shaded.jar"
+        return
+    fi
+    local candidate
+    for candidate in \
+        "$SCRIPT_DIR/../lib/chappe-cli-shaded.jar" \
+        "$SCRIPT_DIR/../target/chappe-cli-"*"-shaded.jar"; do
+        if [[ -f "$candidate" ]]; then
+            echo "$candidate"
+            return
+        fi
+    done
+    echo "ERROR: chappe-cli-shaded.jar not found (checked CHAPPE_HOME and script-relative paths)" >&2
+    exit 1
+}
+
+JAR=$(locate_jar)
+JAVA_OPTS="${JAVA_OPTS:---enable-preview}"
+
+exec java $JAVA_OPTS -jar "$JAR" "$@"

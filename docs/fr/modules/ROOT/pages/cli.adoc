@@ -1,0 +1,161 @@
+= CLI standalone
+:description: `chappe serve` — sert un site statique sans launcher Java applicatif.
+
+[.lead]
+Le module `chappe-cli` fournit la sous-commande `chappe serve` : configuration via
+fichier YAML ou flags, fat jar autonome, image jlink minimale pour Docker. Zéro
+dépendance hors JDK — le mini-parser YAML, le merge config et la négociation de
+compression tiennent dans `chappe-cli/`.
+
+== Build et lancement
+
+[source,bash]
+----
+mvn -ntp -pl chappe-cli -am package
+java --enable-preview -jar chappe-cli/target/chappe-cli-*-shaded.jar \
+     serve --root /var/www/site --port 8080 --gzip
+----
+
+Ou via le script wrapper :
+
+[source,bash]
+----
+export CHAPPE_HOME=/opt/chappe
+chappe serve --config /etc/chappe/config.yml
+----
+
+== Fichier de configuration YAML
+
+Subset documenté : maps imbriquées, listes inline `[a, b]` et bloc `- item`, scalaires
+string/int/bool, commentaires `#`. Pas d'anchors, de tags `!!`, de multilignes.
+
+[source,yaml]
+----
+server:
+  port: 8080
+  bind: 0.0.0.0
+
+static:
+  root: /var/www/site
+  fallback: /404.html              # servi avec status 404
+  spa-fallback: /index.html        # mutuellement exclusif (SPA mode, status 200)
+  index-files: [index.html]
+  cache-control: "max-age=3600, public"
+  gzip: true                        # négocié via Accept-Encoding
+
+headers:
+  always:                           # injectés sur chaque réponse
+    X-Content-Type-Options: "nosniff"
+    Referrer-Policy: "strict-origin-when-cross-origin"
+  staging:                          # actif si l'env var STAGING=true
+    X-Robots-Tag: "noindex, nofollow"
+
+logging:
+  level: INFO
+  access-log: false
+----
+
+== Flags CLI
+
+Les flags renseignés ont priorité sur les valeurs YAML.
+
+[cols="1,3"]
+|===
+| Flag | Effet
+
+| `--config FILE`         | charge un fichier YAML
+| `--root DIR`            | override `static.root`
+| `--port N`              | override `server.port` (défaut 8080)
+| `--bind ADDR`           | override `server.bind` (défaut 0.0.0.0)
+| `--fallback PATH`       | override `static.fallback` (status 404)
+| `--spa-fallback PATH`   | active le mode SPA (status 200 sur 404)
+| `--cache-control STR`   | override `static.cache-control`
+| `--gzip` / `--no-gzip`  | active/désactive la compression
+| `--header KEY=VALUE`    | ajoute un header (répétable, merge dans `headers.always`)
+| `-h, --help`            | aide
+|===
+
+== Compression
+
+Avec `--gzip` (ou `static.gzip: true`) :
+
+* sert en priorité les sidecars `.br` ou `.gz` quand présents (zero-copy via `FileChannel.transferTo`),
+* sinon compresse à la volée pour les `Content-Type` text-like > 1 Ko, en émettant
+  `Content-Encoding: gzip` et `Vary: Accept-Encoding`,
+* skip automatique si `Cache-Control: no-transform` ou `Content-Encoding` déjà fixé.
+
+Brotli n'est pas généré au runtime (le JDK 25 ne fournit pas d'encodeur brotli),
+mais les sidecars `.br` produits par un pipeline build sont servis si
+`Accept-Encoding: br`. Pour générer les `.gz` au build :
+
+[source,xml]
+----
+<plugin>
+  <groupId>io.vidocq.chappe</groupId>
+  <artifactId>chappe-static-index-maven-plugin</artifactId>
+  <executions>
+    <execution>
+      <goals><goal>index</goal></goals>
+      <configuration><compress>gzip</compress></configuration>
+    </execution>
+  </executions>
+</plugin>
+----
+
+== Headers conditionnels
+
+`headers.staging` est appliqué uniquement si la variable d'environnement
+`STAGING` vaut exactement `true`. Côté API, voir `Filter.addHeaderIfEnv` :
+
+[source,java]
+----
+Router.builder()
+    .filter(Filter.addHeader("X-Content-Type-Options", "nosniff"))
+    .filter(Filter.addHeaderIfEnv("STAGING", "true",
+            "X-Robots-Tag", "noindex, nofollow"))
+    .build();
+----
+
+== Docker
+
+=== Image fat-jar
+
+[source,dockerfile]
+----
+FROM eclipse-temurin:25-jre AS runtime
+COPY chappe-cli/target/chappe-cli-*-shaded.jar /opt/chappe/lib/chappe-cli-shaded.jar
+COPY chappe-cli/src/main/scripts/chappe         /opt/chappe/bin/chappe
+ENV PATH=/opt/chappe/bin:$PATH CHAPPE_HOME=/opt/chappe
+COPY site/      /var/www/site
+COPY config.yml /etc/chappe/config.yml
+EXPOSE 8080
+ENTRYPOINT ["chappe", "serve", "--config", "/etc/chappe/config.yml"]
+----
+
+=== Image jlink (~50 Mo)
+
+[source,bash]
+----
+jlink \
+  --module-path "chappe-cli/target:$JAVA_HOME/jmods" \
+  --add-modules io.vidocq.chappe.cli,jdk.crypto.ec,jdk.localedata \
+  --launcher chappe=io.vidocq.chappe.cli/io.vidocq.chappe.cli.Main \
+  --enable-preview --strip-debug --no-man-pages --no-header-files \
+  --output target/chappe-runtime
+----
+
+[source,dockerfile]
+----
+FROM debian:bookworm-slim
+COPY target/chappe-runtime /opt/chappe
+ENV PATH=/opt/chappe/bin:$PATH
+COPY site/ /var/www/site
+ENTRYPOINT ["chappe", "serve", "--root", "/var/www/site"]
+----
+
+== Limitations
+
+* TLS non géré par la CLI — placer derrière un reverse proxy (nginx, Caddy) ou écrire un launcher.
+* Pas de hot reload de la config — un changement nécessite un redémarrage.
+* Brotli runtime : non généré (sidecars `.br` uniquement).
+* Mini-YAML : pas de multilignes ni anchors. Pour des configs complexes, écrire un launcher Java.
