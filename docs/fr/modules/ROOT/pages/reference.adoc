@@ -1,76 +1,236 @@
 = Référence
-:description: Artefacts Maven, packages publics, conformité HTTP, plugins.
+:description: Coordonnées Maven, modules JPMS, API publique, configuration YAML/CLI, plugin Maven.
+
+[.lead]
+Cette page est la référence canonique de Chappe : artefacts Maven, modules JPMS exportés, API publique majeure, fichier de configuration YAML de la CLI, flags de la CLI, plugin de pré-compression. Pour la conformité RFC, voir xref:concepts.adoc[Concepts] et `chappe-conformance` dans le repo.
 
 == Artefacts Maven
 
-[cols="1,3"]
+[cols="2,3"]
 |===
 | Artefact | Rôle
 
 | `io.vidocq.chappe:chappe-api:0.1.0-SNAPSHOT`
-| API publique (`Server`, `Router`, `Handler`, `Filter`, `Request`, `Response`, `StaticFileHandler`, `AcceptEncoding`, `MimeTypes`, `RequestContext`)
+| API publique : `Server`, `Router`, `Handler`, `Filter`, `Request`, `Response`, `Body`, `StatusCode`, `MimeTypes`, `StaticFileHandler`, `AcceptEncoding`, `RequestContext`, `ServerProvider`.
 
 | `io.vidocq.chappe:chappe-http:0.1.0-SNAPSHOT`
-| Couche HTTP/1.1 + HTTP/2, TLS, ByteBufferPool
+| Couche HTTP/1.1 + HTTP/2, TLS, `ByteBufferPool`, HPACK.
 
 | `io.vidocq.chappe:chappe-core:0.1.0-SNAPSHOT`
-| Moteur serveur (virtual threads, protocol detection, lifecycle)
+| Moteur serveur (virtual threads, protocol detection, lifecycle, `ChappeServerProvider`).
 
 | `io.vidocq.chappe:chappe-cli:0.1.0-SNAPSHOT`
-| Launcher CLI standalone `chappe serve` (fat jar + scripts) — voir xref:cli.adoc[CLI standalone]
+| Launcher CLI standalone `chappe serve` (fat jar + scripts).
 
 | `io.vidocq.chappe:chappe-tests:0.1.0-SNAPSHOT`
-| Tests d'intégration (113 tests)
+| Tests d'intégration (113 tests).
 
 | `io.vidocq.chappe:chappe-conformance:0.1.0-SNAPSHOT`
-| Conformité HTTP (45 tests RFC 9110/9112/9113)
+| Conformité HTTP (45 tests RFC 9110/9112/9113).
 
 | `io.vidocq.chappe:chappe-bench:0.1.0-SNAPSHOT`
-| Benchmarks (Jetty, Helidon, JDK)
+| Benchmarks comparatifs (Jetty, Helidon, JDK HttpServer).
 
 | `io.vidocq.chappe:chappe-static-index-maven-plugin:0.1.0-SNAPSHOT`
-| Plugin Maven : index statique au build, option `<compress>gzip</compress>` pour générer les sidecars `.gz`
+| Plugin Maven : index O(1) + sidecars `.gz` au build (option `<compress>gzip</compress>`).
 
 | `io.vidocq.chappe:chappe-examples:0.1.0-SNAPSHOT`
-| Exemples
+| Exemples d'utilisation.
 |===
 
-== Packages publics (`chappe-api`)
+== Modules JPMS
 
-* `io.vidocq.chappe.api` — `Server`, `Router`, `Handler`, `Filter`, `Request`, `Response`, `Body`, `StatusCode`, `MimeTypes`, `StaticFileHandler`, `AcceptEncoding`, `RequestContext`
+[cols="2,3"]
+|===
+| Module | Exports / declarations
 
-== Capacités HTTP
+| `io.vidocq.chappe.api`
+| `exports io.vidocq.chappe.api;` +
+`uses io.vidocq.chappe.api.ServerProvider;`
 
-* HTTP/1.1 — RFC 9110, RFC 9112
-* HTTP/2 — RFC 9113
-* TLS 1.3 (et 1.2)
-* HTTP/3 / QUIC — `[TODO]` planifié
-* WebSocket — `[TODO]` planifié
+| `io.vidocq.chappe.http`
+| `requires io.vidocq.chappe.api;` +
+`exports io.vidocq.chappe.http;` +
+`exports io.vidocq.chappe.http.h2;`
 
-== `StaticFileHandler` — capacités explicites
+| `io.vidocq.chappe.core`
+| `requires io.vidocq.chappe.api;` +
+`requires io.vidocq.chappe.http;` +
+`exports io.vidocq.chappe.core;` +
+`provides io.vidocq.chappe.api.ServerProvider with io.vidocq.chappe.core.ChappeServerProvider;`
 
-* MIME auto-detection (26+ types)
-* `Last-Modified` / `If-Modified-Since` → 304
-* `ETag` / `If-None-Match` → 304
-* path traversal protection
-* directory index (`index.html`, `index.htm`)
-* fallback chain filesystem → classpath
-* zero-copy (`FileChannel.transferTo()`) sur filesystem
-* `notFoundFile(path)` — fichier servi en 404 (mutuellement exclusif avec `spaFallback`)
-* `spaFallback(path)` — mode SPA, sert le fichier en 200 sur 404
-* `preferPrecompressed(true)` — sert les sidecars `.br` / `.gz` en priorité quand l'`Accept-Encoding` les inclut
+| `io.vidocq.chappe.cli`
+| `requires io.vidocq.chappe.api;` +
+`requires io.vidocq.chappe.core;` +
+`requires java.net.http;`
+|===
 
-== `Filter` — helpers déclaratifs
+`chappe-api` n'`opens` rien. Aucun module n'expose son interne via réflexion : tout passe par les `exports` documentés ci-dessus.
 
-* `Filter.addHeader(name, value)` — injecte un header sur chaque réponse.
-* `Filter.addHeaderIf(BooleanSupplier, name, value)` — header conditionnel (prédicat évalué per-request).
-* `Filter.addHeaderIfEnv(envVar, expectedValue, name, value)` — gate sur une variable d'environnement (typique : `STAGING=true` pour `X-Robots-Tag: noindex`).
-* `Filter.gzip()` / `Filter.gzip(threshold)` — compression à la volée négociée via `Accept-Encoding`. Skip si déjà encodé, `Cache-Control: no-transform`, MIME non text-like, ou taille < seuil (1024 par défaut).
+== API publique majeure (`io.vidocq.chappe.api`)
 
-== `AcceptEncoding`
+=== `Server`
 
-* `AcceptEncoding.parse(header)` — liste d'`Entry(name, qvalue)`.
-* `AcceptEncoding.accepts(header, coding)` — règle RFC 9110 §12.5.3 (q-values, wildcard, `identity` implicite).
+[source,java]
+----
+public sealed interface Server extends AutoCloseable {
+    void start();
+    void stop();
+    int port();
+    static ServerBuilder builder();
+}
+----
+
+`ServerBuilder` :
+
+* `port(int)`
+* `bindAddress(String)`
+* `tls(SSLContext)`
+* `alpnProtocols(String...)`
+* `handler(Handler)`
+* `executor(Executor)` (par défaut : virtual threads)
+* `build()` retourne un `Server`
+
+=== `Router`
+
+[source,java]
+----
+Router.builder()
+    .get(path, handler)
+    .post(path, handler)
+    .put(path, handler)
+    .delete(path, handler)
+    .patch(path, handler)
+    .head(path, handler)            // auto pour GET aussi
+    .options(path, handler)
+    .group(prefix, sub -> sub.filter(...).get(...))
+    .mount(prefix, handler)
+    .filter(filter)
+    .notFound(handler)
+    .build();
+----
+
+Comportements :
+
+* `405 Method Not Allowed` automatique avec header `Allow` quand le path matche mais pas la méthode.
+* Trailing slash transparent : `/users` et `/users/` matchent la même route.
+* Percent-decoding sur path params : `/users/John%20Doe` → `pathParam("id") = "John Doe"`.
+
+=== `Filter`
+
+[source,java]
+----
+public interface Filter {
+    Handler apply(Handler next);
+
+    static Filter addHeader(String name, String value);
+    static Filter addHeaderIf(BooleanSupplier when, String name, String value);
+    static Filter addHeaderIfEnv(String envVar, String expected, String name, String value);
+    static Filter gzip();
+    static Filter gzip(int threshold);
+
+    default Filter andThen(Filter next);
+}
+----
+
+=== `StaticFileHandler`
+
+[source,java]
+----
+StaticFileHandler.builder()
+    .addPath(Path)                       // filesystem (zero-copy sendfile)
+    .addClasspath(String resourceRoot)   // classpath (jar, module)
+    .cacheInMemory(boolean)              // cache ETag pour ressources classpath
+    .cacheControl(String)
+    .preferPrecompressed(boolean)        // sidecars .br / .gz si Accept-Encoding
+    .spaFallback(String)                 // 200 sur 404 (mode SPA)
+    .notFoundFile(String)                // 404 sur 404 (mutuellement exclusif)
+    .indexFiles(String...)
+    .build();
+----
+
+=== `AcceptEncoding`
+
+[source,java]
+----
+record Entry(String coding, double qvalue) {}
+
+List<Entry>  AcceptEncoding.parse(String header);
+boolean      AcceptEncoding.accepts(String header, String coding);
+----
+
+Algorithme RFC 9110 §12.5.3 : q-values, wildcard, `identity` implicite.
+
+=== `MimeTypes`
+
+[source,java]
+----
+String mime = MimeTypes.detect(path);    // 26+ types : text/html, application/json, image/png, ...
+----
+
+=== `RequestContext`
+
+[source,java]
+----
+public final class RequestContext {
+    public static final ScopedValue<RequestContext> CURRENT;
+    public static Request currentRequest();
+    public Map<String, Object> attributes();
+}
+----
+
+== Configuration CLI `chappe serve`
+
+[#_cli_chappe_serve]
+=== Flags
+
+[cols="2,3"]
+|===
+| Flag | Effet
+
+| `--config FILE`         | charge un fichier YAML
+| `--root DIR`            | override `static.root`
+| `--port N`              | override `server.port` (défaut 8080)
+| `--bind ADDR`           | override `server.bind` (défaut 0.0.0.0)
+| `--fallback PATH`       | override `static.fallback` (status 404)
+| `--spa-fallback PATH`   | active le mode SPA (status 200 sur 404)
+| `--cache-control STR`   | override `static.cache-control`
+| `--gzip` / `--no-gzip`  | active/désactive la compression
+| `--header KEY=VALUE`    | ajoute un header (répétable, merge dans `headers.always`)
+| `-h, --help`            | aide
+|===
+
+Les flags ont priorité sur le YAML.
+
+=== Schéma YAML
+
+[source,yaml]
+----
+server:
+  port: 8080
+  bind: 0.0.0.0
+
+static:
+  root: /var/www/site
+  fallback: /404.html               # status 404
+  spa-fallback: /index.html         # status 200 (mutuellement exclusif avec fallback)
+  index-files: [index.html]
+  cache-control: "max-age=3600, public"
+  gzip: true                         # négocié via Accept-Encoding
+
+headers:
+  always:                            # injectés sur chaque réponse
+    X-Content-Type-Options: "nosniff"
+    Referrer-Policy: "strict-origin-when-cross-origin"
+  staging:                           # actif si l'env var STAGING=true
+    X-Robots-Tag: "noindex, nofollow"
+
+logging:
+  level: INFO
+  access-log: false
+----
+
+Subset documenté : maps imbriquées, listes inline `[a, b]` et bloc `- item`, scalaires string/int/bool, commentaires `#`. Pas d'anchors, de tags `!!`, de multilignes.
 
 == Plugin Maven : pré-compression
 
@@ -91,16 +251,38 @@
 </plugin>
 ----
 
-Les sidecars `.gz` générés sont indexés dans `META-INF/chappe-static-index.properties` —
-servis zero-copy par `StaticFileHandler.preferPrecompressed(true)`.
+Génère :
 
-== Bugs et benchmarks
+* `META-INF/chappe-static-index.properties` — index O(1) (chemin → taille + ETag).
+* Sidecars `.gz` pour les fichiers > seuil.
 
-* `chappe/BUG.md`
-* `chappe/BENCH.md`
+Servis zero-copy par `StaticFileHandler.preferPrecompressed(true)`.
+
+== Capacités HTTP
+
+[cols="2,1,3"]
+|===
+| Spec | État | Notes
+
+| RFC 9110 (HTTP Semantics) | ✅ | Date, HEAD/204/304, 405+Allow, Host, 100-continue
+| RFC 9112 (HTTP/1.1)       | ✅ | request parsing, chunked, keep-alive, pipelining
+| RFC 9113 (HTTP/2)         | ✅ | framing, flow control, lifecycle, GOAWAY, SETTINGS, CONTINUATION
+| RFC 7541 (HPACK)          | ✅ | table statique, table dynamique, Huffman encode/decode
+| RFC 9114 (HTTP/3)         | ⏳ | planifié — voir lien:{repo-chappe}/blob/main/BUG.md[BUG.md]
+| RFC 8441 (WebSocket H2)   | ⏳ | planifié
+|===
 
 == Compatibilité
 
-* Java 25, Maven 4.0.0-rc-5
-* JPMS strict
-* Zéro dépendance runtime
+* **Java** : 25 (LTS), `--enable-preview` requis tant que `ScopedValue` reste preview dans certains usages.
+* **Maven** : 4.0.0-rc-5 (POM `modelVersion 4.1.0`).
+* **JPMS** strict : aucun classpath, aucun `--add-opens`.
+
+== Bugs et benchmarks
+
+* lien:{repo-chappe}/blob/main/BUG.md[BUG.md] — bugs reproductibles, statut, repro minimal.
+* lien:{repo-chappe}/blob/main/BENCH.md[BENCH.md] — chiffres de performance, hardware, JVM, commande.
+
+== Source
+
+Tout le code et la roadmap sont sur {repo-chappe}.

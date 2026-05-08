@@ -1,0 +1,246 @@
+= Fonctionnement interne
+:description: Architecture en couches, pipelines HTTP/1.1 vs HTTP/2 vs HTTP/3, modèle threading.
+
+[.lead]
+Cette page décrit ce que Chappe fait quand une requête arrive : comment la connexion est acceptée, comment le préambule TCP/TLS est inspecté, comment HTTP/1.1 et HTTP/2 sont parsés, comment le `Router` est invoqué, comment la réponse est écrite. Aucun chiffre de performance ici — voir lien:{repo-chappe}/blob/main/BENCH.md[BENCH.md].
+
+== Architecture en couches
+
+[plantuml]
+....
+@startuml
+skinparam componentStyle rectangle
+skinparam shadowing false
+
+package "chappe-cli" as cli {
+    component "chappe serve\n(launcher CLI)" as Cli
+}
+
+package "chappe-core" as core {
+    component "ChappeServer\n(lifecycle, accept loop, VT executor)" as Core
+    component "ChappeServerProvider\n(SPI ServiceLoader)" as Provider
+}
+
+package "chappe-http" as http {
+    component "HttpConnection\n(HTTP/1.1)" as H11
+    component "Http2Connection\n(HTTP/2)" as H2
+    component "SslHandler\n(TLS · ALPN)" as Tls
+    component "ByteBufferPool" as Pool
+}
+
+package "chappe-api" as api {
+    component "Server · Router · Handler\nRequest · Response · Filter\nStaticFileHandler · MimeTypes" as Api
+}
+
+Cli --> Core
+Core --> Tls
+Core --> H11
+Core --> H2
+Tls --> H11
+Tls --> H2
+H11 --> Api
+H2 --> Api
+Provider ..> Api : provides ServerProvider
+H11 ..> Pool
+H2 ..> Pool
+@enduml
+....
+
+* `chappe-api` n'a aucune dépendance interne — elle expose les interfaces.
+* `chappe-http` ne dépend que de `chappe-api`.
+* `chappe-core` orchestre et fournit l'implémentation `ServerProvider` via `ServiceLoader`.
+
+== Boucle d'acceptation
+
+. `ChappeServer#start()` ouvre un `ServerSocketChannel` (mode bloquant).
+. Un virtual thread (« acceptor ») boucle sur `accept()`.
+. Pour chaque socket, un nouveau virtual thread est lancé via `Executors.newVirtualThreadPerTaskExecutor()`.
+. Le thread inspecte le préambule (`TLS ClientHello` ou requête HTTP/1.1 cleartext) puis dispatch vers `HttpConnection` ou `Http2Connection`.
+
+Pas de `Selector` applicatif. La VM gère le multiplexage des virtual threads sur les carrier threads plateforme.
+
+== Détection de protocole
+
+[mermaid]
+....
+flowchart TD
+    A[Socket acceptée] --> B{TLS ?}
+    B -- non --> C[Lecture des 24 premiers octets]
+    C --> D{H2 preface<br/>'PRI * HTTP/2.0'... ?}
+    D -- oui --> E[Http2Connection<br/>cleartext h2c]
+    D -- non --> F[HttpConnection<br/>HTTP/1.1]
+    F --> G{Upgrade: h2c ?}
+    G -- oui --> E
+    G -- non --> H[Pipeline HTTP/1.1]
+    B -- oui --> I[SslHandler<br/>handshake TLS]
+    I --> J{ALPN ?}
+    J -- h2 --> K[Http2Connection]
+    J -- http/1.1 --> H
+....
+
+== Pipeline HTTP/1.1 — séquence requête
+
+[mermaid]
+....
+sequenceDiagram
+    autonumber
+    participant Cli as Client
+    participant Conn as HttpConnection
+    participant Parser as HttpRequestParser
+    participant Body as HttpBodyReader
+    participant Router as Router
+    participant Handler as Handler
+    participant Writer as HttpResponseWriter
+
+    Cli->>Conn: bytes (request line + headers)
+    Conn->>Parser: parse()
+    Parser-->>Conn: HttpRequestImpl (headers parsés)
+    alt body Content-Length / chunked
+        Conn->>Body: lazy stream
+        Body-->>Handler: req.body().asInputStream()
+    end
+    Conn->>Router: route(request)
+    Router->>Handler: handle(request)
+    Handler-->>Router: Response
+    Router-->>Conn: Response
+    Conn->>Writer: writeStatusLine + headers
+    alt FileBody
+        Writer->>Writer: FileChannel.transferTo()<br/>(zero-copy)
+    else InputStreamBody / ByteArrayBody
+        Writer->>Writer: write chunks
+    end
+    Conn->>Cli: keep-alive (next request)
+....
+
+Composants impliqués (`io.vidocq.chappe.http`) :
+
+* `HttpRequestParser` — parse request line + headers en zero-allocation sur le hot path (réutilise les buffers du `ByteBufferPool`).
+* `ChunkedInputStream` / `FixedLengthInputStream` — lecture body lazy.
+* `HttpResponseWriter` — écriture coalescée (status line + headers + premier chunk en un seul `write`).
+* `ArrayHeaders` — stockage compact, lookup case-insensitive sans allocation.
+
+== Pipeline HTTP/2 — séquence requête
+
+[mermaid]
+....
+sequenceDiagram
+    autonumber
+    participant Cli as Client (h2)
+    participant Conn as Http2Connection
+    participant Reader as Http2FrameReader
+    participant Hpack as HpackDecoder
+    participant Stream as Http2Stream
+    participant Router as Router
+    participant Writer as Http2FrameWriter
+    participant Enc as HpackEncoder
+
+    Cli->>Conn: SETTINGS frame
+    Conn->>Cli: SETTINGS ACK
+    loop frames entrants
+        Cli->>Reader: HEADERS frame (stream id N)
+        Reader->>Hpack: decode block
+        Hpack-->>Stream: pseudo-headers (:method, :path, ...)
+        opt CONTINUATION
+            Cli->>Reader: CONTINUATION
+        end
+        opt DATA
+            Cli->>Reader: DATA → Http2BodyInputStream
+            Reader->>Conn: WINDOW_UPDATE après consommation
+        end
+    end
+    Stream->>Router: route(request)
+    Router-->>Stream: Response
+    Stream->>Enc: encode response headers
+    Enc-->>Writer: HEADERS frame
+    Writer->>Cli: HEADERS + DATA(s) + END_STREAM
+    Conn->>Cli: PING / GOAWAY (lifecycle)
+....
+
+Implémentation (`io.vidocq.chappe.http.h2`) :
+
+* `Http2FrameReader` / `Http2FrameWriter` — framing RFC 9113.
+* `HpackEncoder` / `HpackDecoder` — RFC 7541 (table statique 61 entrées, table dynamique paramétrée par `SETTINGS`, Huffman pour les valeurs courtes).
+* `HpackHuffman` — tables d'encodage/décodage générées statiquement.
+* `Http2Settings` — `HEADER_TABLE_SIZE`, `MAX_CONCURRENT_STREAMS`, `INITIAL_WINDOW_SIZE`, `MAX_FRAME_SIZE`, `MAX_HEADER_LIST_SIZE`.
+* `Http2Stream` — état FSM (idle → open → half-closed local/remote → closed).
+* `Http2ConnectionException` / `Http2ErrorCode` — gestion `GOAWAY` / `RST_STREAM`.
+
+== Pipeline HTTP/3 — esquisse
+
+HTTP/3 n'est pas encore actif. Le pipeline cible :
+
+[mermaid]
+....
+sequenceDiagram
+    autonumber
+    participant Cli as Client (h3)
+    participant Quic as QUIC transport
+    participant Conn as Http3Connection
+    participant Qpack as QPACK decoder
+    participant Router as Router
+
+    Cli->>Quic: QUIC packets (streams)
+    Quic->>Conn: bidirectional stream<br/>(request stream)
+    Conn->>Qpack: decode HEADERS frame
+    Qpack-->>Conn: pseudo-headers
+    Conn->>Router: route(request)
+    Router-->>Conn: Response
+    Conn->>Quic: HEADERS + DATA frames<br/>(streams 0/4 control)
+    Quic->>Cli: encrypted packets
+....
+
+// TODO@user: confirmer la stratégie QUIC retenue (JDK 26 natif vs implémentation pure-Java) — le diagramme actuel est neutre.
+
+== Modèle threading
+
+[plantuml]
+....
+@startuml
+skinparam shadowing false
+left to right direction
+
+actor "Client 1" as C1
+actor "Client 2" as C2
+actor "Client N" as Cn
+
+rectangle "JVM" {
+  rectangle "Acceptor VT" as A
+  rectangle "Connection VT 1\n(HTTP/1.1)" as V1
+  rectangle "Connection VT 2\n(HTTP/2)" as V2
+  rectangle "Connection VT N\n(HTTP/2 multiplexé)" as Vn
+  rectangle "Carrier threads (ForkJoinPool)" as CT
+}
+
+C1 --> V1
+C2 --> V2
+Cn --> Vn
+A --> V1
+A --> V2
+A --> Vn
+V1 ..> CT : mount/unmount
+V2 ..> CT
+Vn ..> CT
+@enduml
+....
+
+Points de design :
+
+* **Aucun thread plateforme dédié à Chappe** — uniquement des virtual threads.
+* **Pas de pinning** — pas de `synchronized` sur le hot path, pas de JNI bloquant. `RequestContext` utilise `ScopedValue`, pas `ThreadLocal`.
+* **Body lazy** — la lecture du body n'est faite qu'à l'appel de `req.body().asInputStream()`. Si le handler retourne sans consommer, le body est drainé proprement avant la requête suivante (keep-alive HTTP/1.1) ou le reset du stream (HTTP/2).
+
+== Optimisations zéro-allocation sur le hot path
+
+Documentées dans `chappe/OPTIMS.md` :
+
+* **Write coalescing** — status line + headers + premier chunk émis dans un seul `write()`.
+* **Zero-alloc headers** — `ArrayHeaders` réutilise un buffer scratch, pas de `HashMap` sur le hot path.
+* **Thread-local buffer pool** — `ByteBufferPool` partage des `ByteBuffer` direct entre virtual threads via les carriers.
+* **Fast path 200 OK** — status line `HTTP/1.1 200 OK` pré-encodé, copie directe.
+* **`StatusCodeCache`** — `StatusCode` enum cachée en `String[]` indexé.
+
+Pour les chiffres mesurés, voir lien:{repo-chappe}/blob/main/BENCH.md[BENCH.md] et `chappe/BENCHMARKS.md`.
+
+== Static index O(1)
+
+`StaticFileHandler` charge un index `META-INF/chappe-static-index.properties` (généré par `chappe-static-index-maven-plugin` au build). Lookup `O(1)` par chemin, pas de scan filesystem au runtime. Les sidecars `.gz` (et `.br` si fournis) sont signalés dans l'index — `preferPrecompressed(true)` les sert zero-copy quand `Accept-Encoding` les inclut.

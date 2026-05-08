@@ -1,0 +1,182 @@
+= Cas d'usage
+:description: TLS, HTTP/2, HTTP/3 (planifié), gzip, virtual hosts, fichiers statiques, CLI standalone.
+
+[.lead]
+Cette page rassemble les recettes opérationnelles : terminer du TLS, négocier HTTP/2 via ALPN, monter plusieurs sous-applications, servir des fichiers statiques en zero-copy, négocier la compression, et utiliser la CLI `chappe serve` pour livrer un site sans launcher Java.
+
+== TLS / HTTPS
+
+Chappe utilise `SSLContext`/`SSLEngine` du JDK. Aucun wrapper, aucune réimplémentation.
+
+[source,java]
+----
+import javax.net.ssl.SSLContext;
+import io.vidocq.chappe.api.*;
+
+SSLContext sslContext = ...;   // chargé depuis un keystore JKS/PKCS12
+
+try (var server = Server.builder()
+        .port(8443)
+        .tls(sslContext)
+        .alpnProtocols("h2", "http/1.1")
+        .handler(router)
+        .build()) {
+    server.start();
+    Thread.currentThread().join();
+}
+----
+
+Points clés :
+
+* `alpnProtocols("h2", "http/1.1")` annonce les deux protocoles via ALPN ; HTTP/2 est sélectionné si le client le propose.
+* TLS 1.3 et TLS 1.2 sont supportés (politique `SSLContext` standard).
+* Le certificat et la clé sont chargés depuis un keystore JDK (`KeyStore.getInstance("PKCS12")`). Pas de PEM natif côté Chappe.
+
+== HTTP/2
+
+HTTP/2 (RFC 9113) est porté par `chappe-http` : framing, HPACK (RFC 7541) avec encodage Huffman, flow control, gestion `CONTINUATION`, lifecycle `GOAWAY`/`SETTINGS`. Le module est activé automatiquement quand TLS + ALPN h2 sont configurés.
+
+Sans TLS (h2c, HTTP/2 cleartext), HTTP/1.1 reste actif par défaut. L'`Upgrade: h2c` est négocié via la couche `chappe-http`.
+
+== HTTP/3 / QUIC
+
+HTTP/3 (RFC 9114) est **planifié**. Le moteur QUIC sous-jacent dépend du JDK (JDK 26+ ou implémentation pure ; voir lien:{repo-chappe}/blob/main/BUG.md[BUG.md] pour le statut courant).
+
+// TODO@user: confirmer la branche/version cible pour l'arrivée effective de HTTP/3 (JDK 26 ? implémentation interne ? attente pure-Java de QUIC ?).
+
+== Virtual hosts
+
+Chappe ne fournit pas d'abstraction « VirtualHost » nominative — préférer un `Router` dispatcher sur `Host`/`:authority` :
+
+[source,java]
+----
+Handler hostA = Router.builder().get("/", _ -> Response.ok("site A")).build();
+Handler hostB = Router.builder().get("/", _ -> Response.ok("site B")).build();
+
+Handler dispatcher = req -> switch (req.header("Host").orElse("")) {
+    case "a.example.com" -> hostA.handle(req);
+    case "b.example.com" -> hostB.handle(req);
+    default -> Response.of(StatusCode.NOT_FOUND);
+};
+
+Server.builder().port(8080).handler(dispatcher).build().start();
+----
+
+Pour TLS multi-domaines, fournir un `SSLContext` configuré avec `SNI` (le JDK gère la sélection de certificat via `X509ExtendedKeyManager#chooseEngineServerAlias`).
+
+== Fichiers statiques avancés
+
+Fallback chain filesystem → classpath, cache mémoire, compression sidecars, mode SPA :
+
+[source,java]
+----
+StaticFileHandler.builder()
+    .addPath(Path.of("./public"))                 // 1. filesystem (zero-copy sendfile)
+    .addClasspath("static")                        // 2. classpath (jar, module)
+    .addClasspath("META-INF/resources")            // 3. webjars / Servlet web fragments
+    .cacheInMemory(true)                           // cache ETag pour ressources classpath
+    .cacheControl("max-age=3600, public")
+    .preferPrecompressed(true)                     // sidecars .br / .gz si Accept-Encoding
+    .spaFallback("/index.html")                    // route inconnue → index (SPA)
+    .build();
+----
+
+Mutuellement exclusifs : `spaFallback(path)` (200 sur 404) et `notFoundFile(path)` (404 sur 404). Un seul des deux par builder.
+
+== Compression négociée
+
+Le helper `Filter.gzip()` négocie `Accept-Encoding` et compresse à la volée :
+
+[source,java]
+----
+Router.builder()
+    .filter(Filter.addHeader("X-Content-Type-Options", "nosniff"))
+    .filter(Filter.addHeaderIfEnv("STAGING", "true",
+            "X-Robots-Tag", "noindex, nofollow"))
+    .filter(Filter.gzip())                          // négocie Accept-Encoding
+    .get("/", handler)
+    .build();
+----
+
+Skip automatique :
+
+* le body fait moins de 1 Ko (seuil par défaut) ;
+* la réponse a déjà un `Content-Encoding` ;
+* le `Cache-Control: no-transform` est présent ;
+* le `Content-Type` n'est pas text-like (text/* + application/json + application/xml + application/javascript + +xml + +json).
+
+`AcceptEncoding.parse(header)` et `AcceptEncoding.accepts(header, coding)` exposent l'algorithme RFC 9110 §12.5.3 (q-values, wildcard, `identity` implicite) — utile pour les handlers qui veulent négocier eux-mêmes.
+
+== Mount d'une sous-application
+
+`Router#mount(prefix, handler)` délègue **tous les verbes** à un sous-handler ; le préfixe est strippé automatiquement :
+
+[source,java]
+----
+Router.builder()
+    .get("/health", _ -> Response.ok("UP"))           // route exacte (priorité)
+    .mount("/app", servletHandler)                     // ex. Foy
+    .mount("/api", restHandler)                        // ex. Cassini
+    .mount("/static", StaticFileHandler.of(webRoot))
+    .notFound(_ -> Response.of(StatusCode.NOT_FOUND))
+    .build();
+----
+
+Côté handler monté :
+
+* `request.path()` est relatif au mount (`/app/index.jsp` arrive comme `/index.jsp`),
+* `request.contextPath()` retourne le préfixe (`"/app"`),
+* `request.attribute(key, value)` permet de partager des attributs avec l'extension (compat Servlet).
+
+== CLI standalone
+
+Pour servir un site statique sans launcher applicatif (cas Docker typique) :
+
+[source,bash]
+----
+./mvnw -ntp -pl chappe-cli -am package
+java --enable-preview \
+     -jar chappe-cli/target/chappe-cli-*-shaded.jar \
+     serve --root /var/www/site --port 8080 --gzip
+----
+
+Configuration via fichier YAML (subset documenté : maps imbriquées, listes, scalaires, commentaires `#` ; pas d'anchors ni multilignes) :
+
+[source,yaml]
+----
+server:
+  port: 8080
+  bind: 0.0.0.0
+
+static:
+  root: /var/www/site
+  spa-fallback: /index.html
+  cache-control: "max-age=3600, public"
+  gzip: true
+
+headers:
+  always:
+    X-Content-Type-Options: "nosniff"
+    Referrer-Policy: "strict-origin-when-cross-origin"
+  staging:                       # actif si l'env var STAGING=true
+    X-Robots-Tag: "noindex, nofollow"
+----
+
+Les flags CLI ont priorité sur le YAML. Voir xref:reference.adoc#_cli_chappe_serve[Référence — CLI `chappe serve`] pour la liste complète des flags.
+
+== Diagramme : décision de pipeline par connexion
+
+[mermaid]
+....
+flowchart TD
+    accept[Connexion acceptée] --> tls{TLS ?}
+    tls -- non --> h11p[Lecture préambule HTTP/1.1]
+    tls -- oui --> alpn{ALPN ?}
+    alpn -- h2 --> h2pipe[Pipeline HTTP/2<br/>HPACK · framing · flow control]
+    alpn -- http/1.1 --> h11p
+    h11p --> upgrade{Upgrade: h2c ?}
+    upgrade -- oui --> h2pipe
+    upgrade -- non --> h11pipe[Pipeline HTTP/1.1<br/>chunked · keep-alive]
+    h2pipe --> handler[Router → Handler]
+    h11pipe --> handler
+....

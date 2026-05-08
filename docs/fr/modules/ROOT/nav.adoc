@@ -1,6 +1,7 @@
 * xref:index.adoc[Chappe]
 ** xref:getting-started.adoc[Démarrage rapide]
+** xref:usage.adoc[Cas d'usage]
 ** xref:concepts.adoc[Concepts]
-** xref:cli.adoc[CLI standalone]
+** xref:internals.adoc[Fonctionnement interne]
 ** xref:reference.adoc[Référence]
 ** xref:migration.adoc[Migration]

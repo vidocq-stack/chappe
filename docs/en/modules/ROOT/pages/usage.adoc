@@ -1,0 +1,182 @@
+= Usage
+:description: TLS, HTTP/2, HTTP/3 (planned), gzip, virtual hosts, static files, standalone CLI.
+
+[.lead]
+This page collects the operational recipes: terminating TLS, negotiating HTTP/2 via ALPN, mounting several sub-applications, serving static files with zero-copy, negotiating compression, and running the `chappe serve` CLI to ship a site without a Java launcher.
+
+== TLS / HTTPS
+
+Chappe uses the JDK's `SSLContext`/`SSLEngine` directly. No wrapper, no reimplementation.
+
+[source,java]
+----
+import javax.net.ssl.SSLContext;
+import io.vidocq.chappe.api.*;
+
+SSLContext sslContext = ...;   // loaded from a JKS / PKCS12 keystore
+
+try (var server = Server.builder()
+        .port(8443)
+        .tls(sslContext)
+        .alpnProtocols("h2", "http/1.1")
+        .handler(router)
+        .build()) {
+    server.start();
+    Thread.currentThread().join();
+}
+----
+
+Key points:
+
+* `alpnProtocols("h2", "http/1.1")` advertises both protocols via ALPN; HTTP/2 is selected when the client offers it.
+* TLS 1.3 and TLS 1.2 are supported (standard `SSLContext` policy).
+* Certificate and key are loaded from a JDK keystore (`KeyStore.getInstance("PKCS12")`). No native PEM loader on the Chappe side.
+
+== HTTP/2
+
+HTTP/2 (RFC 9113) is carried by `chappe-http`: framing, HPACK (RFC 7541) with Huffman coding, flow control, `CONTINUATION` handling, `GOAWAY`/`SETTINGS` lifecycle. The module turns on automatically when TLS + ALPN h2 are configured.
+
+Without TLS (h2c, HTTP/2 cleartext), HTTP/1.1 stays the default. The `Upgrade: h2c` handshake is negotiated by the `chappe-http` layer.
+
+== HTTP/3 / QUIC
+
+HTTP/3 (RFC 9114) is **planned**. The underlying QUIC engine depends on the JDK (JDK 26+ or a pure implementation; see lien:{repo-chappe}/blob/main/BUG.md[BUG.md] for the current status).
+
+// TODO@user: confirm the target branch/version for HTTP/3 (JDK 26 native? in-house implementation? wait for pure-Java QUIC?).
+
+== Virtual hosts
+
+Chappe does not ship a named "VirtualHost" abstraction — prefer a `Router` that dispatches on `Host`/`:authority`:
+
+[source,java]
+----
+Handler hostA = Router.builder().get("/", _ -> Response.ok("site A")).build();
+Handler hostB = Router.builder().get("/", _ -> Response.ok("site B")).build();
+
+Handler dispatcher = req -> switch (req.header("Host").orElse("")) {
+    case "a.example.com" -> hostA.handle(req);
+    case "b.example.com" -> hostB.handle(req);
+    default -> Response.of(StatusCode.NOT_FOUND);
+};
+
+Server.builder().port(8080).handler(dispatcher).build().start();
+----
+
+For multi-domain TLS, hand in an `SSLContext` configured with SNI (the JDK picks the certificate via `X509ExtendedKeyManager#chooseEngineServerAlias`).
+
+== Advanced static file serving
+
+Filesystem → classpath fallback chain, in-memory cache, sidecar compression, SPA mode:
+
+[source,java]
+----
+StaticFileHandler.builder()
+    .addPath(Path.of("./public"))                 // 1. filesystem (zero-copy sendfile)
+    .addClasspath("static")                        // 2. classpath (jar, module)
+    .addClasspath("META-INF/resources")            // 3. webjars / Servlet web fragments
+    .cacheInMemory(true)                           // ETag cache for classpath
+    .cacheControl("max-age=3600, public")
+    .preferPrecompressed(true)                     // .br / .gz sidecars when Accept-Encoding allows
+    .spaFallback("/index.html")                    // unknown route → index (SPA)
+    .build();
+----
+
+Mutually exclusive: `spaFallback(path)` (200 on 404) and `notFoundFile(path)` (404 on 404). Pick one per builder.
+
+== Negotiated compression
+
+The `Filter.gzip()` helper negotiates `Accept-Encoding` and compresses on the fly:
+
+[source,java]
+----
+Router.builder()
+    .filter(Filter.addHeader("X-Content-Type-Options", "nosniff"))
+    .filter(Filter.addHeaderIfEnv("STAGING", "true",
+            "X-Robots-Tag", "noindex, nofollow"))
+    .filter(Filter.gzip())                          // negotiates Accept-Encoding
+    .get("/", handler)
+    .build();
+----
+
+Auto-skip rules:
+
+* the body is below 1 KiB (default threshold);
+* the response already carries a `Content-Encoding`;
+* `Cache-Control: no-transform` is present;
+* the `Content-Type` is not text-like (text/* + application/json + application/xml + application/javascript + +xml + +json).
+
+`AcceptEncoding.parse(header)` and `AcceptEncoding.accepts(header, coding)` expose the RFC 9110 §12.5.3 algorithm (q-values, wildcard, implicit `identity`) — handy for handlers that want to negotiate themselves.
+
+== Mounting a sub-application
+
+`Router#mount(prefix, handler)` delegates **all verbs** to a sub-handler; the prefix is stripped automatically:
+
+[source,java]
+----
+Router.builder()
+    .get("/health", _ -> Response.ok("UP"))           // exact route (priority)
+    .mount("/app", servletHandler)                     // e.g. Foy
+    .mount("/api", restHandler)                        // e.g. Cassini
+    .mount("/static", StaticFileHandler.of(webRoot))
+    .notFound(_ -> Response.of(StatusCode.NOT_FOUND))
+    .build();
+----
+
+Inside the mounted handler:
+
+* `request.path()` is relative to the mount (`/app/index.jsp` arrives as `/index.jsp`),
+* `request.contextPath()` returns the prefix (`"/app"`),
+* `request.attribute(key, value)` shares attributes with the extension (Servlet-compat).
+
+== Standalone CLI
+
+To serve a static site without an application launcher (typical Docker case):
+
+[source,bash]
+----
+./mvnw -ntp -pl chappe-cli -am package
+java --enable-preview \
+     -jar chappe-cli/target/chappe-cli-*-shaded.jar \
+     serve --root /var/www/site --port 8080 --gzip
+----
+
+Configuration through a YAML file (documented subset: nested maps, lists, scalars, `#` comments; no anchors, no multilines):
+
+[source,yaml]
+----
+server:
+  port: 8080
+  bind: 0.0.0.0
+
+static:
+  root: /var/www/site
+  spa-fallback: /index.html
+  cache-control: "max-age=3600, public"
+  gzip: true
+
+headers:
+  always:
+    X-Content-Type-Options: "nosniff"
+    Referrer-Policy: "strict-origin-when-cross-origin"
+  staging:                       # active when env var STAGING=true
+    X-Robots-Tag: "noindex, nofollow"
+----
+
+CLI flags override YAML values. See xref:reference.adoc#_chappe_serve_cli[Reference — `chappe serve` CLI] for the full flag list.
+
+== Diagram: per-connection pipeline decision
+
+[mermaid]
+....
+flowchart TD
+    accept[Accepted connection] --> tls{TLS?}
+    tls -- no --> h11p[Read HTTP/1.1 preamble]
+    tls -- yes --> alpn{ALPN?}
+    alpn -- h2 --> h2pipe[HTTP/2 pipeline<br/>HPACK · framing · flow control]
+    alpn -- http/1.1 --> h11p
+    h11p --> upgrade{Upgrade: h2c?}
+    upgrade -- yes --> h2pipe
+    upgrade -- no --> h11pipe[HTTP/1.1 pipeline<br/>chunked · keep-alive]
+    h2pipe --> handler[Router → Handler]
+    h11pipe --> handler
+....

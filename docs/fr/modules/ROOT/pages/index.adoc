@@ -1,26 +1,77 @@
 = Chappe
-:description: Serveur HTTP/1.1 + HTTP/2 pur Java 25, virtual threads, zéro dépendance.
+:description: Serveur HTTP/1.1 + HTTP/2 + HTTP/3 pur Java 25, virtual threads, zéro dépendance.
 
 [.lead]
-Chappe est un serveur HTTP haute performance écrit en Java 25 pur. HTTP/1.1, HTTP/2, TLS 1.3, virtual threads, zéro dépendance runtime. Le télégraphe optique d'origine atteignait Strasbourg depuis Paris en 36 minutes ; le moteur Chappe vise des chiffres comparables, à son échelle.
+Chappe est un serveur HTTP haute performance écrit en **Java 25 pur**, sans aucune dépendance hors JDK. Il implémente HTTP/1.1 (RFC 9110/9112), HTTP/2 (RFC 9113) et — à terme — HTTP/3 (RFC 9114). Il sert de **couche transport** à l'écosystème Vidocq : Foy (Servlet) et Cassini (REST) se montent par-dessus.
 
-== Pourquoi ?
+== Origine du nom
 
-Claude Chappe (1763-1805), inventeur du télégraphe optique français en 1794 — un réseau de 556 stations, sémaphores articulés sur des collines, capable de transmettre un message de Paris à Toulon en moins de 12 minutes là où la poste à cheval mettait trois jours. Le succès ne tenait pas à la complexité : il tenait au fait que chaque station ne faisait qu'une chose, le faisait vite, et que le protocole entre les stations était trivial à observer et à dépanner.
+**Claude Chappe** (1763-1805), ingénieur français, inventeur du **télégraphe optique** mis en service en 1794. Son réseau de 556 stations à sémaphores articulés couvrait la France entière et transmettait un message de Paris à Toulon en moins de quinze minutes — la première vraie infrastructure de communication longue distance, plusieurs décennies avant Morse.
 
-Chappe, le serveur, suit la même règle. Pas de framework de framework. Une `Request`, une `Response`, un `Router`. Un `StaticFileHandler` pour servir des répertoires en zero-copy. Une couche `chappe-http` pour HTTP/1.1 et HTTP/2, partagée par toute l'écosystème Vidocq (Cassini pour REST, Foy pour Servlet).
+Voir https://fr.wikipedia.org/wiki/Claude_Chappe[Claude Chappe sur Wikipédia].
 
-== En bref
+La métaphore tient sur deux points :
 
-* **HTTP/1.1, HTTP/2, TLS 1.3** — couche `chappe-http`, pas de Netty, pas de Jetty.
-* **Virtual Threads (Project Loom)** — un thread virtuel par connexion, pas de pool plateforme.
-* **Scoped Values (JEP 506)** — `RequestContext.CURRENT` propagé avant chaque handler, pas de `ThreadLocal`.
-* **Zero-copy I/O** — `FileChannel.transferTo()` pour les fichiers statiques.
-* **JPMS** — `chappe-api`, `chappe-http`, `chappe-core`, chacun avec son `module-info.java`.
-* **CLI standalone** — `chappe serve --config …` (mini-YAML in-house, fat jar, jlink) — voir xref:cli.adoc[CLI standalone].
-* **Compression négociée** — `Filter.gzip()` à la volée + sidecars `.br`/`.gz` zero-copy.
-* **45 tests RFC 9110/9112/9113** — module `chappe-conformance`.
-* **113 tests d'intégration** — module `chappe-tests`.
-* **Zéro dépendance** — pas de logger transitif, pas de bibliothèque utilitaire externe.
+* Chappe (le serveur) est la **couche transport** — il déplace des octets, sans intelligence applicative, exactement comme une station optique relayait des codes sans les interpréter.
+* L'administration française du télégraphe Chappe a été reprise par **Alphonse Foy** au XIX^e^ siècle. Dans Vidocq, xref:foy::index.adoc[Foy] (Servlet 6.1) hérite de la même façon du transport Chappe.
 
-xref:getting-started.adoc[Démarrer →]
+== En un coup d'œil
+
+[cols="1,3"]
+|===
+| Spec implémentée | HTTP/1.1 (RFC 9110, RFC 9112), HTTP/2 (RFC 9113), HTTP/3 (RFC 9114, planifié)
+| Repo | {repo-chappe}
+| Java | 25 (LTS)
+| Modules JPMS | `io.vidocq.chappe.api`, `io.vidocq.chappe.http`, `io.vidocq.chappe.core`, `io.vidocq.chappe.cli`
+| Dépendances runtime | zéro (JDK uniquement)
+| Conformité | 45 tests RFC dans `chappe-conformance` ; 113 tests d'intégration dans `chappe-tests`
+| TCK | non applicable (pas de TCK officiel HTTP)
+|===
+
+== Positionnement dans l'écosystème
+
+Chappe est au cœur du transport : tout module Vidocq qui parle HTTP transite par lui.
+
+[mermaid]
+....
+flowchart TB
+    subgraph apps["Couches applicatives"]
+        cassini["Cassini<br/>Jakarta REST 4.0"]
+        foy["Foy<br/>Jakarta Servlet 6.1"]
+        vidocq["Vidocq-MPS<br/>orchestrateur"]
+    end
+    subgraph transport["Couche transport"]
+        chappe["**Chappe**<br/>HTTP/1.1 · HTTP/2 · HTTP/3<br/>TLS 1.3 · Virtual Threads"]
+    end
+    subgraph jdk["Plateforme"]
+        loom["Java 25<br/>Project Loom · Scoped Values"]
+    end
+    cassini --> chappe
+    foy --> chappe
+    vidocq --> chappe
+    chappe --> loom
+....
+
+Chappe peut aussi fonctionner **sans extension** : c'est ce que fait sa CLI `chappe serve` pour servir un site statique en production.
+
+== Caractéristiques identitaires
+
+* **Java 25 strict** — `ScopedValue` (JEP 506), pattern matching exhaustif, sealed interfaces, records.
+* **Virtual Threads** — un thread virtuel par connexion, pas de pool plateforme, pas de `Selector` applicatif.
+* **JPMS strict** — chaque module a son `module-info.java`, exports minimaux, pas de classpath.
+* **Zéro dépendance** — pas de logger transitif, pas de bibliothèque utilitaire externe. Tests JUnit uniquement.
+* **Génération statique** — `chappe-static-index-maven-plugin` produit l'index O(1) et les sidecars `.gz` au build.
+* **Zero-copy I/O** — `FileChannel.transferTo()` pour les fichiers statiques et les sidecars pré-compressés.
+
+== Performance
+
+Tous les chiffres (throughput, latence p50/p99, comparatifs Jetty/Helidon/JDK HttpServer) sont consignés dans lien:{repo-chappe}/blob/main/BENCH.md[BENCH.md] avec hardware, JVM et commande exacte. Aucun chiffre inline dans cette documentation.
+
+== Ressources rapides
+
+* xref:getting-started.adoc[Démarrage rapide] — premier serveur en moins de 30 lignes.
+* xref:usage.adoc[Cas d'usage] — TLS, HTTP/2, virtual hosts, fichiers statiques, compression, CLI.
+* xref:concepts.adoc[Concepts] — connexion, frame, multiplexage, scoped values.
+* xref:internals.adoc[Fonctionnement interne] — pipelines HTTP/1.1, HTTP/2, HTTP/3 ; modèle threading.
+* xref:reference.adoc[Référence] — coordonnées Maven, packages JPMS, API publique, plugin Maven.
+* xref:migration.adoc[Migration] — depuis Netty, Undertow, Jetty, JDK HttpServer.

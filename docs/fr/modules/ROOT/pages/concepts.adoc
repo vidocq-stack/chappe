@@ -1,111 +1,173 @@
 = Concepts
-:description: Server, Router, Handler, Request/Response, RequestContext, ServerProvider SPI.
+:description: Vocabulaire Chappe — connexion, frame, multiplexage, virtual thread per request, scoped values.
 
-== Boucle de connexion
+[.lead]
+Cette page définit le vocabulaire Chappe. Les noms sont alignés sur les RFC HTTP (9110/9112/9113/9114) et sur les API Java 25 modernes (`ScopedValue`, virtual threads). Pas de jargon maison — un développeur HTTP normal doit reconnaître chaque terme.
 
-Chappe applique une règle simple : **un thread virtuel par connexion**. À l'acceptation d'une socket :
+== Server, Router, Handler
 
-. `chappe-core` lance un nouveau virtual thread via `Executors.newVirtualThreadPerTaskExecutor()`.
-. Le thread lit le préambule (négociation HTTP/1.1 vs HTTP/2 vs TLS).
-. Le `Router` est invoqué avec le `Request` immutable.
-. Le `Handler` retourne un `Response` ; le serveur l'écrit dans la connexion.
+Trois interfaces tiennent toute l'API publique.
 
-Pas de `Selector`, pas de `EventLoopGroup`. La VM Java 25 gère la multiplication des virtual threads sur quelques carrier threads plateforme.
+[cols="1,3"]
+|===
+| Type | Rôle
+
+| `Server`
+| Cycle de vie : `start()` ouvre l'écoute, `close()` ferme. Construit via `Server.builder()`.
+
+| `Router`
+| Dispatcher de requêtes par méthode + path. Builder fluide. Supporte routes exactes, path params (`{id}`), wildcards (`*`), `mount(prefix, handler)`, `group(prefix, ...)`, filtres.
+
+| `Handler`
+| Interface fonctionnelle : `Response handle(Request req)`. Tout est handler — un router, un static file handler, un filtre composé, une lambda.
+|===
+
+== Request et Response
+
+Les deux types sont **immutables** côté API. `Response` se construit via builder ; `Request` est fourni par le moteur.
+
+[source,java]
+----
+// Request — accès en lecture
+req.method()           // HttpMethod : GET, POST, ...
+req.path()             // String relatif au mount, sans query string
+req.queryParams()      // Map<String, List<String>>
+req.pathParams()       // Map<String, String>
+req.headers()          // Headers (case-insensitive)
+req.body()             // Body (asInputStream(), asBytes(), ...)
+req.contextPath()      // préfixe du mount, "" sinon
+req.pathInfo()         // alias de path() pour les mounts
+req.remoteAddress()    // SocketAddress du client
+req.isSecure()         // true si TLS
+req.scheme()           // "http" ou "https"
+req.attribute(k, v)    // attributs mutables per-request (compat Servlet)
+----
+
+== Body
+
+Le `Body` est une abstraction sur le corps de requête ou de réponse. Il existe plusieurs implémentations selon le besoin, toutes scellées dans `chappe-api` :
+
+[cols="1,3"]
+|===
+| Type | Usage
+
+| `EmptyBody`
+| 204, 304, requêtes sans corps.
+
+| `ByteArrayBody`
+| Réponses courtes (texte, JSON inline). Allocation unique.
+
+| `InputStreamBody`
+| Wrappe un `InputStream` (proxy, transformations).
+
+| `OutputStreamBody`
+| Streaming par push : `Body.ofOutputStream(out -> out.write(...))`. Compatible `ServletOutputStream`.
+
+| `FileBody`
+| Zero-copy via `FileChannel.transferTo()` — `Body.ofFile(path)`.
+|===
+
+== Filtres
+
+Un `Filter` est un middleware déclaratif. Il transforme un `Handler` en un autre `Handler` :
+
+[source,java]
+----
+Filter logging = next -> req -> {
+    System.out.println(req.method() + " " + req.path());
+    return next.handle(req);
+};
+----
+
+Helpers fournis par `Filter` :
+
+* `Filter.addHeader(name, value)` — header sur chaque réponse.
+* `Filter.addHeaderIf(predicate, name, value)` — header conditionnel (prédicat évalué per-request).
+* `Filter.addHeaderIfEnv(envVar, expected, name, value)` — gate sur variable d'environnement (typique : staging).
+* `Filter.gzip()` / `Filter.gzip(threshold)` — compression à la volée négociée via `Accept-Encoding`.
+
+== Connexion, frame, multiplexage
+
+Vocabulaire HTTP/2 (RFC 9113), réutilisé par HTTP/3 (RFC 9114) avec un transport différent.
+
+[cols="1,3"]
+|===
+| Terme | Sens dans Chappe
+
+| **Connexion**
+| Une socket TCP (HTTP/1.1, HTTP/2) ou un QUIC stream-set (HTTP/3). Un virtual thread par connexion.
+
+| **Frame**
+| Unité de transport HTTP/2 : `HEADERS`, `DATA`, `SETTINGS`, `WINDOW_UPDATE`, `GOAWAY`, `CONTINUATION`, `PING`, `RST_STREAM`, `PRIORITY`. Implémenté dans `io.vidocq.chappe.http.h2.Http2Frame`.
+
+| **Stream**
+| Sous-flux logique multiplexé sur une connexion HTTP/2 — une requête + une réponse. `Http2Stream` porte l'état (idle, open, half-closed, closed).
+
+| **Multiplexage**
+| Plusieurs streams en parallèle sur une connexion. HTTP/1.1 ne le permet pas (pipelining ≠ multiplexage) ; HTTP/2 et HTTP/3 oui.
+
+| **HPACK**
+| Compression de headers HTTP/2 (RFC 7541) — table statique + table dynamique + Huffman. Implémenté dans `HpackEncoder`/`HpackDecoder`/`HpackHuffman`/`HpackDynamicTable`/`HpackStaticTable`.
+
+| **Flow control**
+| Fenêtre de bytes par stream et par connexion (HTTP/2) ; émission de `WINDOW_UPDATE` à mesure que le récepteur consomme.
+|===
+
+== Virtual thread per request
+
+Chappe applique une règle stricte : **un thread virtuel par connexion**. Pas de pool plateforme, pas d'`EventLoopGroup`, pas de `Selector` côté application.
+
+* `Executors.newVirtualThreadPerTaskExecutor()` est le seul exécuteur utilisé.
+* La VM Java 25 multiplexe les virtual threads sur quelques carrier threads plateforme.
+* Le code applicatif écrit du **synchrone bloquant** : `body.asInputStream().readAllBytes()` est correct, jamais une régression de scalabilité.
+* Pas de `ThreadLocal` — voir `RequestContext` ci-dessous.
 
 == `RequestContext` et Scoped Values
 
-`RequestContext.CURRENT` est un `ScopedValue<RequestContext>` (JEP 506, finalisé Java 25). Il porte les attributs de requête, le tenant, l'utilisateur authentifié — tout ce que `ThreadLocal` portait dans les serveurs traditionnels, en plus propre :
+`RequestContext.CURRENT` est un `ScopedValue<RequestContext>` (JEP 506, finalisé en Java 25). Il porte les attributs de requête, le tenant, l'utilisateur authentifié — tout ce que `ThreadLocal` portait dans les serveurs traditionnels, en plus propre :
 
 * propagation explicite via `ScopedValue.where(...).run(...)` ;
 * nettoyage automatique en sortie de scope ;
 * compatibilité virtual threads sans risque de pinning.
 
-== `Router`
-
-API fluente :
-
 [source,java]
 ----
-Router.builder()
-    .get("/items/{id}", req -> ...)
-    .post("/items", req -> ...)
-    .mount("/admin", adminRouter)        // sub-router avec context path
-    .build();
+// Lecture depuis n'importe quel point de la chaîne d'appel
+Request req = RequestContext.currentRequest();
 ----
 
-`Router#mount` strippe automatiquement le prefix : depuis `adminRouter`, `req.path()` est relatif au mount point.
+== Mount, contextPath, pathInfo
 
-== `StaticFileHandler`
+`Router#mount(prefix, handler)` délègue un préfixe entier de chemin, tous verbes confondus. Le préfixe est strippé avant l'appel :
 
-[source,java]
-----
-StaticFileHandler.builder()
-    .addPath(Path.of("./public"))             // filesystem (zero-copy sendfile)
-    .addClasspath("static")                    // classpath (jar, module)
-    .addClasspath("META-INF/resources")        // Servlet web fragments, webjars
-    .cacheInMemory(true)
-    .cacheControl("max-age=3600, public")
-    .preferPrecompressed(true)                  // sidecars .br / .gz si Accept-Encoding
-    .spaFallback("/index.html")                 // ou .notFoundFile("/404.html")
-    .build()
-----
+* `request.path()` → relatif au mount (`/dashboard`),
+* `request.contextPath()` → le préfixe (`/admin`),
+* `request.pathInfo()` → alias de `path()` pour les mounts.
 
-Capacités :
+Ordre de résolution au sein d'un `Router` :
 
-* MIME auto-detection (26+ types)
-* `Last-Modified` / `If-Modified-Since` → 304
-* `ETag` / `If-None-Match` → 304 (cache mémoire pour ressources classpath)
-* path traversal protection
-* directory index automatique
-* `spaFallback(path)` — sert le fichier en 200 quand la ressource n'existe pas (SPA)
-* `notFoundFile(path)` — sert le fichier en 404 (mutuellement exclusif avec `spaFallback`)
-* `preferPrecompressed(true)` — sidecars `.br` / `.gz` zero-copy quand le client les accepte
+. routes exactes (premier match par path + method),
+. `405 Method Not Allowed` si le path matche mais pas la méthode (header `Allow` injecté),
+. mounts (premier préfixe match, ordre d'enregistrement),
+. `notFound` (fallback `404`).
 
-== Filtres déclaratifs et compression
+== ServerProvider SPI
 
-[source,java]
-----
-Router.builder()
-    .filter(Filter.addHeader("X-Content-Type-Options", "nosniff"))
-    .filter(Filter.addHeaderIfEnv("STAGING", "true",
-            "X-Robots-Tag", "noindex, nofollow"))
-    .filter(Filter.gzip())                       // négocie Accept-Encoding
-    .build();
-----
+`ServerProvider` est un service `ServiceLoader`. `chappe-core` enregistre `ChappeServerProvider` via `provides`/`with` dans son `module-info`. Une implémentation alternative (par exemple `cassini-jdk-http` qui pivote sur le `HttpServer` du JDK pour des tests) peut s'enregistrer en parallèle.
 
-`Filter.gzip()` skip automatiquement si la réponse a déjà un `Content-Encoding`,
-porte un `Cache-Control: no-transform`, ou si le `Content-Type` n'est pas text-like
-(text/*, application/json, application/xml, application/javascript, +xml, +json…),
-ou si le body fait moins de 1 Ko.
+== Diagramme : graphe des concepts
 
-`AcceptEncoding.parse()` / `accepts()` exposent la négociation RFC 9110 §12.5.3
-(q-values, wildcard, `identity` implicite).
-
-== Mode CLI standalone
-
-Pour servir un site statique sans launcher applicatif : voir xref:cli.adoc[CLI standalone].
-
-== `Body` streaming
-
-[source,java]
-----
-Body.ofOutputStream(out -> {
-    out.write("chunk 1".getBytes());
-    out.write("chunk 2".getBytes());
-})
-----
-
-Utilisé par Foy pour exposer un `ServletOutputStream` natif sans copie.
-
-== Extension SPI
-
-* `Router.mount(prefix, handler)` — enregistrement par path prefix.
-* `Request.contextPath()` / `pathInfo()` — relatifs au mount point.
-* `Request.attribute(key, value)` — attributs mutables per-request (compat Servlet).
-* `RequestContext.CURRENT` — ScopedValue propagé.
-* `ServerProvider` — `ServiceLoader` SPI pour brancher une implémentation alternative (utilisé par `cassini-jdk-http`).
-
-== Conformité
-
-* `chappe-conformance` — 45 tests RFC 9110/9112/9113.
-* `chappe-tests` — 113 tests d'intégration (verbes HTTP, headers, filtres, compression, async, virtual threads).
+[mermaid]
+....
+flowchart LR
+    Server --> Router
+    Router --> Handler
+    Filter --> Handler
+    Router -. mount .-> Router
+    Handler --> Response
+    Request --> Handler
+    Body -. lue par .-> Request
+    Body -. portée par .-> Response
+    RequestContext -. ScopedValue .-> Handler
+    ServerProvider -. ServiceLoader .-> Server
+....
