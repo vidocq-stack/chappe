@@ -16,7 +16,7 @@ Three interfaces hold the entire public API.
 | Lifecycle: `start()` opens the listener, `close()` shuts it down. Built via `Server.builder()`.
 
 | `Router`
-| Request dispatcher by method + path. Fluent builder. Supports exact routes, path params (`{id}`), wildcards (`*`), `mount(prefix, handler)`, `group(prefix, ...)`, filters.
+| Request dispatcher by method + path. Fluent builder. Supports exact routes, path params (`\{id\}`), wildcards (`*`), `mount(prefix, handler)`, `group(prefix, ...)`, filters.
 
 | `Handler`
 | Functional interface: `Response handle(Request req)`. Everything is a handler — a router, a static file handler, a composed filter, a lambda.

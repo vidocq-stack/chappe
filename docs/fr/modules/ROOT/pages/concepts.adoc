@@ -16,7 +16,7 @@ Trois interfaces tiennent toute l'API publique.
 | Cycle de vie : `start()` ouvre l'écoute, `close()` ferme. Construit via `Server.builder()`.
 
 | `Router`
-| Dispatcher de requêtes par méthode + path. Builder fluide. Supporte routes exactes, path params (`{id}`), wildcards (`*`), `mount(prefix, handler)`, `group(prefix, ...)`, filtres.
+| Dispatcher de requêtes par méthode + path. Builder fluide. Supporte routes exactes, path params (`\{id\}`), wildcards (`*`), `mount(prefix, handler)`, `group(prefix, ...)`, filtres.
 
 | `Handler`
 | Interface fonctionnelle : `Response handle(Request req)`. Tout est handler — un router, un static file handler, un filtre composé, une lambda.
