@@ -1,6 +1,10 @@
 = Chappe
 :description: Pure Java 25 HTTP/1.1 + HTTP/2 + HTTP/3 server, virtual threads, zero dependency.
 
+[.text-center]
+image::chappe-logo.png[Chappe,300,role=module-logo]
+
+
 [.lead]
 Chappe is a high-performance HTTP server written in **pure Java 25** with no runtime dependency outside the JDK. It implements HTTP/1.1 (RFC 9110/9112), HTTP/2 (RFC 9113) and — eventually — HTTP/3 (RFC 9114). It is the **transport layer** of the Vidocq ecosystem: Foy (Servlet) and Cassini (REST) mount on top.
 
