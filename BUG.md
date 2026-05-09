@@ -77,3 +77,18 @@ remaining -= transferred;
   concurrents lisent `connectionSendWindow.get()` en parallèle et peuvent
   dépasser la fenêtre annoncée. Pas reproduit ici (chemin H2 inactif sur le
   staging derrière openresty), mais à corriger côté HTTP/2.
+
+### Validation production (post-fix)
+
+Après déploiement de `8d670fb` (fix + observabilité X-Chappe-Build) sur
+staging-doc.vidocq.dev derrière oauth2-proxy + NPM :
+
+- 624 requêtes cumulées sur les 7 logos PNG (877 KB → 2.4 MB)
+- Profils : burst parallèle 84-way × 5 cycles, burst 200 random, drain
+  ralenti `--limit-rate 200K`
+- **0 fail, 0 timeout, 0 troncature** (vs 9/21 = 43% fail pré-fix)
+
+Une variante observée pré-fix (timeout à ~96 % du body, soupçonnée
+"2e bug") était en réalité le même bug `transferTo==0` qui se manifestait
+sous un profil différent (saturation tardive du SO_SNDBUF) — résolue
+par le même commit `ef864e8`.
