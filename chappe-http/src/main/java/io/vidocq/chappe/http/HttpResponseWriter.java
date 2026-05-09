@@ -42,6 +42,11 @@ public final class HttpResponseWriter {
     private static final byte[] CONTENT_TYPE_TEXT = "Content-Type: text/plain; charset=utf-8\r\n".getBytes(StandardCharsets.US_ASCII);
     private static final byte[] SERVER_HEADER_LINE =
             ("Server: " + BuildInfo.serverHeader() + "\r\n").getBytes(StandardCharsets.US_ASCII);
+    // X-Chappe-Build : doublon du Server header avec un nom non standard que
+    // les reverse proxies (NPM/openresty) ne réécrivent généralement pas.
+    // Permet d'identifier le binaire derrière un proxy qui set son propre Server.
+    private static final byte[] X_CHAPPE_BUILD_LINE =
+            ("X-Chappe-Build: " + BuildInfo.serverHeader() + "\r\n").getBytes(StandardCharsets.US_ASCII);
 
     private static final DateTimeFormatter IMF_FIXDATE = DateTimeFormatter
             .ofPattern("EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.US);
@@ -75,7 +80,8 @@ public final class HttpResponseWriter {
     // Fast-path : headers pré-encodés pour 200 OK keep-alive (sans Date, sans body)
     private static final byte[] FAST_200_KA_PREFIX = ("HTTP/1.1 200 OK\r\n"
             + "Connection: keep-alive\r\n"
-            + "Server: " + BuildInfo.serverHeader() + "\r\n").getBytes(StandardCharsets.US_ASCII);
+            + "Server: " + BuildInfo.serverHeader() + "\r\n"
+            + "X-Chappe-Build: " + BuildInfo.serverHeader() + "\r\n").getBytes(StandardCharsets.US_ASCII);
 
     public void write(Response response, ByteBuffer buffer, WritableByteChannel channel,
                       boolean keepAlive, HttpMethod method) throws IOException {
@@ -119,6 +125,11 @@ public final class HttpResponseWriter {
         // Server header (build info) — sauf si l'app a fixé sa propre identité
         if (!response.headers().contains("Server")) {
             putBytes(SERVER_HEADER_LINE, buffer, channel);
+        }
+        // X-Chappe-Build : header non-standard, survit derrière les reverse proxies
+        // qui réécrivent le Server header (NPM, openresty, oauth2-proxy).
+        if (!response.headers().contains("X-Chappe-Build")) {
+            putBytes(X_CHAPPE_BUILD_LINE, buffer, channel);
         }
 
         // Content-Length ou Transfer-Encoding: chunked
@@ -197,6 +208,7 @@ public final class HttpResponseWriter {
         byte[] bodyBytes = message.getBytes(StandardCharsets.UTF_8);
         putBytes(CONTENT_TYPE_TEXT, buffer, channel);
         putBytes(SERVER_HEADER_LINE, buffer, channel);
+        putBytes(X_CHAPPE_BUILD_LINE, buffer, channel);
         putBytes(CONTENT_LENGTH_PREFIX, buffer, channel);
         putAsciiLong(bodyBytes.length, buffer, channel);
         putBytes(CRLF, buffer, channel);
