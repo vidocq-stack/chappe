@@ -80,8 +80,46 @@ logging:
 | `--spa-fallback PATH` | active le mode SPA (200 sur 404) |
 | `--cache-control STR` | override `static.cache-control` |
 | `--gzip` / `--no-gzip` | active/désactive la compression |
+| `--access-log` / `--no-access-log` | active/désactive l'access log Apache CLF sur stdout |
 | `--header KEY=VALUE` | ajoute un header (répétable, merge dans `headers.always`) |
 | `-h, --help` | affiche l'aide |
+
+Variables d'environnement reconnues par le launcher :
+
+| Variable | Effet |
+|---|---|
+| `STAGING=true` | active le bloc `headers.staging` |
+| `CHAPPE_ACCESS_LOG=true` | active l'access log (équivalent à `--access-log`, override par CLI) |
+
+## Observabilité
+
+### Headers de build
+
+Toutes les réponses HTTP sortant de Chappe portent deux headers identifiant le binaire :
+
+```
+Server: Chappe/0.1.0-SNAPSHOT+8d670fb0 (2026-05-09T19:43:04Z)
+X-Chappe-Build: Chappe/0.1.0-SNAPSHOT+8d670fb0 (2026-05-09T19:43:04Z)
+```
+
+Le contenu (version Maven, short hash du commit Git, build timestamp ISO-8601 UTC) est lu une fois au démarrage depuis `META-INF/chappe-build.properties` (généré par filtering Maven + `git-commit-id-maven-plugin`). Exposé aussi côté Java via `io.vidocq.chappe.api.BuildInfo`.
+
+`X-Chappe-Build` double l'info dans un header non-standard : utile derrière un reverse proxy qui réécrit le `Server` (NPM/openresty fixe son propre `Server: openresty`). Les `X-*` sont relayés tels quels par défaut.
+
+### Access log
+
+`--access-log` (ou `CHAPPE_ACCESS_LOG=true`, ou `logging.access-log: true` dans le YAML) active un filtre qui logue chaque requête sur **stdout** au format Apache Combined Log Format étendu :
+
+```
+1.2.3.4 - yann.blazart@gmail.com [09/May/2026:18:50:54 +0000] "GET /a.png HTTP/1.1" 200 877719 12ms
+```
+
+- IP cliente : `X-Forwarded-For` (premier hop) → `X-Real-IP` → `Request.remoteAddress()`
+- User : `X-Forwarded-User` → `Gap-Auth` (oauth2-proxy) → `-`
+- Size : `Response.body().contentLength()` (`-` si streamé/chunked)
+- Durée : nanosecondes mesurées en outermost wrapper (capture le status final même en cas d'exception)
+
+Pratique avec Docker/Portainer : la sortie stdout est captée et navigable dans l'UI sans configuration supplémentaire.
 
 ## Compression
 

@@ -128,10 +128,29 @@ public interface Filter {
     static Filter addHeaderIfEnv(String envVar, String expected, String name, String value);
     static Filter gzip();
     static Filter gzip(int threshold);
+    static Filter accessLog();                          // <1>
+    static Filter accessLog(Consumer<String> sink);     // <2>
 
     default Filter andThen(Filter next);
 }
 ----
+<1> Logue chaque requête sur `System.out` au format Apache Combined Log Format étendu (cf. xref:_observabilite[Observabilité]).
+<2> Variante avec sink personnalisé (utile pour rediriger vers un logger applicatif).
+
+=== `BuildInfo`
+
+[source,java]
+----
+public final class BuildInfo {
+    public static String version();          // ex: "0.1.0-SNAPSHOT"
+    public static String gitCommit();        // ex: "8d670fb0"
+    public static String buildTimestamp();   // ex: "2026-05-09T19:43:04Z"
+    public static String javaVersion();      // ex: "25.0.3"
+    public static String serverHeader();     // ex: "Chappe/0.1.0-SNAPSHOT+8d670fb0 (2026-05-09T19:43:04Z)"
+}
+----
+
+Lu une fois au démarrage depuis `META-INF/chappe-build.properties` (généré par filtering Maven + `git-commit-id-maven-plugin` au build de `chappe-api`). Utilisé automatiquement par la couche HTTP pour injecter les headers `Server` et `X-Chappe-Build`.
 
 === `StaticFileHandler`
 
@@ -196,11 +215,22 @@ public final class RequestContext {
 | `--spa-fallback PATH`   | active le mode SPA (status 200 sur 404)
 | `--cache-control STR`   | override `static.cache-control`
 | `--gzip` / `--no-gzip`  | active/désactive la compression
+| `--access-log` / `--no-access-log` | active/désactive l'access log Apache CLF sur stdout
 | `--header KEY=VALUE`    | ajoute un header (répétable, merge dans `headers.always`)
 | `-h, --help`            | aide
 |===
 
 Les flags ont priorité sur le YAML.
+
+=== Variables d'environnement
+
+[cols="2,3"]
+|===
+| Variable | Effet
+
+| `STAGING=true`              | active le bloc `headers.staging` (typiquement `X-Robots-Tag: noindex, nofollow`)
+| `CHAPPE_ACCESS_LOG=true`    | active l'access log (équivalent à `--access-log`, le flag CLI override l'env)
+|===
 
 === Schéma YAML
 
@@ -231,6 +261,46 @@ logging:
 ----
 
 Subset documenté : maps imbriquées, listes inline `[a, b]` et bloc `- item`, scalaires string/int/bool, commentaires `#`. Pas d'anchors, de tags `!!`, de multilignes.
+
+[#_observabilite]
+== Observabilité
+
+=== Headers de build
+
+Toutes les réponses HTTP sortant de Chappe portent deux headers identifiant précisément le binaire qui les a produites :
+
+[source]
+----
+Server: Chappe/0.1.0-SNAPSHOT+8d670fb0 (2026-05-09T19:43:04Z)
+X-Chappe-Build: Chappe/0.1.0-SNAPSHOT+8d670fb0 (2026-05-09T19:43:04Z)
+----
+
+Format : `Chappe/<version Maven>+<short hash Git>(<build timestamp ISO-8601 UTC>)`. Lu une fois au démarrage via `BuildInfo` (cf. API publique).
+
+* `Server` est le header standard. Il peut être réécrit par un reverse proxy en amont (NPM, openresty, Cloudflare).
+* `X-Chappe-Build` double l'info dans un header non-standard que les proxies ne réécrivent généralement pas — utile pour identifier le binaire derrière un reverse proxy qui fixe son propre `Server`.
+
+Idempotence : si l'application a déjà fixé l'un de ces headers dans la `Response`, Chappe ne l'écrase pas.
+
+=== Access log
+
+Activable via `--access-log` (CLI), `CHAPPE_ACCESS_LOG=true` (env) ou `logging.access-log: true` (YAML). La CLI prime sur l'env qui prime sur le YAML.
+
+Format : Apache Combined Log Format étendu, sortie sur `System.out` (capté par Docker/Portainer) :
+
+[source]
+----
+1.2.3.4 - yann.blazart@gmail.com [09/May/2026:18:50:54 +0000] "GET /a.png HTTP/1.1" 200 877719 12ms
+----
+
+Résolution des champs :
+
+* IP cliente : `X-Forwarded-For` (premier hop) → `X-Real-IP` → `Request.remoteAddress()` → `-`.
+* User authentifié : `X-Forwarded-User` → `Gap-Auth` (oauth2-proxy) → `-`.
+* Size : `Response.body().contentLength()` (ou `-` si streamé/chunked).
+* Durée : nanosecondes mesurées par le filter en outermost wrapper, capture le status final même quand le handler lève une exception.
+
+Le filter est exposé en API publique via `Filter.accessLog()` / `Filter.accessLog(Consumer<String>)` (cf. ci-dessus) ; le launcher CLI l'applique en outermost.
 
 == Plugin Maven : pré-compression
 
