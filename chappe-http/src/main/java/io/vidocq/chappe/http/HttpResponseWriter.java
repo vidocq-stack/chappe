@@ -258,7 +258,14 @@ public final class HttpResponseWriter {
                     long position = fb.offset();
                     while (remaining > 0) {
                         long transferred = fc.transferTo(position, remaining, channel);
-                        if (transferred <= 0) break;
+                        if (transferred < 0) break;
+                        if (transferred == 0) {
+                            // SO_SNDBUF kernel saturé : sendfile(2) peut renvoyer 0
+                            // sur un SocketChannel blocking (cf. JDK-8264762). Yield
+                            // et retry — ne PAS break, sinon réponse tronquée.
+                            Thread.yield();
+                            continue;
+                        }
                         position += transferred;
                         remaining -= transferred;
                     }
