@@ -154,7 +154,7 @@ If your need is just "serve a static site in production" (Docker case), swap you
 
 [source,bash]
 ----
-java --enable-preview \
+java \
      -jar chappe-cli/target/chappe-cli-*-shaded.jar \
      serve --root /var/www/site --port 8080 --gzip
 ----

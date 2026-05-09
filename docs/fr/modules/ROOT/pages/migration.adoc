@@ -154,7 +154,7 @@ Si votre besoin est seulement « servir un site statique en production » (cas D
 
 [source,bash]
 ----
-java --enable-preview \
+java \
      -jar chappe-cli/target/chappe-cli-*-shaded.jar \
      serve --root /var/www/site --port 8080 --gzip
 ----

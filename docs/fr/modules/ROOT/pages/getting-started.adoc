@@ -112,7 +112,7 @@ Server.builder().port(8080).handler(staticHandler).build().start();
 ----
 sdk env                        # charge JDK 25 + Maven 4.0.0-rc-5
 ./mvnw -ntp install -DskipTests
-java --enable-preview \
+java \
      --module-path target/lib:target/myapp.jar \
      --module myapp/io.example.Main
 ----

@@ -135,7 +135,7 @@ Pour servir un site statique sans launcher applicatif (cas Docker typique) :
 [source,bash]
 ----
 ./mvnw -ntp -pl chappe-cli -am package
-java --enable-preview \
+java \
      -jar chappe-cli/target/chappe-cli-*-shaded.jar \
      serve --root /var/www/site --port 8080 --gzip
 ----
