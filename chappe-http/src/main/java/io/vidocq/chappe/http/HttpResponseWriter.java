@@ -1,6 +1,7 @@
 package io.vidocq.chappe.http;
 
 import io.vidocq.chappe.api.Body;
+import io.vidocq.chappe.api.BuildInfo;
 import io.vidocq.chappe.api.FileBody;
 import io.vidocq.chappe.api.HttpMethod;
 import io.vidocq.chappe.api.Response;
@@ -39,6 +40,8 @@ public final class HttpResponseWriter {
     private static final byte[] CHUNK_TERMINATOR = "0\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
     private static final byte[] DATE_PREFIX = "Date: ".getBytes(StandardCharsets.US_ASCII);
     private static final byte[] CONTENT_TYPE_TEXT = "Content-Type: text/plain; charset=utf-8\r\n".getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] SERVER_HEADER_LINE =
+            ("Server: " + BuildInfo.serverHeader() + "\r\n").getBytes(StandardCharsets.US_ASCII);
 
     private static final DateTimeFormatter IMF_FIXDATE = DateTimeFormatter
             .ofPattern("EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.US);
@@ -71,7 +74,8 @@ public final class HttpResponseWriter {
 
     // Fast-path : headers pré-encodés pour 200 OK keep-alive (sans Date, sans body)
     private static final byte[] FAST_200_KA_PREFIX = ("HTTP/1.1 200 OK\r\n"
-            + "Connection: keep-alive\r\n").getBytes(StandardCharsets.US_ASCII);
+            + "Connection: keep-alive\r\n"
+            + "Server: " + BuildInfo.serverHeader() + "\r\n").getBytes(StandardCharsets.US_ASCII);
 
     public void write(Response response, ByteBuffer buffer, WritableByteChannel channel,
                       boolean keepAlive, HttpMethod method) throws IOException {
@@ -110,6 +114,11 @@ public final class HttpResponseWriter {
             putBytes(DATE_PREFIX, buffer, channel);
             putBytes(getDateValue(), buffer, channel);
             putBytes(CRLF, buffer, channel);
+        }
+
+        // Server header (build info) — sauf si l'app a fixé sa propre identité
+        if (!response.headers().contains("Server")) {
+            putBytes(SERVER_HEADER_LINE, buffer, channel);
         }
 
         // Content-Length ou Transfer-Encoding: chunked
@@ -187,6 +196,7 @@ public final class HttpResponseWriter {
 
         byte[] bodyBytes = message.getBytes(StandardCharsets.UTF_8);
         putBytes(CONTENT_TYPE_TEXT, buffer, channel);
+        putBytes(SERVER_HEADER_LINE, buffer, channel);
         putBytes(CONTENT_LENGTH_PREFIX, buffer, channel);
         putAsciiLong(bodyBytes.length, buffer, channel);
         putBytes(CRLF, buffer, channel);

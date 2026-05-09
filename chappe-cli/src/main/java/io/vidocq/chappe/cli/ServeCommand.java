@@ -24,6 +24,8 @@ public final class ServeCommand {
     public static final String STAGING_ENV = "STAGING";
     /** Valeur attendue de {@link #STAGING_ENV} pour activer le bloc staging. */
     public static final String STAGING_VALUE = "true";
+    /** Variable d'environnement qui active l'access log si égale à {@code "true"}. */
+    public static final String ACCESS_LOG_ENV = "CHAPPE_ACCESS_LOG";
 
     /**
      * Résolution effective des paramètres : la valeur CLI prime sur la valeur YAML.
@@ -37,6 +39,7 @@ public final class ServeCommand {
             String spaFallback,
             String cacheControl,
             boolean gzip,
+            boolean accessLog,
             String indexFile,
             Map<String, String> alwaysHeaders,
             Map<String, String> stagingHeaders) {
@@ -59,6 +62,15 @@ public final class ServeCommand {
             boolean gzip = args.gzip() != null
                     ? args.gzip()
                     : (yaml.staticCfg().gzip() != null && yaml.staticCfg().gzip());
+            // CLI > env > YAML. Env "true" active.
+            boolean accessLog;
+            if (args.accessLog() != null) {
+                accessLog = args.accessLog();
+            } else if ("true".equals(System.getenv(ACCESS_LOG_ENV))) {
+                accessLog = true;
+            } else {
+                accessLog = yaml.logging().accessLog() != null && yaml.logging().accessLog();
+            }
             List<String> indexFiles = yaml.staticCfg().indexFiles();
             String indexFile = (indexFiles != null && !indexFiles.isEmpty())
                     ? indexFiles.getFirst() : null;
@@ -68,7 +80,7 @@ public final class ServeCommand {
             Map<String, String> staging = yaml.headers().staging();
 
             return new Effective(root, port, host, fallback, spaFallback, cache, gzip,
-                    indexFile, Map.copyOf(always), Map.copyOf(staging));
+                    accessLog, indexFile, Map.copyOf(always), Map.copyOf(staging));
         }
     }
 
@@ -95,6 +107,11 @@ public final class ServeCommand {
         for (var e : cfg.alwaysHeaders().entrySet()) {
             h = Filter.addHeader(e.getKey(), e.getValue()).apply(h);
         }
+
+        // Access log : outermost — mesure la durée totale et capture le status final.
+        if (cfg.accessLog()) {
+            h = Filter.accessLog().apply(h);
+        }
         return h;
     }
 
@@ -117,7 +134,9 @@ public final class ServeCommand {
                 : ChappeConfig.EMPTY;
         Effective cfg = Effective.resolve(args, yaml);
         Server server = start(cfg);
-        System.out.println("Chappe listening on " + server.localAddress() + " (root=" + cfg.root() + ")");
+        System.out.println(io.vidocq.chappe.api.BuildInfo.serverHeader()
+                + " listening on " + server.localAddress() + " (root=" + cfg.root()
+                + ", access-log=" + cfg.accessLog() + ")");
         Runtime.getRuntime().addShutdownHook(new Thread(server::stop, "chappe-shutdown"));
         Thread.currentThread().join();
     }

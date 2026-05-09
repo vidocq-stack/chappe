@@ -13,4 +13,56 @@
 
     <name>Chappe API</name>
     <description>API publique du serveur HTTP Chappe</description>
+
+    <properties>
+        <build.timestamp>${maven.build.timestamp}</build.timestamp>
+        <maven.build.timestamp.format>yyyy-MM-dd'T'HH:mm:ss'Z'</maven.build.timestamp.format>
+        <!-- Default si git-commit-id ne s'exécute pas (build hors d'un repo git). -->
+        <git.commit.id>unknown</git.commit.id>
+    </properties>
+
+    <build>
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>true</filtering>
+                <includes>
+                    <include>chappe-build.properties</include>
+                </includes>
+            </resource>
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>false</filtering>
+                <excludes>
+                    <exclude>chappe-build.properties</exclude>
+                </excludes>
+            </resource>
+        </resources>
+
+        <plugins>
+            <!-- Build-only, pas de dépendance runtime. -->
+            <plugin>
+                <groupId>io.github.git-commit-id</groupId>
+                <artifactId>git-commit-id-maven-plugin</artifactId>
+                <version>9.0.1</version>
+                <executions>
+                    <execution>
+                        <id>get-the-git-infos</id>
+                        <phase>initialize</phase>
+                        <goals>
+                            <goal>revision</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <abbrevLength>8</abbrevLength>
+                    <generateGitPropertiesFile>false</generateGitPropertiesFile>
+                    <failOnNoGitDirectory>false</failOnNoGitDirectory>
+                    <failOnUnableToExtractRepoInfo>false</failOnUnableToExtractRepoInfo>
+                    <skipPoms>false</skipPoms>
+                    <verbose>false</verbose>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>

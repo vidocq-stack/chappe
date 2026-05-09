@@ -19,12 +19,13 @@ public record CliArgs(
         String spaFallback,
         String cacheControl,
         Boolean gzip,
+        Boolean accessLog,
         Map<String, String> extraHeaders,
         boolean help) {
 
     /** Sentinelle indiquant l'affichage de l'aide. */
     public static final CliArgs HELP = new CliArgs(
-            null, null, null, null, null, null, null, null, Map.of(), true);
+            null, null, null, null, null, null, null, null, null, Map.of(), true);
 
     /** Parse les arguments. {@code argv[0]} doit valoir {@code "serve"} (sinon {@code --help}). */
     public static CliArgs parse(String[] argv) {
@@ -44,6 +45,7 @@ public record CliArgs(
         String spaFallback = null;
         String cacheControl = null;
         Boolean gzip = null;
+        Boolean accessLog = null;
         LinkedHashMap<String, String> extraHeaders = new LinkedHashMap<>();
         boolean help = false;
 
@@ -61,6 +63,8 @@ public record CliArgs(
                 case "--cache-control" -> { cacheControl = requireValue(argv, ++i, a); i++; }
                 case "--gzip" -> { gzip = Boolean.TRUE; i++; }
                 case "--no-gzip" -> { gzip = Boolean.FALSE; i++; }
+                case "--access-log" -> { accessLog = Boolean.TRUE; i++; }
+                case "--no-access-log" -> { accessLog = Boolean.FALSE; i++; }
                 case "--header" -> {
                     String kv = requireValue(argv, ++i, a);
                     int eq = kv.indexOf('=');
@@ -75,7 +79,7 @@ public record CliArgs(
         }
 
         return new CliArgs(configPath, root, port, bind, fallback, spaFallback,
-                cacheControl, gzip, Map.copyOf(extraHeaders), help);
+                cacheControl, gzip, accessLog, Map.copyOf(extraHeaders), help);
     }
 
     private static String requireValue(String[] argv, int idx, String flag) {
@@ -102,6 +106,8 @@ public record CliArgs(
                   --spa-fallback PATH  Fichier servi en 200 si non trouvé (SPA mode)
                   --cache-control STR  Header Cache-Control sur chaque ressource
                   --gzip / --no-gzip   Active/désactive la compression à la volée
+                  --access-log         Active l'access log Apache CLF sur stdout
+                  --no-access-log      Désactive l'access log
                   --header KEY=VALUE   Ajoute un header (répétable, merge dans headers.always)
                   -h, --help           Affiche ce message
                 """;
