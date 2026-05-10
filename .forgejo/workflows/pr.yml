@@ -1,0 +1,331 @@
+# Template à fusionner dans le `ci.yml` existant de chaque repo *producteur*
+# (vauban, cassini, champollion, foy, chappe, vidocq-mps, mansart, ravel).
+#
+# CE FICHIER NE SE COPIE PAS TEL QUEL. Il sert de référence : ses 4 jobs
+# (`build-pr`, `discover-impact`, `trigger-downstream`, `verify-downstream`)
+# doivent être ajoutés au workflow CI existant, derrière un trigger
+# `pull_request:` distinct du trigger `push:` qui gère les snapshots/releases.
+#
+# Pré-requis :
+#   - Secret organisation `VIDOCQ_BOT_TOKEN` (write GestionProjet, dispatch repos)
+#   - Secret organisation `MAVEN_DEPLOY_TOKEN` (déjà présent dans ci.yml producteur)
+#   - Reposilite : dépôt `pr-staging` accessible à `https://repo.vidocq.dev/pr-staging`
+#   - Le pom racine doit déclarer un `<repository>` ou `<distributionManagement>`
+#     pour `vidocq-pr-staging` (cf. README.md section « pom.xml producteur »).
+name: pr-validate
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+
+  build-pr:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java 25
+        uses: actions/setup-java@v4
+        with:
+          java-version: '25'
+          distribution: temurin
+          cache: maven
+
+      - name: Install Maven 4
+        run: |
+          wget -q https://dlcdn.apache.org/maven/maven-4/4.0.0-rc-5/binaries/apache-maven-4.0.0-rc-5-bin.tar.gz
+          tar -xzf apache-maven-4.0.0-rc-5-bin.tar.gz -C /opt
+          echo "/opt/apache-maven-4.0.0-rc-5/bin" >> "$GITHUB_PATH"
+
+      - name: Configure Maven settings (snapshots + releases + pr-staging)
+        run: |
+          mkdir -p ~/.m2
+          cat > ~/.m2/settings.xml <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <settings>
+            <servers>
+              <server>
+                <id>vidocq-snapshots</id>
+                <username>vidocq-ci-deploy</username>
+                <password>${{ secrets.MAVEN_DEPLOY_TOKEN }}</password>
+                <configuration>
+                  <httpConfiguration><all><usePreemptive>true</usePreemptive></all></httpConfiguration>
+                </configuration>
+              </server>
+              <server>
+                <id>vidocq-releases</id>
+                <username>vidocq-ci-deploy</username>
+                <password>${{ secrets.MAVEN_DEPLOY_TOKEN }}</password>
+                <configuration>
+                  <httpConfiguration><all><usePreemptive>true</usePreemptive></all></httpConfiguration>
+                </configuration>
+              </server>
+              <server>
+                <id>vidocq-pr-staging</id>
+                <username>vidocq-ci-deploy</username>
+                <password>${{ secrets.MAVEN_DEPLOY_TOKEN }}</password>
+                <configuration>
+                  <httpConfiguration><all><usePreemptive>true</usePreemptive></all></httpConfiguration>
+                </configuration>
+              </server>
+            </servers>
+          </settings>
+          EOF
+
+      - name: Compute PR version
+        id: version
+        run: |
+          # Parsing direct du pom.xml en Python — `mvn help:evaluate -q` ne
+          # supprime pas tous les [INFO] en Maven 4, ce qui produit des versions
+          # corrompues type "[INFO]-PR1.1-SNAPSHOT".
+          # Détection dynamique du namespace (Model 4.0.0 vs 4.1.0).
+          BASE=$(python3 - <<'PY'
+          import re, sys, xml.etree.ElementTree as ET
+          root = ET.parse("pom.xml").getroot()
+          ns_uri = root.tag[1:].split("}", 1)[0] if root.tag.startswith("{") else ""
+          v = root.find(f"{{{ns_uri}}}version") if ns_uri else root.find("version")
+          if v is None or not v.text:
+              sys.stderr.write(f"<version> introuvable au niveau racine (ns={ns_uri!r})\n")
+              sys.exit(1)
+          print(re.sub(r"-SNAPSHOT$", "", v.text.strip()))
+          PY
+          )
+          if [ -z "$BASE" ]; then
+            echo "Impossible de lire project.version depuis pom.xml" >&2
+            exit 1
+          fi
+          PR_VERSION="${BASE}-PR${{ github.event.number }}.${{ github.run_number }}-SNAPSHOT"
+          echo "version=$PR_VERSION" >> "$GITHUB_OUTPUT"
+          echo "PR version : $PR_VERSION"
+
+      - name: Set PR version sur tout le reactor
+        run: |
+          mvn -B -ntp versions:set \
+            -DnewVersion=${{ steps.version.outputs.version }} \
+            -DprocessAllModules=true \
+            -DgenerateBackupPoms=false
+
+      - name: Sync plugin.xml descriptors avec la version PR
+        # versions:set ne touche pas aux resources. Or les modules avec
+        # packaging=maven-plugin embarquent un plugin.xml dans
+        # src/main/resources/META-INF/maven/ avec une <version> en dur — sans
+        # sync, le JAR de plugin contient un descriptor obsolète et tout
+        # consommateur du plugin échoue avec "Plugin's descriptor contains
+        # the wrong version".
+        run: |
+          python3 - <<'PY'
+          import re
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          root_pom = ET.parse("pom.xml").getroot()
+          ns_uri = root_pom.tag[1:].split("}", 1)[0] if root_pom.tag.startswith("{") else ""
+          ns = {"m": ns_uri} if ns_uri else {}
+          v = root_pom.find("m:version", ns) if ns_uri else root_pom.find("version")
+          if v is None or not v.text:
+              raise SystemExit("version racine introuvable dans pom.xml")
+          ROOT_VERSION = v.text.strip()
+          print(f"Version racine = {ROOT_VERSION}")
+
+          count = 0
+          for pom in Path(".").rglob("pom.xml"):
+              if "target" in pom.parts:
+                  continue
+              try:
+                  root = ET.parse(pom).getroot()
+              except ET.ParseError:
+                  continue
+              pns_uri = root.tag[1:].split("}", 1)[0] if root.tag.startswith("{") else ""
+              pns = {"m": pns_uri} if pns_uri else {}
+              pkg = root.find("m:packaging", pns) if pns_uri else root.find("packaging")
+              if pkg is None or (pkg.text or "").strip() != "maven-plugin":
+                  continue
+              plugin_xml = pom.parent / "src/main/resources/META-INF/maven/plugin.xml"
+              if not plugin_xml.is_file():
+                  continue
+              content = plugin_xml.read_text(encoding="utf-8")
+              new = re.sub(
+                  r"(<artifactId>[^<]+</artifactId>\s*\n\s*<version>)[^<]+(</version>)",
+                  rf"\g<1>{ROOT_VERSION}\g<2>",
+                  content,
+                  count=1,
+              )
+              if new != content:
+                  plugin_xml.write_text(new, encoding="utf-8")
+                  print(f"sync : {plugin_xml} -> {ROOT_VERSION}")
+                  count += 1
+          print(f"Total : {count} plugin.xml synchronisé(s).")
+          PY
+
+      - name: Build, test, deploy en pr-staging
+        run: |
+          mvn -B -ntp deploy -DskipTests=false \
+            -DaltDeploymentRepository=vidocq-pr-staging::https://repo.vidocq.dev/pr-staging
+
+  discover-impact:
+    needs: build-pr
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.resolve.outputs.matrix }}
+      has_consumers: ${{ steps.resolve.outputs.has_consumers }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: S'assure que python3, curl et jq sont disponibles
+        run: |
+          if ! command -v python3 >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1; then
+            apt-get update && apt-get install -y --no-install-recommends python3 jq curl ca-certificates
+          fi
+
+      - name: Récupère le graphe, le résolveur et le data file du repo
+        run: |
+          # Slug forge -> nom de fichier data : vidocq/vauban -> vidocq_vauban.json
+          SLUG="${{ github.repository }}"
+          DATA_FILE="${SLUG/\//_}.json"
+          echo "Slug=$SLUG / data file=$DATA_FILE"
+
+          curl -fsSL -H "Authorization: token ${{ secrets.VIDOCQ_BOT_TOKEN }}" \
+            -o /tmp/inverted.json \
+            "https://forge.vidocq.dev/vidocq/GestionProjet/raw/branch/main/graph/inverted.json"
+          curl -fsSL -H "Authorization: token ${{ secrets.VIDOCQ_BOT_TOKEN }}" \
+            -o /tmp/resolve_impact.py \
+            "https://forge.vidocq.dev/vidocq/GestionProjet/raw/branch/main/scripts/resolve_impact.py"
+          curl -fsSL -H "Authorization: token ${{ secrets.VIDOCQ_BOT_TOKEN }}" \
+            -o /tmp/data.json \
+            "https://forge.vidocq.dev/vidocq/GestionProjet/raw/branch/main/data/${DATA_FILE}"
+
+      - name: Liste les artefacts produits par ce repo (depuis le graphe)
+        id: produced
+        # On lit `produces` du data file plutôt que `mvn exec:exec`. Plus rapide,
+        # plus robuste (insensible à l'auto-discovery Maven 4 sans <modules>),
+        # et utilise déjà la source de vérité tenue à jour par update-dep-graph.yml.
+        run: |
+          ARTIFACTS=$(python3 - <<'PY'
+          import json
+          with open("/tmp/data.json") as f:
+              d = json.load(f)
+          out = []
+          for p in d.get("produces", []):
+              out.append(f"{p['groupId']}:{p['artifactId']}")
+          print(" ".join(sorted(set(out))))
+          PY
+          )
+          if [ -z "$ARTIFACTS" ]; then
+            echo "Aucun artefact io.vidocq.* dans data/${{ github.repository }}.json — graphe désynchronisé ?" >&2
+            exit 1
+          fi
+          echo "Produits : $ARTIFACTS"
+          echo "artifacts=$ARTIFACTS" >> "$GITHUB_OUTPUT"
+
+      - name: Résout les consommateurs impactés (fermeture transitive)
+        id: resolve
+        run: |
+          MATRIX=$(python3 /tmp/resolve_impact.py \
+            --graph /tmp/inverted.json \
+            --changed ${{ steps.produced.outputs.artifacts }} \
+            --format matrix)
+          echo "Matrice : $MATRIX"
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+          COUNT=$(echo "$MATRIX" | jq '.include | length')
+          if [ "$COUNT" -gt 0 ]; then
+            echo "has_consumers=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_consumers=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  trigger-downstream:
+    needs: [build-pr, discover-impact]
+    if: needs.discover-impact.outputs.has_consumers == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.discover-impact.outputs.matrix) }}
+    steps:
+      - name: Dispatch ${{ github.repository }} -> ${{ matrix.repo }}
+        # Forgejo Actions n'a pas l'endpoint repository_dispatch ; on utilise
+        # workflow_dispatch sur le fichier upstream-pr.yml présent dans le repo
+        # consommateur.
+        run: |
+          curl -fsSL -X POST \
+            -H "Authorization: token ${{ secrets.VIDOCQ_BOT_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            "https://forge.vidocq.dev/api/v1/repos/${{ matrix.repo }}/actions/workflows/upstream-pr.yml/dispatches" \
+            -d "$(cat <<JSON
+          {
+            "ref": "main",
+            "inputs": {
+              "upstream_repo": "${{ github.repository }}",
+              "upstream_version": "${{ needs.build-pr.outputs.version }}",
+              "pr_number": "${{ github.event.number }}",
+              "pr_sha": "${{ github.event.pull_request.head.sha }}"
+            }
+          }
+          JSON
+          )"
+
+  verify-downstream:
+    # Ce job est l'unique « required check » à mettre dans la branch protection.
+    # Il agrège les downstreams dynamiques en un seul statut stable.
+    needs: [discover-impact, trigger-downstream]
+    if: always() && needs.discover-impact.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cas trivial — aucun consommateur impacté
+        if: needs.discover-impact.outputs.has_consumers != 'true'
+        run: |
+          echo "Aucun consommateur impacté par cette PR — verify OK."
+          exit 0
+
+      - name: S'assure que jq et curl sont disponibles
+        if: needs.discover-impact.outputs.has_consumers == 'true'
+        run: |
+          if ! command -v jq >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1; then
+            apt-get update && apt-get install -y --no-install-recommends jq curl ca-certificates
+          fi
+
+      - name: Attend les statuts downstream
+        if: needs.discover-impact.outputs.has_consumers == 'true'
+        run: |
+          SHA="${{ github.event.pull_request.head.sha }}"
+          EXPECTED=$(echo '${{ needs.discover-impact.outputs.matrix }}' \
+            | jq -r '.include[].repo' | sed 's|.*|downstream/&|')
+          echo "Contextes attendus :"
+          echo "$EXPECTED"
+          DEADLINE=$(( $(date +%s) + 3600 ))  # 60 min max
+          ITERATION=0
+          while [ $(date +%s) -lt $DEADLINE ]; do
+            ITERATION=$((ITERATION + 1))
+            STATUSES=$(curl -fsSL \
+              -H "Authorization: token ${{ secrets.VIDOCQ_BOT_TOKEN }}" \
+              "https://forge.vidocq.dev/api/v1/repos/${{ github.repository }}/commits/$SHA/statuses")
+            POSTED=$(echo "$STATUSES" | jq -r '.[].context' | sort -u)
+            echo "--- Itération $ITERATION : $(echo "$POSTED" | wc -w | tr -d ' ') status posté(s)"
+            ALL_OK=1
+            for ctx in $EXPECTED; do
+              STATE=$(echo "$STATUSES" | jq -r ".[] | select(.context==\"$ctx\") | .state" | head -n1)
+              if [ -z "$STATE" ]; then
+                echo "  [$ctx] AUCUN STATUS POSTÉ — le workflow upstream-pr n'a pas (encore) tourné, ou plante avant 'Poste status'"
+                ALL_OK=0
+                continue
+              fi
+              if [ "$STATE" = "pending" ]; then
+                echo "  [$ctx] pending..."
+                ALL_OK=0
+                continue
+              fi
+              if [ "$STATE" = "failure" ] || [ "$STATE" = "error" ]; then
+                echo "  [$ctx] $STATE — verify-downstream échoue."
+                exit 1
+              fi
+              echo "  [$ctx] $STATE"
+            done
+            if [ "$ALL_OK" = "1" ]; then
+              echo "Tous les downstreams sont remontés OK."
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "Timeout : certains downstreams n'ont pas reporté à temps." >&2
+          exit 1
