@@ -268,7 +268,12 @@ jobs:
   verify-downstream:
     # Ce job est l'unique « required check » à mettre dans la branch protection.
     # Il agrège les downstreams dynamiques en un seul statut stable.
-    needs: [discover-impact, trigger-downstream]
+    # Note : pas de dépendance sur `trigger-downstream` car Forgejo Actions évalue
+    # mal `if: always()` quand un job `needs:` est skipped (cas trivial sans
+    # consommateur). On dépend seulement de discover-impact, le polling des
+    # statuts downstream/* récupère naturellement ce que trigger-downstream a
+    # dispatché (fire-and-forget).
+    needs: [discover-impact]
     if: always() && needs.discover-impact.result == 'success'
     runs-on: ubuntu-latest
     steps:
