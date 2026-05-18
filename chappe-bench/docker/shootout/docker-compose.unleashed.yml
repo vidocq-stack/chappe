@@ -1,0 +1,91 @@
+name: chappe-shootout-unleashed
+
+# Variante "unleashed" du shootout — pas de plafond artificiel :
+#   - PAS de cpuset (chaque container utilise les 12 cores de macuntu)
+#   - network_mode: host (bypass bridge Docker, latence loopback)
+#   - chaque service écoute sur un port unique sur l'host (18081-18089)
+#   - le client wrk2 attaque via localhost:<port>
+#
+# Réutilise les IMAGES déjà buildées par le compose principal — pas de rebuild.
+# Lancement via : SHOOTOUT_UNLEASHED=1 ./client/run-shootout.sh
+
+x-jvm-base: &jvm-base
+  image: chappe-shootout-jvm:local
+  restart: "no"
+  network_mode: host
+
+services:
+
+  chappe-jvm:
+    <<: *jvm-base
+    container_name: chappe-shootout-u-chappe-jvm
+    environment: { PORT: "18081" }
+    command: ["io.vidocq.chappe.bench.oop.ChappeMain"]
+    profiles: [servers, jvm, all]
+
+  jetty:
+    <<: *jvm-base
+    container_name: chappe-shootout-u-jetty
+    environment: { PORT: "18082" }
+    command: ["io.vidocq.chappe.bench.oop.JettyMain"]
+    profiles: [servers, jvm, all]
+
+  helidon:
+    <<: *jvm-base
+    container_name: chappe-shootout-u-helidon
+    environment: { PORT: "18083" }
+    command: ["io.vidocq.chappe.bench.oop.HelidonMain"]
+    profiles: [servers, jvm, all]
+
+  jdk:
+    <<: *jvm-base
+    container_name: chappe-shootout-u-jdk
+    environment: { PORT: "18084" }
+    command: ["io.vidocq.chappe.bench.oop.JdkMain"]
+    profiles: [servers, jvm, all]
+
+  netty:
+    <<: *jvm-base
+    container_name: chappe-shootout-u-netty
+    environment: { PORT: "18085" }
+    command: ["io.vidocq.chappe.bench.oop.NettyMain"]
+    profiles: [servers, jvm, all]
+
+  vertx:
+    <<: *jvm-base
+    container_name: chappe-shootout-u-vertx
+    environment: { PORT: "18086" }
+    command: ["io.vidocq.chappe.bench.oop.VertxMain"]
+    profiles: [servers, jvm, all]
+
+  chappe-native:
+    image: chappe-shootout-native:local
+    container_name: chappe-shootout-u-chappe-native
+    restart: "no"
+    network_mode: host
+    environment: { PORT: "18087" }
+    profiles: [servers, native, all]
+
+  nginx:
+    image: chappe-shootout-nginx:local
+    container_name: chappe-shootout-u-nginx
+    restart: "no"
+    network_mode: host
+    environment: { PORT: "18088" }
+    profiles: [servers, native, all]
+
+  go:
+    image: chappe-shootout-go:local
+    container_name: chappe-shootout-u-go
+    restart: "no"
+    network_mode: host
+    environment: { PORT: "18089" }
+    profiles: [servers, native, all]
+
+  # ─── Client wrk2 — host network pour tester via localhost:PORT ─────────────
+  wrk2:
+    image: cylab/wrk2:latest
+    container_name: chappe-shootout-u-wrk2
+    network_mode: host
+    profiles: [client]
+    entrypoint: ["sleep", "infinity"]

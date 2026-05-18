@@ -1,0 +1,130 @@
+= Performance
+:description: Throughput, p99 latency and benchmarks for Chappe vs Jetty/nginx/Netty/Helidon/Go.
+
+[.lead]
+This page provides a quick read of Chappe's performance (JVM and native)
+against major HTTP servers. *Full numbers, run history and detailed
+methodology* are kept in
+link:{repo-chappe}/blob/main/BENCHMARKS.md[BENCHMARKS.md].
+
+== TL;DR
+
+On Linux x86_64 (12 cores, host network, Docker), with a `wrk2`
+**open-loop** harness and **p99 < 10 ms** as quality-of-service filter:
+
+[cols="1,3,1,1",options="header"]
+|===
+| Tier   | Servers                                            | Sustained   | p99
+| Top    | nginx · Jetty 12 · Netty 4                         | 200k req/s  | 2.3 – 5.1 ms
+| *Mid*  | *chappe-jvm · chappe-native* · Helidon SE 4 · JDK · Go | *100k req/s*| *2.5 – 3.0 ms*
+| Bottom | Vert.x 4 (defaults)                                | < 100k      | high tail
+|===
+
+*Pragmatic read*: Chappe (JVM and native) sustains *100,000 req/s with
+p99 < 3 ms* — covers the vast majority of production HTTP workloads. Below
+that load, Chappe is on par with Helidon SE 4 (same virtual-threads
+architecture), with a *37 MB image / 3 MiB RSS* footprint for the native
+build vs 389 MB / 38 MiB on the JVM.
+
+== Headline numbers (canonical run 2026-05-18, unleashed mode)
+
+[cols="3,1,1,1,1,1",options="header"]
+|===
+| Service       | Image (MB)   | RSS idle  | Sustained @ p99<10ms | p50      | p99
+| nginx 1.27    | 46.0         | 87 MiB    | 200,000              | 0.94 ms  | *2.35 ms*
+| Jetty 12.0.21 | 389.3        | 100 MiB   | 200,000              | 1.03 ms  | 2.46 ms
+| Netty 4.2     | 389.3        | 62 MiB    | 200,000              | *0.92 ms*| 5.07 ms
+| *chappe-jvm*  | 389.3        | 38 MiB    | 100,000              | 1.13 ms  | 2.46 ms
+| Helidon SE 4  | 389.3        | 57 MiB    | 100,000              | 1.16 ms  | 2.54 ms
+| JDK HttpServer 25 | 389.3    | 39 MiB    | 100,000              | 1.20 ms  | 2.74 ms
+| *chappe-native* | *37.1*     | *3 MiB*   | *100,000*            | 1.18 ms  | 2.96 ms
+| Go 1.24 net/http | *7.3*     | *1.7 MiB* | 100,000              | 1.16 ms  | 2.73 ms
+| Vert.x 4.5    | 389.3        | 80 MiB    | 0 (p99 > 100 ms at 100k) | —    | —
+|===
+
+* Conditions: `wrk2` 4 threads / 100 connections / 30 s, fresh Docker
+  container per rate, `network_mode: host`, payload `GET / → "ok"`
+  (2 bytes, text/plain).
+* The `p99 < 10 ms` filter retains the highest rate at which the p99 latency
+  stays below 10 ms — that is the quality of service seen by an actual HTTP
+  client.
+* Companion measurement with `p99 < 20 ms`: Chappe with progressive warmup
+  (5 s @ 100k then 200k) sustains *200k req/s @ p99 ≈ 15 ms*. Under direct
+  cold-start at 200k req/s, p99 drifts (~200 ms) — JIT + Loom scheduler
+  need time to settle. See BENCHMARKS.md, _Progressive warmup vs cold-start_.
+
+== Why is Chappe in mid-tier and not top-tier?
+
+JFR profiling (60 s under 200k req/s load, full profile):
+
+* *GC ruled out*: 19 G1New pauses, max 2.83 ms, total 34 ms over 80 s.
+* *Identified culprit*: *140 ThreadParks* on `ForkJoinPool.awaitWork`,
+  10-32 ms each.
+* Chappe model = *1 virtual thread per connection*. Under TCP bursts at
+  200k req/s, Loom carriers oscillate between `runWorker` and `awaitWork`,
+  accumulating micro-stalls that degrade the latency tail.
+* Jetty / nginx / Netty / Helidon Níma use a *hybrid* NIO event loop +
+  thread pool / virtual thread: their loop never sleeps (`epoll_wait` blocks
+  in the kernel, not in the scheduler) — no wake-up step in the chain.
+
+Considered optimization _(not delivered)_: optional "selector loop" mode in
+Chappe (NIO event loop multiplexing + virtual-thread handler) — the
+Helidon Níma approach. Estimated effort ★★★.
+
+== Chappe native vs JVM (GraalVM CE 25)
+
+[cols="2,1,1,1",options="header"]
+|===
+| Metric              | chappe-native    | chappe-jvm     | Native delta
+| Docker image        | *37 MB*          | 389 MB         | **−90 %** (×10.5)
+| Idle RSS            | *3 MiB*          | 38 MiB         | **−92 %** (×12)
+| Sustained throughput| 100,000 req/s    | 100,000 req/s  | identical
+| p50 @ 100k          | 1.18 ms          | 1.13 ms        | +0.05 ms
+| p99 @ 100k          | 2.96 ms          | 2.46 ms        | +0.50 ms
+|===
+
+Binary built with GraalVM Community Edition 25, `-march=compatibility`,
+`StaticExecutableWithDynamicLibC` mode (mostly-static binary, links glibc
+only). Runtime image: `gcr.io/distroless/cc-debian12:nonroot`. No PGO and
+no `-march=native` — additional optimization headroom available.
+
+== Methodology
+
+* *Bench host*: Linux x86_64, 12 cores, 32 GiB RAM, Docker engine 29.4.3
+  (machine `macuntu`, context `macuntutailscale`).
+* *Client*: `cylab/wrk2` (fork of Gil Tene's wrk2), 4 threads / 100
+  connections, 30 s measurement, 5 s warmup, _coordinated omission_
+  correction (HdrHistogram).
+* *Unleashed mode*: `network_mode: host` (bypasses Docker bridge), no
+  `cpuset` (12 cores available per container), fresh container per rate
+  (eliminates inter-rate coupling).
+* *Acceptance filter*: highest rate at which *p99 < 10 ms*.
+
+[NOTE]
+====
+The link:{repo-chappe}/blob/main/BENCHMARKS.md[BENCHMARKS.md] report also
+contains _closed-loop_ in-process measurements (2026-04-16, 2026-04-23,
+re-run 2026-05-18) that report 275k req/s for Chappe at 16 threads. Those
+numbers measure *raw physical capacity* (client running in the same JVM,
+no latency constraint) — useful for tracking before/after a Chappe
+optimization, but *not comparable* to external servers nor to user-perceived
+performance. The table above remains the canonical reference.
+====
+
+== Reproducibility
+
+[source,bash]
+----
+# Canonical reference: unleashed multi-runtime shootout
+./chappe-bench/docker/run-remote.sh shootout-unleashed
+
+# Bridge mode (CPU pinning 0-3 servers / 4-7 client, reproducible isolation)
+./chappe-bench/docker/run-remote.sh shootout
+
+# Without native build (if GraalVM 25 unavailable)
+./chappe-bench/docker/run-remote.sh shootout-jvm-only
+----
+
+For the full Dockerfiles, harness and JFR profiling suite, see the
+link:{repo-chappe}/tree/main/chappe-bench/docker/shootout[`chappe-bench/docker/shootout`]
+folder and the complete link:{repo-chappe}/blob/main/BENCHMARKS.md[BENCHMARKS.md] report.

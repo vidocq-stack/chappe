@@ -1,0 +1,65 @@
+# syntax=docker/dockerfile:1.7
+#
+# Build une image distroless contenant uniquement le binaire natif Chappe
+# (GraalVM CE 25 native-image). Utilise le profil Maven `native` du module
+# chappe-bench qui invoque native-image sur ChappeMain.
+#
+ARG GRAALVM_TAG=25-ol9
+ARG MAVEN_TAG=4.0.0-rc-5-eclipse-temurin-25
+
+# Stage 1 : build le jar + collect deps via maven standard (plus rapide à cacher)
+FROM maven:${MAVEN_TAG} AS jar-build
+WORKDIR /chappe
+
+COPY pom.xml ./
+COPY chappe-api/pom.xml                         chappe-api/pom.xml
+COPY chappe-http/pom.xml                        chappe-http/pom.xml
+COPY chappe-core/pom.xml                        chappe-core/pom.xml
+COPY chappe-tests/pom.xml                       chappe-tests/pom.xml
+COPY chappe-bench/pom.xml                       chappe-bench/pom.xml
+COPY chappe-conformance/pom.xml                 chappe-conformance/pom.xml
+COPY chappe-examples/pom.xml                    chappe-examples/pom.xml
+COPY chappe-cli/pom.xml                         chappe-cli/pom.xml
+COPY chappe-static-index-maven-plugin/pom.xml   chappe-static-index-maven-plugin/pom.xml
+
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn -pl chappe-bench -am -DskipTests dependency:go-offline -B || true
+
+COPY chappe-api/src                        chappe-api/src
+COPY chappe-http/src                       chappe-http/src
+COPY chappe-core/src                       chappe-core/src
+COPY chappe-bench/src                      chappe-bench/src
+COPY chappe-static-index-maven-plugin/src  chappe-static-index-maven-plugin/src
+
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn -pl chappe-bench -am -DskipTests package
+
+
+# Stage 2 : native-image sur Chappe uniquement (sans Jetty/Helidon/Netty/Vert.x dans le classpath)
+FROM ghcr.io/graalvm/native-image-community:${GRAALVM_TAG} AS native-build
+WORKDIR /work
+
+# Le jar du module + uniquement les jars chappe-api/http/core dans le classpath natif.
+# On exclut volontairement Helidon/Jetty/Netty/Vert.x qui ne servent qu'au comparatif in-process.
+COPY --from=jar-build /chappe/chappe-api/target/chappe-api-*.jar    /work/deps/
+COPY --from=jar-build /chappe/chappe-http/target/chappe-http-*.jar  /work/deps/
+COPY --from=jar-build /chappe/chappe-core/target/chappe-core-*.jar  /work/deps/
+COPY --from=jar-build /chappe/chappe-bench/target/classes           /work/classes
+
+# Les flags native-image (--enable-preview, --no-fallback, -march=compatibility,
+# --initialize-at-build-time=…) sont fournis par
+# /work/classes/META-INF/native-image/io.vidocq.chappe/chappe-bench/native-image.properties
+# que native-image découvre automatiquement.
+RUN native-image \
+        -cp "/work/classes:/work/deps/*" \
+        io.vidocq.chappe.bench.oop.ChappeMain \
+        /work/chappe-native
+
+
+# Stage 3 : runtime distroless cc (libc + libgcc + libssl + libz)
+# native-image lie dynamiquement libz (compression JDK), absent de distroless/base.
+FROM gcr.io/distroless/cc-debian12:nonroot
+COPY --from=native-build /work/chappe-native /chappe-native
+ENV PORT=8080
+EXPOSE 8080
+ENTRYPOINT ["/chappe-native"]
