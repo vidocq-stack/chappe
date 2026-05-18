@@ -382,27 +382,33 @@ soutenu vs bridge confirme l'effet du CPU pinning sur les chiffres précédents.
 Vert.x défonce sa latence dès 100k req/s (`p99 = 109 ms`) dans sa config par
 défaut (1 event loop verticle) — exclu du filtre `p99 < 10 ms`.
 
-#### Nuance importante : warmup progressif vs cold-start au rate cible
+#### Note sur la sensibilité au warmup (run 2026-05-18T14:42:14Z)
 
-Le tableau ci-dessus warmupe **5 s au rate cible** avant chaque mesure. Test
-séparé avec **warmup à 100k req/s puis mesure à 200k** sur le même `chappe-jvm`
-(container fresh, JVM_TOOL_OPTIONS standard) :
+Hypothèse initialement formulée : Chappe (modèle Loom 1 VT / connection)
+**bénéficierait d'un warmup progressif** au rate inférieur avant la mesure
+à pleine charge — le JIT et le scheduler Loom auraient le temps de s'aligner.
 
-| Setup                                       | p99 @ 200k |
-|---------------------------------------------|-----------:|
-| Shootout fresh (warmup direct à 200k)       | **219 ms** |
-| Warmup progressif (5 s @ 100k puis 200k)    |  **15.57 ms** |
+Test reproduit dans le shootout (warmup 10 s @ 100k req/s puis mesure 30 s
+au rate cible, container fresh) :
 
-Chappe (et plus généralement le modèle Loom : 1 VT par connection) **bénéficie
-d'un warmup progressif** : JIT compile les hot paths à bas rate puis tient
-ensuite la charge. Sous cold-start direct à 200k req/s, les VTs sont créés sous
-pression maximale, le JIT compile en parallèle de bursts, et le tail explose.
-Jetty / nginx / netty ne montrent pas cette sensibilité car ils utilisent un
-pool fixe + event loop (pas de spawn dynamique).
+| Setup                                       | chappe-jvm p99 @ 200k | netty p99 @ 200k |
+|---------------------------------------------|----------------------:|-----------------:|
+| Warmup direct au rate cible (5 s @ 200k)    |   ~200 ms             |  **5.07 ms** ✅   |
+| Warmup progressif (10 s @ 100k puis 200k)   |   214 ms              |   226 ms ❌       |
+| **Test isolé hier — fenêtre 20 s seulement**|   **15.57 ms**        |   —              |
 
-→ Le tableau "Max sustained" reflète donc le **cas le moins favorable** pour
-Chappe (cold-start direct). En production avec rampup progressif (rolling deploy
-+ trafic qui monte), Chappe tient probablement **200k req/s à p99 ≈ 15-20 ms**.
+→ **Le `15.57 ms` du test isolé était un artefact de fenêtre courte (20 s)
+qui n'a pas capturé les spikes rares.** Avec 30 s de mesure, le p99 réel à
+200k req/s reste à ~200 ms pour Chappe — peu importe la stratégie de warmup.
+
+Pire : le warmup progressif a **dégradé** netty (5 ms → 226 ms) — l'event
+loop netty bénéficie d'un warmup au rate cible (préchauffe ses pipelines).
+
+**Conclusion** : la limite à 100k req/s @ p99 < 10 ms pour Chappe est bien
+**architecturale** (modèle 1 VT par connection sature les carriers
+ForkJoinPool sous très haute charge), pas conjoncturelle. Aucun tuning de
+warmup ne fait passer Chappe en top-tier 200k sans refactor du modèle de
+threading. Cf. profil JFR ci-dessous.
 
 ### Peak throughput observé (sans filtre latence, comparable au bench 2026-04-23)
 

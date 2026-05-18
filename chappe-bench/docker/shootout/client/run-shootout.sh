@@ -30,7 +30,11 @@ CONTEXT="${CHAPPE_DOCKER_CONTEXT:-macuntutailscale}"
 SKIP_NATIVE="${SHOOTOUT_SKIP_NATIVE:-0}"
 UNLEASHED="${SHOOTOUT_UNLEASHED:-0}"
 DURATION="${SHOOTOUT_DURATION:-30s}"
-WARMUP="${SHOOTOUT_WARMUP:-5s}"
+WARMUP="${SHOOTOUT_WARMUP:-10s}"
+# Warmup PROGRESSIF : toujours à un rate "raisonnable" (default 100k) pour laisser
+# le JIT et le scheduler Loom s'aligner avant la mesure à plein régime. Cf. note
+# BENCHMARKS.md §"warmup progressif vs cold-start".
+WARMUP_RATE="${SHOOTOUT_WARMUP_RATE:-100000}"
 CONNECTIONS="${SHOOTOUT_CONNECTIONS:-100}"
 THREADS="${SHOOTOUT_THREADS:-4}"
 KEEP_UP="${SHOOTOUT_KEEP_UP:-0}"
@@ -222,8 +226,12 @@ measure_one() {
             rss=$(echo "$stats_out" | awk '{print $1}')
         fi
 
-        echo "  warmup $WARMUP @ rate $rate (on fresh container)"
-        compose exec -T wrk2 wrk -d"$WARMUP" -t"$THREADS" -c"$CONNECTIONS" -R"$rate" \
+        # Warmup progressif : capé à WARMUP_RATE (100k par défaut) pour laisser
+        # le JIT et le scheduler Loom s'aligner avant la mesure à plein régime.
+        local w_rate="$WARMUP_RATE"
+        [ "$rate" -lt "$w_rate" ] && w_rate="$rate"
+        echo "  warmup $WARMUP @ rate $w_rate (progressif → cible $rate)"
+        compose exec -T wrk2 wrk -d"$WARMUP" -t"$THREADS" -c"$CONNECTIONS" -R"$w_rate" \
             "$url" >/dev/null 2>&1 || true
 
         echo "  measure $DURATION @ rate $rate"
