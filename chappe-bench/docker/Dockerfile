@@ -21,6 +21,7 @@ COPY chappe-tests/pom.xml                       chappe-tests/pom.xml
 COPY chappe-bench/pom.xml                       chappe-bench/pom.xml
 COPY chappe-conformance/pom.xml                 chappe-conformance/pom.xml
 COPY chappe-examples/pom.xml                    chappe-examples/pom.xml
+COPY chappe-cli/pom.xml                         chappe-cli/pom.xml
 COPY chappe-static-index-maven-plugin/pom.xml   chappe-static-index-maven-plugin/pom.xml
 
 RUN --mount=type=cache,target=/root/.m2 \

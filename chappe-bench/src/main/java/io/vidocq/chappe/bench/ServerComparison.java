@@ -86,41 +86,86 @@ public class ServerComparison {
         }
     }
 
-    static final class GrizzlyServer implements BenchServer {
-        private org.glassfish.grizzly.http.server.HttpServer server;
-        private int actualPort;
+    static final class NettyServer implements BenchServer {
+        private io.netty.channel.EventLoopGroup boss;
+        private io.netty.channel.EventLoopGroup worker;
+        private io.netty.channel.Channel channel;
 
         @Override
         public void start(int port) throws Exception {
-            // Grizzly ne supporte pas port 0 — trouver un port éphémère manuellement
-            if (port == 0) {
-                try (var ss = new java.net.ServerSocket(0)) {
-                    port = ss.getLocalPort();
-                }
-            }
-            actualPort = port;
-            server = org.glassfish.grizzly.http.server.HttpServer.createSimpleServer(null, port);
-            server.getServerConfiguration().addHttpHandler(
-                    new org.glassfish.grizzly.http.server.HttpHandler() {
+            boss = new io.netty.channel.nio.NioEventLoopGroup(1);
+            worker = new io.netty.channel.nio.NioEventLoopGroup();
+            io.netty.bootstrap.ServerBootstrap b = new io.netty.bootstrap.ServerBootstrap();
+            b.group(boss, worker)
+                    .channel(io.netty.channel.socket.nio.NioServerSocketChannel.class)
+                    .childOption(io.netty.channel.ChannelOption.TCP_NODELAY, true)
+                    .childHandler(new io.netty.channel.ChannelInitializer<io.netty.channel.socket.SocketChannel>() {
                         @Override
-                        public void service(
-                                org.glassfish.grizzly.http.server.Request req,
-                                org.glassfish.grizzly.http.server.Response res) throws Exception {
-                            res.setContentType("text/plain");
-                            res.getWriter().write("ok");
+                        protected void initChannel(io.netty.channel.socket.SocketChannel ch) {
+                            ch.pipeline().addLast(new io.netty.handler.codec.http.HttpServerCodec());
+                            ch.pipeline().addLast(new io.netty.handler.codec.http.HttpObjectAggregator(8192));
+                            ch.pipeline().addLast(new io.netty.channel.SimpleChannelInboundHandler<io.netty.handler.codec.http.FullHttpRequest>() {
+                                @Override
+                                protected void channelRead0(io.netty.channel.ChannelHandlerContext ctx,
+                                                            io.netty.handler.codec.http.FullHttpRequest req) {
+                                    io.netty.buffer.ByteBuf content =
+                                            io.netty.buffer.Unpooled.copiedBuffer("ok", io.netty.util.CharsetUtil.UTF_8);
+                                    io.netty.handler.codec.http.FullHttpResponse resp =
+                                            new io.netty.handler.codec.http.DefaultFullHttpResponse(
+                                                    io.netty.handler.codec.http.HttpVersion.HTTP_1_1,
+                                                    io.netty.handler.codec.http.HttpResponseStatus.OK,
+                                                    content);
+                                    resp.headers()
+                                            .set(io.netty.handler.codec.http.HttpHeaderNames.CONTENT_TYPE, "text/plain")
+                                            .setInt(io.netty.handler.codec.http.HttpHeaderNames.CONTENT_LENGTH,
+                                                    content.readableBytes());
+                                    if (io.netty.handler.codec.http.HttpUtil.isKeepAlive(req)) {
+                                        resp.headers().set(io.netty.handler.codec.http.HttpHeaderNames.CONNECTION,
+                                                io.netty.handler.codec.http.HttpHeaderValues.KEEP_ALIVE);
+                                    }
+                                    ctx.writeAndFlush(resp);
+                                }
+                            });
                         }
-                    }, "/");
-            server.start();
+                    });
+            channel = b.bind(port).sync().channel();
         }
 
         @Override
         public int port() {
-            return actualPort;
+            return ((InetSocketAddress) channel.localAddress()).getPort();
         }
 
         @Override
         public void stop() throws Exception {
-            server.shutdownNow();
+            channel.close().sync();
+            boss.shutdownGracefully().sync();
+            worker.shutdownGracefully().sync();
+        }
+    }
+
+    static final class VertxServer implements BenchServer {
+        private io.vertx.core.Vertx vertx;
+        private io.vertx.core.http.HttpServer server;
+
+        @Override
+        public void start(int port) throws Exception {
+            vertx = io.vertx.core.Vertx.vertx();
+            server = vertx.createHttpServer()
+                    .requestHandler(req -> req.response()
+                            .putHeader("content-type", "text/plain")
+                            .end("ok"));
+            server.listen(port).toCompletionStage().toCompletableFuture().get();
+        }
+
+        @Override
+        public int port() {
+            return server.actualPort();
+        }
+
+        @Override
+        public void stop() throws Exception {
+            vertx.close().toCompletionStage().toCompletableFuture().get();
         }
     }
 
@@ -354,9 +399,10 @@ public class ServerComparison {
         return switch (index) {
             case 0 -> new ChappeServer();
             case 1 -> new HelidonServer();
-            case 2 -> new GrizzlyServer();
-            case 3 -> new JettyServer();
-            case 4 -> new JdkHttpServer();
+            case 2 -> new JettyServer();
+            case 3 -> new JdkHttpServer();
+            case 4 -> new NettyServer();
+            case 5 -> new VertxServer();
             default -> throw new IllegalArgumentException("Unknown server index: " + index);
         };
     }
@@ -407,11 +453,11 @@ public class ServerComparison {
         System.out.println("║   Server Comparison Benchmark — Chappe 0.1    ║");
         System.out.println("╚════════════════════════════════════════════════╝");
 
-        String[] serverNames = {"Chappe", "Helidon SE 4", "Grizzly 4", "Jetty 12", "JDK HttpServer"};
+        String[] serverNames = {"Chappe", "Helidon SE 4", "Jetty 12", "JDK HttpServer", "Netty 4.2", "Vert.x 4.5"};
         int[] threadCounts = {1, 4, 8, 16};
-        double[][] results = new double[5][4];
+        double[][] results = new double[serverNames.length][threadCounts.length];
 
-        for (int s = 0; s < 5; s++) {
+        for (int s = 0; s < serverNames.length; s++) {
             BenchServer server = null;
             try {
                 server = createServer(s);

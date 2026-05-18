@@ -69,7 +69,7 @@ Chappe peut aussi fonctionner **sans extension** : c'est ce que fait sa CLI `cha
 
 == Performance
 
-Tous les chiffres (throughput, latence p50/p99, comparatifs Jetty/Helidon/JDK HttpServer) sont consignés dans lien:{repo-chappe}/blob/main/BENCH.md[BENCH.md] avec hardware, JVM et commande exacte. Aucun chiffre inline dans cette documentation.
+Lecture rapide (TL;DR, tableau canonique, profil JFR, comparatif natif vs JVM) : xref:performance.adoc[page Performance]. Le journal complet de tous les runs (closed-loop in-process et open-loop wrk2), la méthodologie détaillée et l'historique des optimisations sont consignés dans lien:{repo-chappe}/blob/main/BENCHMARKS.md[BENCHMARKS.md].
 
 == Ressources rapides
 

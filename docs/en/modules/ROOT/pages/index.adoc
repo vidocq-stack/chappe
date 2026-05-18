@@ -69,7 +69,7 @@ Chappe also runs **without any extension**: that is what its `chappe serve` CLI 
 
 == Performance
 
-All numbers (throughput, p50/p99 latency, comparisons against Jetty/Helidon/JDK HttpServer) live in lien:{repo-chappe}/blob/main/BENCH.md[BENCH.md] alongside hardware, JVM and exact command. No inline figures in this documentation.
+Quick read (TL;DR, canonical table, JFR profile, native vs JVM): xref:performance.adoc[Performance page]. The full log of all runs (closed-loop in-process and open-loop wrk2), detailed methodology and history of optimizations live in lien:{repo-chappe}/blob/main/BENCHMARKS.md[BENCHMARKS.md].
 
 == Quick links
 
