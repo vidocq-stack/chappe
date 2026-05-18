@@ -1,0 +1,125 @@
+name: chappe-shootout
+
+# Réseau bridge dédié — tous les services communiquent via leur nom DNS Compose.
+# Chaque serveur expose 8080 en interne ; le port hôte est mappé pour debug.
+# CPU pinning : serveurs sur cpus 0-3, client wrk2 sur 4-7 (override via env si moins de coeurs dispos).
+#
+# Lancement complet via : ../client/run-shootout.sh
+# Debug d'un seul serveur :
+#   docker compose -f docker-compose.yml --profile servers up <service>
+
+x-jvm-base: &jvm-base
+  build:
+    context: ../../..
+    dockerfile: chappe-bench/docker/shootout/Dockerfile.jvm
+  image: chappe-shootout-jvm:local
+  restart: "no"
+  networks: [shootout]
+  cpuset: "${SERVER_CPUSET:-0-3}"
+  healthcheck:
+    test: ["CMD-SHELL", "ss -tln | grep -q :8080 || nc -z localhost 8080"]
+    interval: 1s
+    timeout: 1s
+    retries: 30
+
+services:
+
+  chappe-jvm:
+    <<: *jvm-base
+    container_name: chappe-shootout-chappe-jvm
+    command: ["io.vidocq.chappe.bench.oop.ChappeMain"]
+    profiles: [servers, jvm, all]
+    ports: ["18081:8080"]
+
+  jetty:
+    <<: *jvm-base
+    container_name: chappe-shootout-jetty
+    command: ["io.vidocq.chappe.bench.oop.JettyMain"]
+    profiles: [servers, jvm, all]
+    ports: ["18082:8080"]
+
+  helidon:
+    <<: *jvm-base
+    container_name: chappe-shootout-helidon
+    command: ["io.vidocq.chappe.bench.oop.HelidonMain"]
+    profiles: [servers, jvm, all]
+    ports: ["18083:8080"]
+
+  jdk:
+    <<: *jvm-base
+    container_name: chappe-shootout-jdk
+    command: ["io.vidocq.chappe.bench.oop.JdkMain"]
+    profiles: [servers, jvm, all]
+    ports: ["18084:8080"]
+
+  netty:
+    <<: *jvm-base
+    container_name: chappe-shootout-netty
+    command: ["io.vidocq.chappe.bench.oop.NettyMain"]
+    profiles: [servers, jvm, all]
+    ports: ["18085:8080"]
+
+  vertx:
+    <<: *jvm-base
+    container_name: chappe-shootout-vertx
+    command: ["io.vidocq.chappe.bench.oop.VertxMain"]
+    profiles: [servers, jvm, all]
+    ports: ["18086:8080"]
+
+  chappe-native:
+    build:
+      context: ../../..
+      dockerfile: chappe-bench/docker/shootout/Dockerfile.chappe-native
+    image: chappe-shootout-native:local
+    container_name: chappe-shootout-chappe-native
+    restart: "no"
+    networks: [shootout]
+    cpuset: "${SERVER_CPUSET:-0-3}"
+    profiles: [servers, native, all]
+    ports: ["18087:8080"]
+    # distroless base n'embarque pas de shell — détection via wrk2 (run-shootout.sh poll loop).
+
+  nginx:
+    build:
+      context: ../../..
+      dockerfile: chappe-bench/docker/shootout/Dockerfile.nginx
+    image: chappe-shootout-nginx:local
+    container_name: chappe-shootout-nginx
+    restart: "no"
+    networks: [shootout]
+    cpuset: "${SERVER_CPUSET:-0-3}"
+    profiles: [servers, native, all]
+    ports: ["18088:8080"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/ | grep -q ok"]
+      interval: 1s
+      timeout: 1s
+      retries: 30
+
+  go:
+    build:
+      context: ../../..
+      dockerfile: chappe-bench/docker/shootout/Dockerfile.go
+    image: chappe-shootout-go:local
+    container_name: chappe-shootout-go
+    restart: "no"
+    networks: [shootout]
+    cpuset: "${SERVER_CPUSET:-0-3}"
+    profiles: [servers, native, all]
+    ports: ["18089:8080"]
+    # distroless n'embarque ni wget ni nc — on délègue au client wrk2 pour la détection (boucle retry).
+
+  # ─── Client wrk2 — profil "client" uniquement, pas démarré avec "servers" ─────
+  # Image cylab/wrk2 : c'est bien la wrk2 de Gil Tene (fork qui supporte -R/--latency),
+  # mais le binaire installé s'appelle `wrk` et non `wrk2` (compile par défaut en `wrk`).
+  wrk2:
+    image: cylab/wrk2:latest
+    container_name: chappe-shootout-wrk2
+    networks: [shootout]
+    cpuset: "${CLIENT_CPUSET:-4-7}"
+    profiles: [client]
+    entrypoint: ["sleep", "infinity"]
+
+networks:
+  shootout:
+    driver: bridge

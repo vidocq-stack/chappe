@@ -1,0 +1,11 @@
+# syntax=docker/dockerfile:1.7
+FROM nginx:1.27-alpine
+
+# Template avec ${PORT} substitué au démarrage par envsubst — supporte le mode
+# "unleashed" où chaque service écoute sur un port unique en network_mode: host.
+COPY chappe-bench/docker/shootout/nginx.conf /etc/nginx/nginx.conf.template
+
+ENV PORT=8080
+EXPOSE 8080
+
+CMD ["sh","-c","envsubst '${PORT}' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf && exec nginx -g 'daemon off;'"]
