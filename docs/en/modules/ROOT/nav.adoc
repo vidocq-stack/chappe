@@ -3,5 +3,6 @@
 ** xref:usage.adoc[Usage]
 ** xref:concepts.adoc[Concepts]
 ** xref:internals.adoc[Internals]
+** xref:performance.adoc[Performance]
 ** xref:reference.adoc[Reference]
 ** xref:migration.adoc[Migration]
