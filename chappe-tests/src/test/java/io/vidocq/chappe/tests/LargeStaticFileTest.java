@@ -1,10 +1,8 @@
 package io.vidocq.chappe.tests;
 
-import io.vidocq.chappe.api.Server;
-import io.vidocq.chappe.api.StaticFileHandler;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -18,9 +16,12 @@ import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.SplittableRandom;
 
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import io.vidocq.chappe.api.Server;
+import io.vidocq.chappe.api.StaticFileHandler;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Régression : un client qui drain lentement ne doit pas recevoir une réponse
@@ -49,18 +50,13 @@ class LargeStaticFileTest {
         Path big = root.resolve("big.bin");
         Files.write(big, payload);
 
-        server = Server.builder()
-                .port(0)
-                .handler(StaticFileHandler.of(root))
-                .build();
+        server = Server.builder().port(0).handler(StaticFileHandler.of(root)).build();
         server.start();
 
         byte[] received = drainSlowly(server.port(), "/big.bin", payload.length);
 
-        assertEquals(payload.length, received.length,
-                "réponse tronquée — vraisemblablement transferTo==0 silencieux");
-        assertEquals(sha256(payload), sha256(received),
-                "intégrité du fichier compromise");
+        assertEquals(payload.length, received.length, "réponse tronquée — vraisemblablement transferTo==0 silencieux");
+        assertEquals(sha256(payload), sha256(received), "intégrité du fichier compromise");
         assertArrayEquals(payload, received);
     }
 
@@ -71,9 +67,8 @@ class LargeStaticFileTest {
             socket.setSoTimeout(30_000);
 
             OutputStream out = socket.getOutputStream();
-            out.write(("GET " + path + " HTTP/1.1\r\n"
-                    + "Host: localhost\r\n"
-                    + "Connection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+            out.write(("GET " + path + " HTTP/1.1\r\n" + "Host: localhost\r\n" + "Connection: close\r\n\r\n")
+                    .getBytes(StandardCharsets.US_ASCII));
             out.flush();
 
             InputStream in = socket.getInputStream();
@@ -97,7 +92,9 @@ class LargeStaticFileTest {
                 total += n;
                 // Drain ralenti — sature le SO_SNDBUF côté serveur et force
                 // sendfile(2) à observer EAGAIN-like → transferTo peut renvoyer 0.
-                try { Thread.sleep(2); } catch (InterruptedException ie) {
+                try {
+                    Thread.sleep(2);
+                } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
                     break;
                 }

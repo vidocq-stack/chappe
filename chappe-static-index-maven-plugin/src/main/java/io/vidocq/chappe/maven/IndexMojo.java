@@ -1,12 +1,5 @@
 package io.vidocq.chappe.maven;
 
-import org.apache.maven.plugin.AbstractMojo;
-import org.apache.maven.plugin.MojoExecutionException;
-import org.apache.maven.plugins.annotations.LifecyclePhase;
-import org.apache.maven.plugins.annotations.Mojo;
-import org.apache.maven.plugins.annotations.Parameter;
-import org.apache.maven.project.MavenProject;
-
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.InputStream;
@@ -21,6 +14,13 @@ import java.util.Properties;
 import java.util.stream.Stream;
 import java.util.zip.GZIPOutputStream;
 
+import org.apache.maven.plugin.AbstractMojo;
+import org.apache.maven.plugin.MojoExecutionException;
+import org.apache.maven.plugins.annotations.LifecyclePhase;
+import org.apache.maven.plugins.annotations.Mojo;
+import org.apache.maven.plugins.annotations.Parameter;
+import org.apache.maven.project.MavenProject;
+
 /**
  * Scans a configured resource root under the project build output and writes an
  * index file listing each static resource with its size, last-modified timestamp,
@@ -29,14 +29,10 @@ import java.util.zip.GZIPOutputStream;
  * <p>At runtime, {@code StaticFileHandler} loads this index to resolve resources
  * in O(1) without calling {@code URLConnection.openConnection()} per request.
  */
-@Mojo(
-        name = "index",
-        defaultPhase = LifecyclePhase.PROCESS_RESOURCES,
-        threadSafe = true)
+@Mojo(name = "index", defaultPhase = LifecyclePhase.PROCESS_RESOURCES, threadSafe = true)
 public final class IndexMojo extends AbstractMojo {
 
-    private static final String INDEX_RESOURCE_PATH =
-            "META-INF/chappe-static-index.properties";
+    private static final String INDEX_RESOURCE_PATH = "META-INF/chappe-static-index.properties";
 
     @Parameter(defaultValue = "${project}", readonly = true, required = true)
     private MavenProject project;
@@ -111,8 +107,7 @@ public final class IndexMojo extends AbstractMojo {
                 props.store(out, "Chappe static resources index — generated at build time");
             }
             String suffix = doGzip ? " (+" + gzCount[0] + " .gz sidecars)" : "";
-            getLog().info("chappe-static-index: indexed " + props.size()
-                    + " resources" + suffix + " → " + indexFile);
+            getLog().info("chappe-static-index: indexed " + props.size() + " resources" + suffix + " → " + indexFile);
         } catch (IOException e) {
             throw new MojoExecutionException("Failed to generate " + INDEX_RESOURCE_PATH, e);
         }
@@ -126,11 +121,20 @@ public final class IndexMojo extends AbstractMojo {
         }
         String name = file.getFileName().toString().toLowerCase();
         // Skip already-compressed sidecars and non-compressible types.
-        if (name.endsWith(".gz") || name.endsWith(".br") || name.endsWith(".zip")
-                || name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg")
-                || name.endsWith(".webp") || name.endsWith(".gif") || name.endsWith(".woff")
-                || name.endsWith(".woff2") || name.endsWith(".mp4") || name.endsWith(".webm")
-                || name.endsWith(".pdf") || name.endsWith(".wasm")) {
+        if (name.endsWith(".gz")
+                || name.endsWith(".br")
+                || name.endsWith(".zip")
+                || name.endsWith(".png")
+                || name.endsWith(".jpg")
+                || name.endsWith(".jpeg")
+                || name.endsWith(".webp")
+                || name.endsWith(".gif")
+                || name.endsWith(".woff")
+                || name.endsWith(".woff2")
+                || name.endsWith(".mp4")
+                || name.endsWith(".webm")
+                || name.endsWith(".pdf")
+                || name.endsWith(".wasm")) {
             return false;
         }
         return true;
@@ -139,8 +143,8 @@ public final class IndexMojo extends AbstractMojo {
     private Path generateGzipSidecar(Path source) {
         Path target = source.resolveSibling(source.getFileName() + ".gz");
         try (InputStream in = Files.newInputStream(source);
-             OutputStream out = Files.newOutputStream(target);
-             GZIPOutputStream gz = new GZIPOutputStream(out)) {
+                OutputStream out = Files.newOutputStream(target);
+                GZIPOutputStream gz = new GZIPOutputStream(out)) {
             in.transferTo(gz);
         } catch (IOException e) {
             getLog().warn("Failed to gzip " + source + ": " + e.getMessage());
@@ -164,8 +168,7 @@ public final class IndexMojo extends AbstractMojo {
         }
     }
 
-    private static String sha256Hex(Path path)
-            throws IOException, NoSuchAlgorithmException {
+    private static String sha256Hex(Path path) throws IOException, NoSuchAlgorithmException {
         MessageDigest md = MessageDigest.getInstance("SHA-256");
         byte[] buf = new byte[8192];
         try (InputStream in = Files.newInputStream(path)) {
@@ -212,6 +215,8 @@ public final class IndexMojo extends AbstractMojo {
     }
 
     static final class IndexingException extends RuntimeException {
-        IndexingException(String msg, Throwable cause) { super(msg, cause); }
+        IndexingException(String msg, Throwable cause) {
+            super(msg, cause);
+        }
     }
 }

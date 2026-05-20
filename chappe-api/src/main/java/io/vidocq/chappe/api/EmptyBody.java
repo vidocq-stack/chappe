@@ -27,8 +27,13 @@ final class EmptyBody implements Body {
     public Flow.Publisher<ByteBuffer> asPublisher() {
         return subscriber -> {
             subscriber.onSubscribe(new Flow.Subscription() {
-                @Override public void request(long n) { subscriber.onComplete(); }
-                @Override public void cancel() {}
+                @Override
+                public void request(long n) {
+                    subscriber.onComplete();
+                }
+
+                @Override
+                public void cancel() {}
             });
         };
     }

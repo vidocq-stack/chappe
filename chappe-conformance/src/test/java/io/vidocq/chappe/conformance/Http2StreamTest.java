@@ -1,11 +1,6 @@
 package io.vidocq.chappe.conformance;
 
-import io.vidocq.chappe.api.Response;
-import io.vidocq.chappe.api.Router;
-import io.vidocq.chappe.api.Server;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
 import java.net.URI;
@@ -16,7 +11,13 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
 
-import static org.junit.jupiter.api.Assertions.*;
+import io.vidocq.chappe.api.Response;
+import io.vidocq.chappe.api.Router;
+import io.vidocq.chappe.api.Server;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 /**
  * HTTP/2 stream-level tests using {@link HttpClient} with HTTP_2 prior-knowledge (h2c).
@@ -41,16 +42,11 @@ class Http2StreamTest {
                 })
                 .build();
 
-        server = Server.builder()
-                .port(0)
-                .handler(router)
-                .build();
+        server = Server.builder().port(0).handler(router).build();
         server.start();
         baseUrl = "http://127.0.0.1:" + server.port();
 
-        client = HttpClient.newBuilder()
-                .version(HttpClient.Version.HTTP_2)
-                .build();
+        client = HttpClient.newBuilder().version(HttpClient.Version.HTTP_2).build();
     }
 
     @AfterEach
@@ -63,10 +59,8 @@ class Http2StreamTest {
      */
     @Test
     void simpleGetStream() throws IOException, InterruptedException {
-        var request = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl + "/"))
-                .GET()
-                .build();
+        var request =
+                HttpRequest.newBuilder().uri(URI.create(baseUrl + "/")).GET().build();
         var response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
         assertEquals(200, response.statusCode());
@@ -94,10 +88,8 @@ class Http2StreamTest {
 
         for (var future : futures) {
             var response = future.get();
-            assertEquals(200, response.statusCode(),
-                    "Each concurrent stream should get 200");
-            assertEquals("stream-ok", response.body(),
-                    "Each concurrent stream should get correct body");
+            assertEquals(200, response.statusCode(), "Each concurrent stream should get 200");
+            assertEquals("stream-ok", response.body(), "Each concurrent stream should get correct body");
         }
     }
 
@@ -114,7 +106,6 @@ class Http2StreamTest {
         var response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
         assertEquals(200, response.statusCode());
-        assertEquals(bodyText, response.body(),
-                "POST body should be echoed back");
+        assertEquals(bodyText, response.body(), "POST body should be echoed back");
     }
 }

@@ -13,40 +13,40 @@ public sealed interface StatusCode permits StatusCode.Standard, StatusCode.Custo
     String reason();
 
     // --- 2xx Success ---
-    StatusCode OK                    = new Standard(200, "OK");
-    StatusCode CREATED               = new Standard(201, "Created");
-    StatusCode ACCEPTED              = new Standard(202, "Accepted");
-    StatusCode NO_CONTENT            = new Standard(204, "No Content");
+    StatusCode OK = new Standard(200, "OK");
+    StatusCode CREATED = new Standard(201, "Created");
+    StatusCode ACCEPTED = new Standard(202, "Accepted");
+    StatusCode NO_CONTENT = new Standard(204, "No Content");
 
     // --- 3xx Redirection ---
-    StatusCode MOVED_PERMANENTLY     = new Standard(301, "Moved Permanently");
-    StatusCode FOUND                 = new Standard(302, "Found");
-    StatusCode NOT_MODIFIED          = new Standard(304, "Not Modified");
-    StatusCode TEMPORARY_REDIRECT    = new Standard(307, "Temporary Redirect");
-    StatusCode PERMANENT_REDIRECT    = new Standard(308, "Permanent Redirect");
+    StatusCode MOVED_PERMANENTLY = new Standard(301, "Moved Permanently");
+    StatusCode FOUND = new Standard(302, "Found");
+    StatusCode NOT_MODIFIED = new Standard(304, "Not Modified");
+    StatusCode TEMPORARY_REDIRECT = new Standard(307, "Temporary Redirect");
+    StatusCode PERMANENT_REDIRECT = new Standard(308, "Permanent Redirect");
 
     // --- 4xx Client Error ---
-    StatusCode BAD_REQUEST           = new Standard(400, "Bad Request");
-    StatusCode UNAUTHORIZED          = new Standard(401, "Unauthorized");
-    StatusCode FORBIDDEN             = new Standard(403, "Forbidden");
-    StatusCode NOT_FOUND             = new Standard(404, "Not Found");
-    StatusCode METHOD_NOT_ALLOWED    = new Standard(405, "Method Not Allowed");
-    StatusCode NOT_ACCEPTABLE        = new Standard(406, "Not Acceptable");
-    StatusCode REQUEST_TIMEOUT       = new Standard(408, "Request Timeout");
-    StatusCode CONFLICT              = new Standard(409, "Conflict");
-    StatusCode GONE                  = new Standard(410, "Gone");
-    StatusCode LENGTH_REQUIRED       = new Standard(411, "Length Required");
-    StatusCode PAYLOAD_TOO_LARGE     = new Standard(413, "Content Too Large");
-    StatusCode URI_TOO_LONG          = new Standard(414, "URI Too Long");
+    StatusCode BAD_REQUEST = new Standard(400, "Bad Request");
+    StatusCode UNAUTHORIZED = new Standard(401, "Unauthorized");
+    StatusCode FORBIDDEN = new Standard(403, "Forbidden");
+    StatusCode NOT_FOUND = new Standard(404, "Not Found");
+    StatusCode METHOD_NOT_ALLOWED = new Standard(405, "Method Not Allowed");
+    StatusCode NOT_ACCEPTABLE = new Standard(406, "Not Acceptable");
+    StatusCode REQUEST_TIMEOUT = new Standard(408, "Request Timeout");
+    StatusCode CONFLICT = new Standard(409, "Conflict");
+    StatusCode GONE = new Standard(410, "Gone");
+    StatusCode LENGTH_REQUIRED = new Standard(411, "Length Required");
+    StatusCode PAYLOAD_TOO_LARGE = new Standard(413, "Content Too Large");
+    StatusCode URI_TOO_LONG = new Standard(414, "URI Too Long");
     StatusCode UNSUPPORTED_MEDIA_TYPE = new Standard(415, "Unsupported Media Type");
-    StatusCode TOO_MANY_REQUESTS     = new Standard(429, "Too Many Requests");
+    StatusCode TOO_MANY_REQUESTS = new Standard(429, "Too Many Requests");
 
     // --- 5xx Server Error ---
     StatusCode INTERNAL_SERVER_ERROR = new Standard(500, "Internal Server Error");
-    StatusCode NOT_IMPLEMENTED       = new Standard(501, "Not Implemented");
-    StatusCode BAD_GATEWAY           = new Standard(502, "Bad Gateway");
-    StatusCode SERVICE_UNAVAILABLE   = new Standard(503, "Service Unavailable");
-    StatusCode GATEWAY_TIMEOUT       = new Standard(504, "Gateway Timeout");
+    StatusCode NOT_IMPLEMENTED = new Standard(501, "Not Implemented");
+    StatusCode BAD_GATEWAY = new Standard(502, "Bad Gateway");
+    StatusCode SERVICE_UNAVAILABLE = new Standard(503, "Service Unavailable");
+    StatusCode GATEWAY_TIMEOUT = new Standard(504, "Gateway Timeout");
 
     /**
      * Retourne un {@code StatusCode} pour le code et la raison donnés.

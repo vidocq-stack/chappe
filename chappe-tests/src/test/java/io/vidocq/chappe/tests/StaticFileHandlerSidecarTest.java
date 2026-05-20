@@ -1,5 +1,15 @@
 package io.vidocq.chappe.tests;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+
+import java.io.ByteArrayOutputStream;
+import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Map;
+import java.util.zip.GZIPOutputStream;
+
 import io.vidocq.chappe.api.Body;
 import io.vidocq.chappe.api.Handler;
 import io.vidocq.chappe.api.Headers;
@@ -9,18 +19,9 @@ import io.vidocq.chappe.api.Request;
 import io.vidocq.chappe.api.Response;
 import io.vidocq.chappe.api.StaticFileHandler;
 import io.vidocq.chappe.api.StatusCode;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-
-import java.io.ByteArrayOutputStream;
-import java.net.URI;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.Map;
-import java.util.zip.GZIPOutputStream;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 class StaticFileHandlerSidecarTest {
 
@@ -95,9 +96,7 @@ class StaticFileHandlerSidecarTest {
         Files.writeString(root.resolve("style.css"), "body{}");
         Files.write(root.resolve("style.css.gz"), gzipBytes("body{}".getBytes()));
 
-        Handler h = StaticFileHandler.builder()
-                .addPath(root)
-                .build();
+        Handler h = StaticFileHandler.builder().addPath(root).build();
 
         Response r = h.handle(req("/style.css", "gzip"));
         assertEquals(null, r.headers().firstOrNull("Content-Encoding"));
@@ -114,20 +113,61 @@ class StaticFileHandlerSidecarTest {
     private static Request req(String path, String acceptEncoding) {
         Headers h = Headers.builder().add("Accept-Encoding", acceptEncoding).build();
         return new Request() {
-            @Override public HttpMethod method() { return HttpMethod.GET; }
-            @Override public URI uri() { return URI.create("http://test" + path); }
-            @Override public String path() { return path; }
-            @Override public String query() { return null; }
-            @Override public HttpVersion version() { return HttpVersion.HTTP_1_1; }
-            @Override public Headers headers() { return h; }
-            @Override public Body body() { return Body.empty(); }
-            @Override public Map<String, String> pathParams() { return Map.of(); }
-            @Override public Map<String, String> queryParams() { return Map.of(); }
-            @Override public String pathInfo() { return path; }
+            @Override
+            public HttpMethod method() {
+                return HttpMethod.GET;
+            }
+
+            @Override
+            public URI uri() {
+                return URI.create("http://test" + path);
+            }
+
+            @Override
+            public String path() {
+                return path;
+            }
+
+            @Override
+            public String query() {
+                return null;
+            }
+
+            @Override
+            public HttpVersion version() {
+                return HttpVersion.HTTP_1_1;
+            }
+
+            @Override
+            public Headers headers() {
+                return h;
+            }
+
+            @Override
+            public Body body() {
+                return Body.empty();
+            }
+
+            @Override
+            public Map<String, String> pathParams() {
+                return Map.of();
+            }
+
+            @Override
+            public Map<String, String> queryParams() {
+                return Map.of();
+            }
+
+            @Override
+            public String pathInfo() {
+                return path;
+            }
         };
     }
 
     private static byte[] readAll(Body b) throws Exception {
-        try (var in = b.asInputStream()) { return in.readAllBytes(); }
+        try (var in = b.asInputStream()) {
+            return in.readAllBytes();
+        }
     }
 }

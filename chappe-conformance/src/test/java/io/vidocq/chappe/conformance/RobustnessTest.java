@@ -1,12 +1,6 @@
 package io.vidocq.chappe.conformance;
 
-import io.vidocq.chappe.api.Response;
-import io.vidocq.chappe.api.Router;
-import io.vidocq.chappe.api.Server;
-import io.vidocq.chappe.api.StatusCode;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -16,7 +10,13 @@ import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 
-import static org.junit.jupiter.api.Assertions.*;
+import io.vidocq.chappe.api.Response;
+import io.vidocq.chappe.api.Router;
+import io.vidocq.chappe.api.Server;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 /**
  * Robustness tests — verifies the server handles malformed, incomplete,
@@ -64,12 +64,13 @@ class RobustnessTest {
             var in = socket.getInputStream();
 
             // Send random garbage
-            out.write(new byte[]{0x00, 0x01, 0x02, (byte) 0xFF, (byte) 0xFE, 0x0D, 0x0A});
+            out.write(new byte[] {0x00, 0x01, 0x02, (byte) 0xFF, (byte) 0xFE, 0x0D, 0x0A});
             out.flush();
 
             var response = readResponse(in);
             // Server should either close the connection (empty response) or send 400
-            assertTrue(response.isEmpty() || response.contains("400"),
+            assertTrue(
+                    response.isEmpty() || response.contains("400"),
                     "Garbage input should result in connection close or 400: " + truncate(response));
         }
 
@@ -150,7 +151,8 @@ class RobustnessTest {
 
             var response = readResponse(in);
             // Should either succeed (200) or timeout (408)
-            assertTrue(response.contains("200") || response.contains("408"),
+            assertTrue(
+                    response.contains("200") || response.contains("408"),
                     "Slow client should get 200 or 408, got: " + truncate(response));
         }
 
@@ -180,7 +182,8 @@ class RobustnessTest {
             try {
                 var response = readResponse(in);
                 // Expect 431 (Request Header Fields Too Large) or 400
-                assertTrue(response.contains("431") || response.contains("400"),
+                assertTrue(
+                        response.contains("431") || response.contains("400"),
                         "Oversized header should get 431 or 400, got: " + truncate(response));
             } catch (java.net.SocketException _) {
                 // Connection reset by server is acceptable — server closed before response
@@ -188,7 +191,10 @@ class RobustnessTest {
         }
 
         // Wait a bit for server to process
-        try { Thread.sleep(100); } catch (InterruptedException _) {}
+        try {
+            Thread.sleep(100);
+        } catch (InterruptedException _) {
+        }
         assertTrue(server.isRunning(), "Server must survive oversized headers");
     }
 
@@ -204,8 +210,7 @@ class RobustnessTest {
             out.flush();
 
             var response = readResponse(in);
-            assertTrue(response.contains("200"),
-                    "Normal request after abuse should succeed: " + truncate(response));
+            assertTrue(response.contains("200"), "Normal request after abuse should succeed: " + truncate(response));
         }
     }
 

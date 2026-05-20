@@ -7,6 +7,6 @@ module io.vidocq.chappe.core {
 
     exports io.vidocq.chappe.core;
 
-    provides io.vidocq.chappe.api.ServerProvider
-            with io.vidocq.chappe.core.ChappeServerProvider;
+    provides io.vidocq.chappe.api.ServerProvider with
+            io.vidocq.chappe.core.ChappeServerProvider;
 }

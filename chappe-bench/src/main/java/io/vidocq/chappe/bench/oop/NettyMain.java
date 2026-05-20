@@ -51,8 +51,7 @@ public final class NettyMain {
                                             .set(HttpHeaderNames.CONTENT_TYPE, "text/plain")
                                             .setInt(HttpHeaderNames.CONTENT_LENGTH, content.readableBytes());
                                     if (HttpUtil.isKeepAlive(req)) {
-                                        resp.headers().set(HttpHeaderNames.CONNECTION,
-                                                HttpHeaderValues.KEEP_ALIVE);
+                                        resp.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.KEEP_ALIVE);
                                     }
                                     ctx.writeAndFlush(resp);
                                 }

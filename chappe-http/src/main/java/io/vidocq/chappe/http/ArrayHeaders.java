@@ -1,13 +1,13 @@
 package io.vidocq.chappe.http;
 
-import io.vidocq.chappe.api.Headers;
-
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
+
+import io.vidocq.chappe.api.Headers;
 
 /**
  * Implémentation de {@link Headers} sur tableaux parallèles — zero-copy.

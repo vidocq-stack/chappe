@@ -42,6 +42,8 @@
 
         <!-- Quality -->
         <jacoco.version>0.8.13</jacoco.version>
+        <spotless.version>2.46.1</spotless.version>
+        <palantir.version>2.84.0</palantir.version>
         <sonar.projectKey>vidocq-chappe</sonar.projectKey>
         <sonar.java.source>25</sonar.java.source>
         <sonar.coverage.jacoco.xmlReportPaths>${project.build.directory}/site/jacoco/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
@@ -180,8 +182,44 @@
                     <artifactId>sonar-maven-plugin</artifactId>
                     <version>5.1.0.4751</version>
                 </plugin>
+                <plugin>
+                    <groupId>com.diffplug.spotless</groupId>
+                    <artifactId>spotless-maven-plugin</artifactId>
+                    <version>${spotless.version}</version>
+                    <configuration>
+                        <java>
+                            <includes>
+                                <include>src/main/java/**/*.java</include>
+                                <include>src/test/java/**/*.java</include>
+                            </includes>
+                            <palantirJavaFormat>
+                                <version>${palantir.version}</version>
+                                <style>PALANTIR</style>
+                            </palantirJavaFormat>
+                            <removeUnusedImports/>
+                            <importOrder>
+                                <order>java,javax,jakarta,io.vidocq,</order>
+                            </importOrder>
+                            <trimTrailingWhitespace/>
+                            <endWithNewline/>
+                        </java>
+                    </configuration>
+                    <executions>
+                        <execution>
+                            <id>spotless-check</id>
+                            <phase>verify</phase>
+                            <goals><goal>check</goal></goals>
+                        </execution>
+                    </executions>
+                </plugin>
             </plugins>
         </pluginManagement>
+        <plugins>
+            <plugin>
+                <groupId>com.diffplug.spotless</groupId>
+                <artifactId>spotless-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
     </build>
 
     <distributionManagement>

@@ -1,9 +1,5 @@
 package io.vidocq.chappe.http.h2;
 
-import io.vidocq.chappe.api.Body;
-import io.vidocq.chappe.api.HttpVersion;
-import io.vidocq.chappe.http.HttpRequestImpl;
-
 import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -11,13 +7,21 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 
+import io.vidocq.chappe.api.Body;
+import io.vidocq.chappe.api.HttpVersion;
+import io.vidocq.chappe.http.HttpRequestImpl;
+
 /**
  * État d'un stream HTTP/2 — lifecycle, flow control, construction de la requête.
  */
 public final class Http2Stream {
 
     public enum State {
-        IDLE, OPEN, HALF_CLOSED_LOCAL, HALF_CLOSED_REMOTE, CLOSED
+        IDLE,
+        OPEN,
+        HALF_CLOSED_LOCAL,
+        HALF_CLOSED_REMOTE,
+        CLOSED
     }
 
     private final int streamId;
@@ -49,13 +53,23 @@ public final class Http2Stream {
         this.request.setVersion(HttpVersion.HTTP_2);
     }
 
-    public int streamId() { return streamId; }
-    public State state() { return state; }
-    public HttpRequestImpl request() { return request; }
+    public int streamId() {
+        return streamId;
+    }
+
+    public State state() {
+        return state;
+    }
+
+    public HttpRequestImpl request() {
+        return request;
+    }
 
     // --- Transitions d'état ---
 
-    public void open() { state = State.OPEN; }
+    public void open() {
+        state = State.OPEN;
+    }
 
     public void halfCloseRemote() {
         state = (state == State.HALF_CLOSED_LOCAL) ? State.CLOSED : State.HALF_CLOSED_REMOTE;
@@ -65,15 +79,27 @@ public final class Http2Stream {
         state = (state == State.OPEN) ? State.HALF_CLOSED_LOCAL : State.CLOSED;
     }
 
-    public void close() { state = State.CLOSED; }
+    public void close() {
+        state = State.CLOSED;
+    }
 
     // --- Flow control ---
 
-    public int recvWindow() { return recvWindow.get(); }
-    public int sendWindow() { return sendWindow.get(); }
+    public int recvWindow() {
+        return recvWindow.get();
+    }
 
-    public void consumeRecvWindow(int delta) { recvWindow.addAndGet(-delta); }
-    public void consumeSendWindow(int delta) { sendWindow.addAndGet(-delta); }
+    public int sendWindow() {
+        return sendWindow.get();
+    }
+
+    public void consumeRecvWindow(int delta) {
+        recvWindow.addAndGet(-delta);
+    }
+
+    public void consumeSendWindow(int delta) {
+        sendWindow.addAndGet(-delta);
+    }
 
     public void incrementSendWindow(int delta) {
         sendWindow.addAndGet(delta);
@@ -85,10 +111,17 @@ public final class Http2Stream {
         }
     }
 
-    public void incrementRecvWindow(int delta) { recvWindow.addAndGet(delta); }
+    public void incrementRecvWindow(int delta) {
+        recvWindow.addAndGet(delta);
+    }
 
-    public ReentrantLock sendLock() { return sendLock; }
-    public Condition sendWindowAvailable() { return sendWindowAvailable; }
+    public ReentrantLock sendLock() {
+        return sendLock;
+    }
+
+    public Condition sendWindowAvailable() {
+        return sendWindowAvailable;
+    }
 
     // --- Accumulation du header block ---
 
@@ -110,7 +143,9 @@ public final class Http2Stream {
         return result;
     }
 
-    public boolean headersEndStream() { return headersEndStream; }
+    public boolean headersEndStream() {
+        return headersEndStream;
+    }
 
     // --- Données (body) ---
 
@@ -127,8 +162,13 @@ public final class Http2Stream {
         return dataQueue.take();
     }
 
-    boolean isEndStreamReceived() { return endStreamReceived; }
-    boolean isDataQueueEmpty() { return dataQueue.isEmpty(); }
+    boolean isEndStreamReceived() {
+        return endStreamReceived;
+    }
+
+    boolean isDataQueueEmpty() {
+        return dataQueue.isEmpty();
+    }
 
     /** Crée un Body alimenté par la queue de données. */
     public Body createBody() {

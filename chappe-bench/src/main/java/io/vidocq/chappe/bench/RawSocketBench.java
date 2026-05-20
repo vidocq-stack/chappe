@@ -1,18 +1,19 @@
 package io.vidocq.chappe.bench;
 
-import io.vidocq.chappe.api.Response;
-import io.vidocq.chappe.api.Server;
-import org.openjdk.jmh.annotations.*;
-import org.openjdk.jmh.runner.Runner;
-import org.openjdk.jmh.runner.RunnerException;
-import org.openjdk.jmh.runner.options.OptionsBuilder;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.TimeUnit;
+
+import io.vidocq.chappe.api.Response;
+import io.vidocq.chappe.api.Server;
+
+import org.openjdk.jmh.annotations.*;
+import org.openjdk.jmh.runner.Runner;
+import org.openjdk.jmh.runner.RunnerException;
+import org.openjdk.jmh.runner.options.OptionsBuilder;
 
 /**
  * Benchmark avec client raw socket — mesure le throughput pur du serveur
@@ -38,10 +39,7 @@ public class RawSocketBench {
 
     @Setup(Level.Trial)
     public void setupServer() {
-        server = Server.builder()
-                .port(0)
-                .handler(_ -> Response.ok("ok"))
-                .build();
+        server = Server.builder().port(0).handler(_ -> Response.ok("ok")).build();
         server.start();
         port = server.port();
         readBuf = new byte[4096];
@@ -104,8 +102,7 @@ public class RawSocketBench {
 
             // Chercher \r\n\r\n
             for (int i = Math.max(0, totalRead - n - 3); i <= totalRead - 4; i++) {
-                if (readBuf[i] == '\r' && readBuf[i + 1] == '\n'
-                        && readBuf[i + 2] == '\r' && readBuf[i + 3] == '\n') {
+                if (readBuf[i] == '\r' && readBuf[i + 1] == '\n' && readBuf[i + 2] == '\r' && readBuf[i + 3] == '\n') {
                     headerEnd = i + 4;
                     break;
                 }

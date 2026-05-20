@@ -1,8 +1,9 @@
 package io.vidocq.chappe.api;
 
-import javax.net.ssl.SSLContext;
 import java.time.Duration;
 import java.util.List;
+
+import javax.net.ssl.SSLContext;
 
 /**
  * Configuration immutable du serveur HTTP.
@@ -30,8 +31,7 @@ public record ServerConfig(
         int maxHeaderSize,
         SSLContext sslContext,
         List<String> alpnProtocols,
-        Duration shutdownGracePeriod
-) {
+        Duration shutdownGracePeriod) {
 
     /** Configuration par défaut (cleartext). */
     public static final ServerConfig DEFAULT = new ServerConfig(
@@ -45,8 +45,7 @@ public record ServerConfig(
             8192,
             null,
             List.of("h2", "http/1.1"),
-            Duration.ofSeconds(30)
-    );
+            Duration.ofSeconds(30));
 
     /** {@code true} si TLS est activé. */
     public boolean tlsEnabled() {

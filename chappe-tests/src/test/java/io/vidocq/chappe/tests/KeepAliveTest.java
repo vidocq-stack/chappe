@@ -1,10 +1,6 @@
 package io.vidocq.chappe.tests;
 
-import io.vidocq.chappe.api.Response;
-import io.vidocq.chappe.api.Server;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -16,7 +12,12 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 
-import static org.junit.jupiter.api.Assertions.*;
+import io.vidocq.chappe.api.Response;
+import io.vidocq.chappe.api.Server;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 class KeepAliveTest {
 
@@ -27,10 +28,7 @@ class KeepAliveTest {
 
     @BeforeEach
     void setUp() {
-        server = Server.builder()
-                .port(0)
-                .handler(_ -> Response.ok("ok"))
-                .build();
+        server = Server.builder().port(0).handler(_ -> Response.ok("ok")).build();
         server.start();
         port = server.port();
         baseUrl = "http://127.0.0.1:" + port;
@@ -72,8 +70,8 @@ class KeepAliveTest {
             var response = readResponse(in);
             assertTrue(response.contains("200"), "Should be 200 OK: " + response);
             assertTrue(response.contains("ok"), "Body should contain 'ok': " + response);
-            assertTrue(response.toLowerCase().contains("connection: close"),
-                    "Should have Connection: close: " + response);
+            assertTrue(
+                    response.toLowerCase().contains("connection: close"), "Should have Connection: close: " + response);
         }
     }
 

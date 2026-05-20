@@ -38,8 +38,7 @@ public final class Http2FrameWriter {
     // Méthodes publiques — toutes throws IOException
     // -------------------------------------------------------------------------
 
-    public void writeFrame(int type, int flags, int streamId,
-                           byte[] payload, int off, int len) throws IOException {
+    public void writeFrame(int type, int flags, int streamId, byte[] payload, int off, int len) throws IOException {
         writeLock.lock();
         try {
             writeFrameHeader(len, type, flags, streamId);
@@ -122,8 +121,7 @@ public final class Http2FrameWriter {
         }
     }
 
-    public void writeHeaders(int streamId, byte[] encodedHeaders, boolean endStream)
-            throws IOException {
+    public void writeHeaders(int streamId, byte[] encodedHeaders, boolean endStream) throws IOException {
         writeLock.lock();
         try {
             int totalLen = encodedHeaders.length;
@@ -156,8 +154,7 @@ public final class Http2FrameWriter {
         }
     }
 
-    public void writeData(int streamId, byte[] data, int off, int len, boolean endStream)
-            throws IOException {
+    public void writeData(int streamId, byte[] data, int off, int len, boolean endStream) throws IOException {
         writeLock.lock();
         try {
             int remaining = len;
@@ -188,8 +185,7 @@ public final class Http2FrameWriter {
     // Helpers internes
     // -------------------------------------------------------------------------
 
-    private void writeFrameHeader(int payloadLen, int type, int flags, int streamId)
-            throws IOException {
+    private void writeFrameHeader(int payloadLen, int type, int flags, int streamId) throws IOException {
         ensureCapacity(FRAME_HEADER_SIZE);
         writeBuffer.put((byte) ((payloadLen >>> 16) & 0xFF));
         writeBuffer.put((byte) ((payloadLen >>> 8) & 0xFF));

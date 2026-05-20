@@ -147,8 +147,8 @@ public interface Filter {
 
             byte[] compressed;
             try (var in = r.body().asInputStream();
-                 var bos = new ByteArrayOutputStream();
-                 var gout = new GZIPOutputStream(bos)) {
+                    var bos = new ByteArrayOutputStream();
+                    var gout = new GZIPOutputStream(bos)) {
                 in.transferTo(gout);
                 gout.finish();
                 compressed = bos.toByteArray();
@@ -171,8 +171,7 @@ public interface Filter {
     }
 
     /** Format de date Apache : {@code [day/Mon/yyyy:HH:mm:ss +0000]}. */
-    DateTimeFormatter ACCESS_LOG_DATE = DateTimeFormatter
-            .ofPattern("dd/MMM/yyyy:HH:mm:ss xx", Locale.ROOT);
+    DateTimeFormatter ACCESS_LOG_DATE = DateTimeFormatter.ofPattern("dd/MMM/yyyy:HH:mm:ss xx", Locale.ROOT);
 
     /**
      * Filtre d'access log au format Apache Combined Log Format (CLF) étendu.
@@ -217,8 +216,7 @@ public interface Filter {
         };
     }
 
-    private static void logLine(Consumer<String> sink, Request req,
-                                int status, long size, long startNanos) {
+    private static void logLine(Consumer<String> sink, Request req, int status, long size, long startNanos) {
         long durMs = (System.nanoTime() - startNanos) / 1_000_000L;
         String ts = ZonedDateTime.now(ZoneOffset.UTC).format(ACCESS_LOG_DATE);
         String ip = clientIp(req);

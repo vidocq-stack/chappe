@@ -11,19 +11,17 @@ public record Http2Settings(
         int maxConcurrentStreams,
         int initialWindowSize,
         int maxFrameSize,
-        int maxHeaderListSize
-) {
+        int maxHeaderListSize) {
 
     // Identifiants des paramètres (RFC 9113, Section 6.5.1)
-    public static final int HEADER_TABLE_SIZE      = 0x1;
-    public static final int ENABLE_PUSH            = 0x2;
+    public static final int HEADER_TABLE_SIZE = 0x1;
+    public static final int ENABLE_PUSH = 0x2;
     public static final int MAX_CONCURRENT_STREAMS = 0x3;
-    public static final int INITIAL_WINDOW_SIZE    = 0x4;
-    public static final int MAX_FRAME_SIZE         = 0x5;
-    public static final int MAX_HEADER_LIST_SIZE   = 0x6;
+    public static final int INITIAL_WINDOW_SIZE = 0x4;
+    public static final int MAX_FRAME_SIZE = 0x5;
+    public static final int MAX_HEADER_LIST_SIZE = 0x6;
 
-    public static final Http2Settings DEFAULT = new Http2Settings(
-            4096, false, 100, 65535, 16384, 8192);
+    public static final Http2Settings DEFAULT = new Http2Settings(4096, false, 100, 65535, 16384, 8192);
 
     /** Parse un payload SETTINGS et retourne les settings mis à jour. */
     public Http2Settings applyFrom(ByteBuffer payload, int length) {
@@ -38,12 +36,12 @@ public record Http2Settings(
             int id = payload.getShort() & 0xFFFF;
             int value = payload.getInt();
             switch (id) {
-                case HEADER_TABLE_SIZE      -> htSize = value;
-                case ENABLE_PUSH            -> push = (value != 0);
+                case HEADER_TABLE_SIZE -> htSize = value;
+                case ENABLE_PUSH -> push = (value != 0);
                 case MAX_CONCURRENT_STREAMS -> maxStreams = value;
-                case INITIAL_WINDOW_SIZE    -> winSize = value;
-                case MAX_FRAME_SIZE         -> maxFrame = value;
-                case MAX_HEADER_LIST_SIZE   -> maxHeader = value;
+                case INITIAL_WINDOW_SIZE -> winSize = value;
+                case MAX_FRAME_SIZE -> maxFrame = value;
+                case MAX_HEADER_LIST_SIZE -> maxHeader = value;
                 default -> {} // ignorer les settings inconnus (RFC 9113 §6.5.2)
             }
         }

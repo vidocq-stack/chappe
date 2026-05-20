@@ -79,7 +79,8 @@ final class RawHttp {
         // Status line: HTTP/1.1 200 OK
         int firstSpace = response.indexOf(' ');
         if (firstSpace < 0) {
-            throw new IllegalArgumentException("Malformed status line: " + response.lines().findFirst().orElse(""));
+            throw new IllegalArgumentException(
+                    "Malformed status line: " + response.lines().findFirst().orElse(""));
         }
         int secondSpace = response.indexOf(' ', firstSpace + 1);
         int endOfCode = secondSpace > 0 ? secondSpace : response.indexOf('\r', firstSpace + 1);

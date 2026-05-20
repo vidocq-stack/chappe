@@ -1,18 +1,7 @@
 package io.vidocq.chappe.http.h2;
 
-import io.vidocq.chappe.api.Body;
-import io.vidocq.chappe.api.Handler;
-import io.vidocq.chappe.api.HttpMethod;
-import io.vidocq.chappe.api.HttpVersion;
-import io.vidocq.chappe.api.RequestContext;
-import io.vidocq.chappe.api.Response;
-import io.vidocq.chappe.api.ServerConfig;
-import io.vidocq.chappe.api.StatusCode;
-import io.vidocq.chappe.http.HttpRequestImpl;
-
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.channels.SocketChannel;
@@ -23,6 +12,15 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 
+import io.vidocq.chappe.api.Body;
+import io.vidocq.chappe.api.Handler;
+import io.vidocq.chappe.api.HttpMethod;
+import io.vidocq.chappe.api.RequestContext;
+import io.vidocq.chappe.api.Response;
+import io.vidocq.chappe.api.ServerConfig;
+import io.vidocq.chappe.api.StatusCode;
+import io.vidocq.chappe.http.HttpRequestImpl;
+
 /**
  * Gestionnaire de connexion HTTP/2 — une instance par connexion,
  * exécutée dans un virtual thread dédié.
@@ -32,8 +30,7 @@ import java.util.concurrent.locks.ReentrantLock;
  */
 public final class Http2Connection {
 
-    private static final byte[] CLIENT_PREFACE =
-            "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] CLIENT_PREFACE = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
 
     private static final int WRITE_BUFFER_SIZE = 16_384;
     private static final int DATA_CHUNK_SIZE = 8_192;
@@ -81,17 +78,19 @@ public final class Http2Connection {
      * @param config     la configuration serveur
      * @param readBuffer le buffer de lecture pré-rempli (depuis le protocol sniffing)
      */
-    public Http2Connection(SocketChannel channel, Handler handler,
-                           ServerConfig config, ByteBuffer readBuffer) {
-        this((ReadableByteChannel) channel, (WritableByteChannel) channel,
-                handler, config, readBuffer);
+    public Http2Connection(SocketChannel channel, Handler handler, ServerConfig config, ByteBuffer readBuffer) {
+        this((ReadableByteChannel) channel, (WritableByteChannel) channel, handler, config, readBuffer);
     }
 
     /**
      * Constructeur acceptant des channels séparés (pour TLS via SslHandler).
      */
-    public Http2Connection(ReadableByteChannel readChannel, WritableByteChannel writeChannel,
-                           Handler handler, ServerConfig config, ByteBuffer readBuffer) {
+    public Http2Connection(
+            ReadableByteChannel readChannel,
+            WritableByteChannel writeChannel,
+            Handler handler,
+            ServerConfig config,
+            ByteBuffer readBuffer) {
         this.readChannel = readChannel;
         this.writeChannel = writeChannel;
         this.handler = handler;
@@ -100,8 +99,7 @@ public final class Http2Connection {
         this.writeBuffer = ByteBuffer.allocateDirect(WRITE_BUFFER_SIZE);
         this.frameReader = new Http2FrameReader(readBuffer, readChannel);
         this.frameWriter = new Http2FrameWriter(writeBuffer, writeChannel);
-        this.hpackDecoder = new HpackDecoder(
-                localSettings.headerTableSize(), localSettings.maxHeaderListSize());
+        this.hpackDecoder = new HpackDecoder(localSettings.headerTableSize(), localSettings.maxHeaderListSize());
         this.hpackEncoder = new HpackEncoder();
     }
 
@@ -138,12 +136,12 @@ public final class Http2Connection {
             // PRIORITY frames are skipped (null)
             if (frame == null) continue;
 
-
             // CONTINUATION state enforcement (RFC 9113 §6.10)
             if (expectingContinuationForStream >= 0) {
                 if (!(frame instanceof Http2Frame.ContinuationFrame cont)
                         || cont.streamId() != expectingContinuationForStream) {
-                    throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR,
+                    throw new Http2ConnectionException(
+                            Http2ErrorCode.PROTOCOL_ERROR,
                             "Expected CONTINUATION for stream " + expectingContinuationForStream);
                 }
                 handleContinuation(cont);
@@ -151,17 +149,16 @@ public final class Http2Connection {
             }
 
             switch (frame) {
-                case Http2Frame.DataFrame f         -> handleData(f);
-                case Http2Frame.HeadersFrame f      -> handleHeaders(f);
-                case Http2Frame.RstStreamFrame f    -> handleRstStream(f);
-                case Http2Frame.SettingsFrame f     -> handleSettings(f);
-                case Http2Frame.PingFrame f         -> handlePing(f);
-                case Http2Frame.GoawayFrame f       -> handleGoaway(f);
+                case Http2Frame.DataFrame f -> handleData(f);
+                case Http2Frame.HeadersFrame f -> handleHeaders(f);
+                case Http2Frame.RstStreamFrame f -> handleRstStream(f);
+                case Http2Frame.SettingsFrame f -> handleSettings(f);
+                case Http2Frame.PingFrame f -> handlePing(f);
+                case Http2Frame.GoawayFrame f -> handleGoaway(f);
                 case Http2Frame.WindowUpdateFrame f -> handleWindowUpdate(f);
                 case Http2Frame.ContinuationFrame _ ->
-                    throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR,
-                            "Unexpected CONTINUATION frame");
-                case Http2Frame.UnknownFrame _      -> {} // ignore
+                    throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR, "Unexpected CONTINUATION frame");
+                case Http2Frame.UnknownFrame _ -> {} // ignore
             }
         }
     }
@@ -174,8 +171,8 @@ public final class Http2Connection {
         if (frame.ack()) return;
 
         if (frame.streamId() != 0) {
-            throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR,
-                    "SETTINGS frame on non-zero stream " + frame.streamId());
+            throw new Http2ConnectionException(
+                    Http2ErrorCode.PROTOCOL_ERROR, "SETTINGS frame on non-zero stream " + frame.streamId());
         }
 
         var payload = frame.payload();
@@ -208,8 +205,8 @@ public final class Http2Connection {
         if (frame.ack()) return;
 
         if (frame.streamId() != 0) {
-            throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR,
-                    "PING frame on non-zero stream " + frame.streamId());
+            throw new Http2ConnectionException(
+                    Http2ErrorCode.PROTOCOL_ERROR, "PING frame on non-zero stream " + frame.streamId());
         }
 
         frameWriter.writePingAck(frame.opaqueData());
@@ -220,8 +217,8 @@ public final class Http2Connection {
 
         // Stream ID must be odd (client-initiated) and greater than lastStreamId
         if (streamId % 2 == 0 || streamId <= lastStreamId) {
-            throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR,
-                    "Invalid stream ID: " + streamId + " (last=" + lastStreamId + ")");
+            throw new Http2ConnectionException(
+                    Http2ErrorCode.PROTOCOL_ERROR, "Invalid stream ID: " + streamId + " (last=" + lastStreamId + ")");
         }
         lastStreamId = streamId;
 
@@ -232,8 +229,7 @@ public final class Http2Connection {
         }
 
         // Create and register the stream
-        var stream = new Http2Stream(streamId,
-                localSettings.initialWindowSize(), remoteSettings.initialWindowSize());
+        var stream = new Http2Stream(streamId, localSettings.initialWindowSize(), remoteSettings.initialWindowSize());
         stream.open();
         streams.put(streamId, stream);
 
@@ -247,13 +243,12 @@ public final class Http2Connection {
         }
     }
 
-    private void handleContinuation(Http2Frame.ContinuationFrame frame)
-            throws IOException {
+    private void handleContinuation(Http2Frame.ContinuationFrame frame) throws IOException {
         int streamId = frame.streamId();
         var stream = streams.get(streamId);
         if (stream == null) {
-            throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR,
-                    "CONTINUATION for unknown stream " + streamId);
+            throw new Http2ConnectionException(
+                    Http2ErrorCode.PROTOCOL_ERROR, "CONTINUATION for unknown stream " + streamId);
         }
 
         stream.appendHeaderFragment(frame.headerBlock());
@@ -272,7 +267,6 @@ public final class Http2Connection {
         // Extract pseudo-headers
         extractPseudoHeaders(stream.request());
 
-
         // Half-close remote if END_STREAM was set on HEADERS
         if (stream.headersEndStream()) {
             stream.halfCloseRemote();
@@ -280,17 +274,14 @@ public final class Http2Connection {
 
         // Dispatch in a dedicated virtual thread
         int streamId = stream.streamId();
-        Thread.ofVirtual()
-                .name("chappe-h2-stream-" + streamId)
-                .start(() -> dispatchStream(stream));
+        Thread.ofVirtual().name("chappe-h2-stream-" + streamId).start(() -> dispatchStream(stream));
     }
 
     private void handleData(Http2Frame.DataFrame frame) throws IOException {
         int streamId = frame.streamId();
         var stream = streams.get(streamId);
         if (stream == null) {
-            throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR,
-                    "DATA for unknown stream " + streamId);
+            throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR, "DATA for unknown stream " + streamId);
         }
 
         int dataLength = frame.data().remaining();
@@ -323,12 +314,10 @@ public final class Http2Connection {
         }
     }
 
-    private void handleWindowUpdate(Http2Frame.WindowUpdateFrame frame)
-            throws IOException {
+    private void handleWindowUpdate(Http2Frame.WindowUpdateFrame frame) throws IOException {
         int increment = frame.windowIncrement();
         if (increment == 0) {
-            throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR,
-                    "WINDOW_UPDATE with zero increment");
+            throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR, "WINDOW_UPDATE with zero increment");
         }
 
         int streamId = frame.streamId();
@@ -336,8 +325,8 @@ public final class Http2Connection {
             // Check overflow: connection send window must not exceed 2^31-1 (RFC 9113 §6.9.1)
             int current = connectionSendWindow.get();
             if (current > Integer.MAX_VALUE - increment) {
-                throw new Http2ConnectionException(Http2ErrorCode.FLOW_CONTROL_ERROR,
-                        "Connection send window overflow");
+                throw new Http2ConnectionException(
+                        Http2ErrorCode.FLOW_CONTROL_ERROR, "Connection send window overflow");
             }
             connectionSendWindow.addAndGet(increment);
             connectionSendLock.lock();
@@ -392,8 +381,7 @@ public final class Http2Connection {
             Response response;
             try {
                 var ctx = new RequestContext(request);
-                response = ScopedValue.where(RequestContext.CURRENT, ctx)
-                        .call(() -> handler.handle(request));
+                response = ScopedValue.where(RequestContext.CURRENT, ctx).call(() -> handler.handle(request));
             } catch (Exception _) {
                 response = Response.of(StatusCode.INTERNAL_SERVER_ERROR);
             }
@@ -411,8 +399,7 @@ public final class Http2Connection {
         int streamId = stream.streamId();
 
         // Encode response headers via HPACK
-        byte[] encodedHeaders = hpackEncoder.encode(
-                response.status().code(), response.headers());
+        byte[] encodedHeaders = hpackEncoder.encode(response.status().code(), response.headers());
 
         Body body = response.body();
         boolean hasBody = body != null && body.contentLength() != 0;
@@ -510,8 +497,8 @@ public final class Http2Connection {
      * Extrait les pseudo-headers HTTP/2 (:method, :path, :scheme, :authority)
      * et les convertit en propriétés de la requête, puis les supprime du tableau.
      */
-    private static final java.util.Set<String> FORBIDDEN_HEADERS = java.util.Set.of(
-            "connection", "keep-alive", "proxy-connection", "transfer-encoding", "upgrade");
+    private static final java.util.Set<String> FORBIDDEN_HEADERS =
+            java.util.Set.of("connection", "keep-alive", "proxy-connection", "transfer-encoding", "upgrade");
 
     private void extractPseudoHeaders(HttpRequestImpl request) throws Http2ConnectionException {
         String method = null;
@@ -532,53 +519,58 @@ public final class Http2Connection {
             if (name.charAt(0) == ':') {
                 // Pseudo-headers must appear before regular headers (RFC 9113 §8.3)
                 if (seenRegularHeader) {
-                    throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR,
-                            "Pseudo-header after regular header: " + name);
+                    throw new Http2ConnectionException(
+                            Http2ErrorCode.PROTOCOL_ERROR, "Pseudo-header after regular header: " + name);
                 }
                 switch (name) {
                     case ":method" -> {
-                        if (seenMethod) throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR,
-                                "Duplicate :method pseudo-header");
+                        if (seenMethod)
+                            throw new Http2ConnectionException(
+                                    Http2ErrorCode.PROTOCOL_ERROR, "Duplicate :method pseudo-header");
                         seenMethod = true;
                         method = request.headerValue(i);
                     }
                     case ":path" -> {
-                        if (seenPath) throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR,
-                                "Duplicate :path pseudo-header");
+                        if (seenPath)
+                            throw new Http2ConnectionException(
+                                    Http2ErrorCode.PROTOCOL_ERROR, "Duplicate :path pseudo-header");
                         seenPath = true;
                         path = request.headerValue(i);
                         if (path == null || path.isEmpty()) {
-                            throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR,
-                                    ":path must not be empty");
+                            throw new Http2ConnectionException(
+                                    Http2ErrorCode.PROTOCOL_ERROR, ":path must not be empty");
                         }
                     }
                     case ":scheme" -> {
-                        if (seenScheme) throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR,
-                                "Duplicate :scheme pseudo-header");
+                        if (seenScheme)
+                            throw new Http2ConnectionException(
+                                    Http2ErrorCode.PROTOCOL_ERROR, "Duplicate :scheme pseudo-header");
                         seenScheme = true;
                     }
                     case ":authority" -> {
-                        if (seenAuthority) throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR,
-                                "Duplicate :authority pseudo-header");
+                        if (seenAuthority)
+                            throw new Http2ConnectionException(
+                                    Http2ErrorCode.PROTOCOL_ERROR, "Duplicate :authority pseudo-header");
                         seenAuthority = true;
                         authority = request.headerValue(i);
                     }
-                    default -> throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR,
-                            "Unknown pseudo-header: " + name);
+                    default ->
+                        throw new Http2ConnectionException(
+                                Http2ErrorCode.PROTOCOL_ERROR, "Unknown pseudo-header: " + name);
                 }
             } else {
                 seenRegularHeader = true;
 
                 // Forbidden connection-specific headers (RFC 9113 §8.2.2)
                 if (FORBIDDEN_HEADERS.contains(name)) {
-                    throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR,
-                            "Forbidden header: " + name);
+                    throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR, "Forbidden header: " + name);
                 }
                 // TE header is only allowed with value "trailers" (RFC 9113 §8.2.2)
                 if ("te".equals(name)) {
                     String val = request.headerValue(i);
                     if (val == null || !val.equals("trailers")) {
-                        throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR,
+                        throw new Http2ConnectionException(
+                                Http2ErrorCode.PROTOCOL_ERROR,
                                 "te header only allowed with value 'trailers', got: " + val);
                     }
                 }
@@ -587,12 +579,10 @@ public final class Http2Connection {
 
         // :method and :path are required (RFC 9113 §8.3.1)
         if (!seenMethod) {
-            throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR,
-                    "Missing required :method pseudo-header");
+            throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR, "Missing required :method pseudo-header");
         }
         if (!seenPath) {
-            throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR,
-                    "Missing required :path pseudo-header");
+            throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR, "Missing required :path pseudo-header");
         }
 
         // Apply to request
@@ -641,8 +631,8 @@ public final class Http2Connection {
             }
             byte b = readBuffer.get();
             if (b != CLIENT_PREFACE[i]) {
-                throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR,
-                        "Invalid HTTP/2 client connection preface");
+                throw new Http2ConnectionException(
+                        Http2ErrorCode.PROTOCOL_ERROR, "Invalid HTTP/2 client connection preface");
             }
         }
     }
@@ -669,7 +659,13 @@ public final class Http2Connection {
         streams.clear();
 
         // Close channels
-        try { readChannel.close(); } catch (IOException _) {}
-        try { writeChannel.close(); } catch (IOException _) {}
+        try {
+            readChannel.close();
+        } catch (IOException _) {
+        }
+        try {
+            writeChannel.close();
+        } catch (IOException _) {
+        }
     }
 }

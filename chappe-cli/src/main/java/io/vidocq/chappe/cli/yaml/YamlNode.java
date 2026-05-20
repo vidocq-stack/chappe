@@ -22,8 +22,11 @@ public sealed interface YamlNode {
 
         public Optional<Integer> integer(String key) {
             return string(key).map(s -> {
-                try { return Integer.parseInt(s.trim()); }
-                catch (NumberFormatException e) { return null; }
+                try {
+                    return Integer.parseInt(s.trim());
+                } catch (NumberFormatException e) {
+                    return null;
+                }
             });
         }
 

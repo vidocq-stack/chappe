@@ -1,9 +1,10 @@
 package io.vidocq.chappe.api;
 
-import javax.net.ssl.SSLContext;
 import java.net.InetSocketAddress;
 import java.time.Duration;
 import java.util.ServiceLoader;
+
+import javax.net.ssl.SSLContext;
 
 /**
  * Serveur HTTP — point d'entrée pour démarrer et arrêter le serveur.
@@ -50,8 +51,8 @@ public interface Server extends AutoCloseable {
     static Builder builder() {
         return ServiceLoader.load(ServerProvider.class)
                 .findFirst()
-                .orElseThrow(() -> new IllegalStateException(
-                        "No ServerProvider found — add chappe-core to the module path"))
+                .orElseThrow(
+                        () -> new IllegalStateException("No ServerProvider found — add chappe-core to the module path"))
                 .newBuilder();
     }
 

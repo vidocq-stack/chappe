@@ -1,14 +1,14 @@
 package io.vidocq.chappe.bench;
 
-import org.openjdk.jmh.annotations.*;
-import org.openjdk.jmh.infra.Blackhole;
-
 import java.io.IOException;
 import java.net.URL;
 import java.net.URLConnection;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+
+import org.openjdk.jmh.annotations.*;
+import org.openjdk.jmh.infra.Blackhole;
 
 /**
  * Compare la résolution de métadonnées pour une ressource classpath :
@@ -45,7 +45,10 @@ public class ClasspathLookupBench {
     @Benchmark
     public void old_urlConnection(Blackhole bh) throws IOException {
         URL url = loader.getResource(resourcePath);
-        if (url == null) { bh.consume(0); return; }
+        if (url == null) {
+            bh.consume(0);
+            return;
+        }
         URLConnection conn = url.openConnection();
         conn.setUseCaches(false);
         bh.consume(conn.getContentLengthLong());
@@ -55,7 +58,10 @@ public class ClasspathLookupBench {
     @Benchmark
     public void current_indexedLookup(Blackhole bh) {
         IndexedEntry entry = index.get(resourcePath);
-        if (entry == null) { bh.consume(0); return; }
+        if (entry == null) {
+            bh.consume(0);
+            return;
+        }
         bh.consume(entry.size());
         bh.consume(entry.mtime());
     }

@@ -12,6 +12,11 @@ public final class YamlParseException extends RuntimeException {
         this.column = column;
     }
 
-    public int line() { return line; }
-    public int column() { return column; }
+    public int line() {
+        return line;
+    }
+
+    public int column() {
+        return column;
+    }
 }

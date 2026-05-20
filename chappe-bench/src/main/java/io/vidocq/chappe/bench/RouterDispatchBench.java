@@ -1,8 +1,5 @@
 package io.vidocq.chappe.bench;
 
-import org.openjdk.jmh.annotations.*;
-import org.openjdk.jmh.infra.Blackhole;
-
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -10,6 +7,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+
+import org.openjdk.jmh.annotations.*;
+import org.openjdk.jmh.infra.Blackhole;
 
 /**
  * Compare le dispatch du Router :
@@ -35,22 +35,22 @@ public class RouterDispatchBench {
     private Map<String, Route> staticIndex;
     private List<Route> dynamicRoutes;
 
-    @Param({"/users",           // première route — scan trouve vite
-            "/internal/status", // dernière statique — scan parcourt toutes les autres
-            "/api/v1/404"})     // miss — scan parcourt tout
+    @Param({
+        "/users", // première route — scan trouve vite
+        "/internal/status", // dernière statique — scan parcourt toutes les autres
+        "/api/v1/404"
+    }) // miss — scan parcourt tout
     public String requestPath;
 
     @Setup
     public void setup() {
         String[] staticPatterns = {
-                "/users", "/users/me", "/users/profile", "/posts", "/posts/trending",
-                "/comments", "/login", "/logout", "/register", "/health",
-                "/metrics", "/api/v1/ping", "/api/v1/echo", "/api/v1/time", "/api/v2/version",
-                "/admin", "/admin/users", "/admin/settings", "/config", "/internal/status"
+            "/users", "/users/me", "/users/profile", "/posts", "/posts/trending",
+            "/comments", "/login", "/logout", "/register", "/health",
+            "/metrics", "/api/v1/ping", "/api/v1/echo", "/api/v1/time", "/api/v2/version",
+            "/admin", "/admin/users", "/admin/settings", "/config", "/internal/status"
         };
-        String[] dynamicPatterns = {
-                "/users/{id}", "/posts/{slug}", "/api/v1/items/{id}"
-        };
+        String[] dynamicPatterns = {"/users/{id}", "/posts/{slug}", "/api/v1/items/{id}"};
 
         allRoutes = new ArrayList<>();
         staticIndex = new HashMap<>();
@@ -99,8 +99,8 @@ public class RouterDispatchBench {
 
     // Copie minimale de DefaultRouterBuilder.matchPath — équivalence fonctionnelle.
     private static Map<String, String> matchPath(String pattern, String path) {
-        String np = (pattern.length() > 1 && pattern.endsWith("/"))
-                ? pattern.substring(0, pattern.length() - 1) : pattern;
+        String np =
+                (pattern.length() > 1 && pattern.endsWith("/")) ? pattern.substring(0, pattern.length() - 1) : pattern;
         if (np.equals(path)) return Collections.emptyMap();
         if (np.endsWith("/*")) {
             var base = np.substring(0, np.length() - 2);

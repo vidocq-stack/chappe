@@ -1,12 +1,5 @@
 package io.vidocq.chappe.http;
 
-import io.vidocq.chappe.api.Body;
-import io.vidocq.chappe.api.BuildInfo;
-import io.vidocq.chappe.api.FileBody;
-import io.vidocq.chappe.api.HttpMethod;
-import io.vidocq.chappe.api.Response;
-import io.vidocq.chappe.api.StatusCode;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
@@ -16,6 +9,13 @@ import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
+
+import io.vidocq.chappe.api.Body;
+import io.vidocq.chappe.api.BuildInfo;
+import io.vidocq.chappe.api.FileBody;
+import io.vidocq.chappe.api.HttpMethod;
+import io.vidocq.chappe.api.Response;
+import io.vidocq.chappe.api.StatusCode;
 
 /**
  * Sérialisation d'une {@link Response} HTTP/1.1 vers un channel.
@@ -35,11 +35,14 @@ public final class HttpResponseWriter {
     private static final byte SPACE = ' ';
     private static final byte[] CONTENT_LENGTH_PREFIX = "Content-Length: ".getBytes(StandardCharsets.US_ASCII);
     private static final byte[] CONNECTION_CLOSE = "Connection: close\r\n".getBytes(StandardCharsets.US_ASCII);
-    private static final byte[] CONNECTION_KEEP_ALIVE = "Connection: keep-alive\r\n".getBytes(StandardCharsets.US_ASCII);
-    private static final byte[] TRANSFER_ENCODING_CHUNKED = "Transfer-Encoding: chunked\r\n".getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] CONNECTION_KEEP_ALIVE =
+            "Connection: keep-alive\r\n".getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] TRANSFER_ENCODING_CHUNKED =
+            "Transfer-Encoding: chunked\r\n".getBytes(StandardCharsets.US_ASCII);
     private static final byte[] CHUNK_TERMINATOR = "0\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
     private static final byte[] DATE_PREFIX = "Date: ".getBytes(StandardCharsets.US_ASCII);
-    private static final byte[] CONTENT_TYPE_TEXT = "Content-Type: text/plain; charset=utf-8\r\n".getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] CONTENT_TYPE_TEXT =
+            "Content-Type: text/plain; charset=utf-8\r\n".getBytes(StandardCharsets.US_ASCII);
     private static final byte[] SERVER_HEADER_LINE =
             ("Server: " + BuildInfo.serverHeader() + "\r\n").getBytes(StandardCharsets.US_ASCII);
     // X-Chappe-Build : doublon du Server header avec un nom non standard que
@@ -48,8 +51,8 @@ public final class HttpResponseWriter {
     private static final byte[] X_CHAPPE_BUILD_LINE =
             ("X-Chappe-Build: " + BuildInfo.serverHeader() + "\r\n").getBytes(StandardCharsets.US_ASCII);
 
-    private static final DateTimeFormatter IMF_FIXDATE = DateTimeFormatter
-            .ofPattern("EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.US);
+    private static final DateTimeFormatter IMF_FIXDATE =
+            DateTimeFormatter.ofPattern("EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.US);
 
     // Cache Date header (1 seconde)
     private static volatile long lastDateSecond;
@@ -79,26 +82,33 @@ public final class HttpResponseWriter {
 
     // Fast-path : headers pré-encodés pour 200 OK keep-alive (sans Date, sans body)
     private static final byte[] FAST_200_KA_PREFIX = ("HTTP/1.1 200 OK\r\n"
-            + "Connection: keep-alive\r\n"
-            + "Server: " + BuildInfo.serverHeader() + "\r\n"
-            + "X-Chappe-Build: " + BuildInfo.serverHeader() + "\r\n").getBytes(StandardCharsets.US_ASCII);
+                    + "Connection: keep-alive\r\n"
+                    + "Content-Type: text/plain; charset=utf-8\r\n"
+                    + "Server: " + BuildInfo.serverHeader() + "\r\n"
+                    + "X-Chappe-Build: " + BuildInfo.serverHeader() + "\r\n")
+            .getBytes(StandardCharsets.US_ASCII);
 
-    public void write(Response response, ByteBuffer buffer, WritableByteChannel channel,
-                      boolean keepAlive, HttpMethod method) throws IOException {
+    public void write(
+            Response response, ByteBuffer buffer, WritableByteChannel channel, boolean keepAlive, HttpMethod method)
+            throws IOException {
         buffer.clear();
 
         int statusCode = response.status().code();
-        boolean suppressBody = (method == HttpMethod.HEAD)
-                || statusCode == 204 || statusCode == 304;
+        boolean suppressBody = (method == HttpMethod.HEAD) || statusCode == 204 || statusCode == 304;
 
-        // ═══ FAST PATH : 200 OK, keep-alive, pas de headers custom, body connu ═══
-        // C'est le cas le plus fréquent (~80% des réponses dans un serveur typique).
-        // On écrit tout en un seul bloc sans itérer les headers.
+        // ═══ FAST PATH : 200 OK, keep-alive, body connu, Content-Type text/plain ═══
+        // Le préfixe pré-encodé inclut Content-Type: text/plain; charset=utf-8 — on ne l'active
+        // donc que si la réponse a exactement ce header (cas typique Response.ok(String)).
+        // Refuser headerCount==0 évite de mentir au client avec un Content-Type bidon.
         Body body = response.body();
         long contentLength = body.contentLength();
-        if (statusCode == 200 && keepAlive && !suppressBody
-                && contentLength >= 0 && contentLength <= 8192
-                && response.headers().isEmpty()) {
+        if (statusCode == 200
+                && keepAlive
+                && !suppressBody
+                && contentLength >= 0
+                && contentLength <= 8192
+                && response.headers().size() == 1
+                && "text/plain; charset=utf-8".equals(response.headers().firstOrNull("Content-Type"))) {
             writeFastPath(body, contentLength, buffer, channel);
             return;
         }
@@ -138,8 +148,7 @@ public final class HttpResponseWriter {
             putBytes(CONTENT_LENGTH_PREFIX, buffer, channel);
             putAsciiLong(contentLength, buffer, channel);
             putBytes(CRLF, buffer, channel);
-        } else if (contentLength < 0 && !suppressBody
-                   && !response.headers().contains("Transfer-Encoding")) {
+        } else if (contentLength < 0 && !suppressBody && !response.headers().contains("Transfer-Encoding")) {
             if (keepAlive) {
                 putBytes(TRANSFER_ENCODING_CHUNKED, buffer, channel);
                 chunked = true;
@@ -173,8 +182,8 @@ public final class HttpResponseWriter {
      * Fast path pour 200 OK keep-alive avec petit body sans headers custom.
      * Tout est écrit en un seul channel.write() — 1 syscall.
      */
-    private void writeFastPath(Body body, long contentLength, ByteBuffer buffer,
-                               WritableByteChannel channel) throws IOException {
+    private void writeFastPath(Body body, long contentLength, ByteBuffer buffer, WritableByteChannel channel)
+            throws IOException {
         // Status + Connection
         putBytes(FAST_200_KA_PREFIX, buffer, channel);
         // Date
@@ -200,8 +209,8 @@ public final class HttpResponseWriter {
         flush(buffer, channel);
     }
 
-    public void writeError(StatusCode status, String message, ByteBuffer buffer,
-                           WritableByteChannel channel) throws IOException {
+    public void writeError(StatusCode status, String message, ByteBuffer buffer, WritableByteChannel channel)
+            throws IOException {
         buffer.clear();
         putStatusLine(status, buffer, channel);
 
@@ -221,16 +230,25 @@ public final class HttpResponseWriter {
 
     // --- Status line ---
 
-    private void putStatusLine(StatusCode status, ByteBuffer buffer,
-                               WritableByteChannel channel) throws IOException {
-        byte[] preEncoded = switch (status.code()) {
-            case 200 -> STATUS_200; case 201 -> STATUS_201; case 204 -> STATUS_204;
-            case 301 -> STATUS_301; case 302 -> STATUS_302; case 304 -> STATUS_304;
-            case 400 -> STATUS_400; case 401 -> STATUS_401; case 403 -> STATUS_403;
-            case 404 -> STATUS_404; case 405 -> STATUS_405; case 500 -> STATUS_500;
-            case 502 -> STATUS_502; case 503 -> STATUS_503;
-            default -> null;
-        };
+    private void putStatusLine(StatusCode status, ByteBuffer buffer, WritableByteChannel channel) throws IOException {
+        byte[] preEncoded =
+                switch (status.code()) {
+                    case 200 -> STATUS_200;
+                    case 201 -> STATUS_201;
+                    case 204 -> STATUS_204;
+                    case 301 -> STATUS_301;
+                    case 302 -> STATUS_302;
+                    case 304 -> STATUS_304;
+                    case 400 -> STATUS_400;
+                    case 401 -> STATUS_401;
+                    case 403 -> STATUS_403;
+                    case 404 -> STATUS_404;
+                    case 405 -> STATUS_405;
+                    case 500 -> STATUS_500;
+                    case 502 -> STATUS_502;
+                    case 503 -> STATUS_503;
+                    default -> null;
+                };
         if (preEncoded != null) {
             putBytes(preEncoded, buffer, channel);
         } else {
@@ -244,8 +262,7 @@ public final class HttpResponseWriter {
 
     // --- Body writers ---
 
-    private void writeBodyChunked(Body body, ByteBuffer buffer, WritableByteChannel channel)
-            throws IOException {
+    private void writeBodyChunked(Body body, ByteBuffer buffer, WritableByteChannel channel) throws IOException {
         if (body.contentLength() == 0) {
             putBytes(CHUNK_TERMINATOR, buffer, channel);
             return;
@@ -264,8 +281,7 @@ public final class HttpResponseWriter {
         putBytes(CHUNK_TERMINATOR, buffer, channel);
     }
 
-    private void writeBody(Body body, ByteBuffer buffer, WritableByteChannel channel)
-            throws IOException {
+    private void writeBody(Body body, ByteBuffer buffer, WritableByteChannel channel) throws IOException {
         if (body.contentLength() == 0) return;
 
         // Zero-copy fast path for file bodies on raw SocketChannel
@@ -309,8 +325,7 @@ public final class HttpResponseWriter {
     // --- Primitives d'écriture optimisées ---
 
     /** Écrit une String ASCII directement dans le buffer, char par char — zéro allocation. */
-    private void putAsciiString(String s, ByteBuffer buffer, WritableByteChannel channel)
-            throws IOException {
+    private void putAsciiString(String s, ByteBuffer buffer, WritableByteChannel channel) throws IOException {
         for (int i = 0, len = s.length(); i < len; i++) {
             if (!buffer.hasRemaining()) flush(buffer, channel);
             buffer.put((byte) s.charAt(i));
@@ -318,15 +333,13 @@ public final class HttpResponseWriter {
     }
 
     /** Écrit un seul byte. */
-    private void putByte(byte b, ByteBuffer buffer, WritableByteChannel channel)
-            throws IOException {
+    private void putByte(byte b, ByteBuffer buffer, WritableByteChannel channel) throws IOException {
         if (!buffer.hasRemaining()) flush(buffer, channel);
         buffer.put(b);
     }
 
     /** Écrit un long en ASCII décimal directement dans le buffer — zéro allocation. */
-    private void putAsciiLong(long value, ByteBuffer buffer, WritableByteChannel channel)
-            throws IOException {
+    private void putAsciiLong(long value, ByteBuffer buffer, WritableByteChannel channel) throws IOException {
         if (value == 0) {
             putByte((byte) '0', buffer, channel);
             return;
@@ -341,8 +354,7 @@ public final class HttpResponseWriter {
     }
 
     /** Écrit un int en hex ASCII — pour chunked transfer. */
-    private void putAsciiHex(int value, ByteBuffer buffer, WritableByteChannel channel)
-            throws IOException {
+    private void putAsciiHex(int value, ByteBuffer buffer, WritableByteChannel channel) throws IOException {
         if (value == 0) {
             putByte((byte) '0', buffer, channel);
             return;
@@ -357,8 +369,7 @@ public final class HttpResponseWriter {
         putBytes(digitsBuf, pos, digitsBuf.length - pos, buffer, channel);
     }
 
-    private void putBytes(byte[] data, ByteBuffer buffer, WritableByteChannel channel)
-            throws IOException {
+    private void putBytes(byte[] data, ByteBuffer buffer, WritableByteChannel channel) throws IOException {
         int off = 0;
         while (off < data.length) {
             int space = buffer.remaining();
@@ -372,8 +383,8 @@ public final class HttpResponseWriter {
         }
     }
 
-    private void putBytes(byte[] data, int off, int len, ByteBuffer buffer,
-                          WritableByteChannel channel) throws IOException {
+    private void putBytes(byte[] data, int off, int len, ByteBuffer buffer, WritableByteChannel channel)
+            throws IOException {
         int end = off + len;
         while (off < end) {
             int space = buffer.remaining();
@@ -399,8 +410,10 @@ public final class HttpResponseWriter {
         long nowSecond = System.currentTimeMillis() / 1000;
         if (nowSecond != lastDateSecond || cachedDateValue == null) {
             lastDateSecond = nowSecond;
-            cachedDateValue = ZonedDateTime.now(ZoneOffset.UTC).format(IMF_FIXDATE)
-                    .getBytes(StandardCharsets.US_ASCII);
+            // ZonedDateTime.format + getBytes reste le goulot d'étranglement ici.
+            // On cache le résultat final.
+            cachedDateValue =
+                    ZonedDateTime.now(ZoneOffset.UTC).format(IMF_FIXDATE).getBytes(StandardCharsets.US_ASCII);
         }
         return cachedDateValue;
     }

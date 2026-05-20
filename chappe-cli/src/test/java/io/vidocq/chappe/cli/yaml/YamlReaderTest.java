@@ -1,13 +1,13 @@
 package io.vidocq.chappe.cli.yaml;
 
-import org.junit.jupiter.api.Test;
-
-import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.List;
+
+import org.junit.jupiter.api.Test;
 
 class YamlReaderTest {
 
@@ -121,7 +121,8 @@ class YamlReaderTest {
                 """);
         var always = m.map("headers").orElseThrow().map("always").orElseThrow();
         assertEquals("nosniff", always.string("X-Content-Type-Options").orElseThrow());
-        assertEquals("strict-origin-when-cross-origin",
+        assertEquals(
+                "strict-origin-when-cross-origin",
                 always.string("Referrer-Policy").orElseThrow());
         var staging = m.map("headers").orElseThrow().map("staging").orElseThrow();
         assertEquals("noindex, nofollow", staging.string("X-Robots-Tag").orElseThrow());
@@ -129,8 +130,7 @@ class YamlReaderTest {
 
     @Test
     void tabIndentationRejected() {
-        var ex = assertThrows(YamlParseException.class,
-                () -> YamlReader.parse("server:\n\tport: 80\n"));
+        var ex = assertThrows(YamlParseException.class, () -> YamlReader.parse("server:\n\tport: 80\n"));
         assertTrue(ex.getMessage().toLowerCase().contains("tab"));
     }
 
@@ -167,13 +167,13 @@ class YamlReaderTest {
         var st = m.map("static").orElseThrow();
         assertEquals("/var/www/vidocq-docs", st.string("root").orElseThrow());
         assertEquals("/404.html", st.string("fallback").orElseThrow());
-        assertEquals(List.of("index.html", "index.htm"),
-                st.stringList("index-files").orElseThrow());
+        assertEquals(
+                List.of("index.html", "index.htm"), st.stringList("index-files").orElseThrow());
         assertEquals(Boolean.TRUE, st.bool("gzip").orElseThrow());
         var always = m.map("headers").orElseThrow().map("always").orElseThrow();
         assertEquals("nosniff", always.string("X-Content-Type-Options").orElseThrow());
         assertEquals("INFO", m.map("logging").orElseThrow().string("level").orElseThrow());
-        assertEquals(Boolean.FALSE,
-                m.map("logging").orElseThrow().bool("access-log").orElseThrow());
+        assertEquals(
+                Boolean.FALSE, m.map("logging").orElseThrow().bool("access-log").orElseThrow());
     }
 }

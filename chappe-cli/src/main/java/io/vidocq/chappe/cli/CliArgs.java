@@ -24,8 +24,8 @@ public record CliArgs(
         boolean help) {
 
     /** Sentinelle indiquant l'affichage de l'aide. */
-    public static final CliArgs HELP = new CliArgs(
-            null, null, null, null, null, null, null, null, null, Map.of(), true);
+    public static final CliArgs HELP =
+            new CliArgs(null, null, null, null, null, null, null, null, null, Map.of(), true);
 
     /** Parse les arguments. {@code argv[0]} doit valoir {@code "serve"} (sinon {@code --help}). */
     public static CliArgs parse(String[] argv) {
@@ -33,8 +33,7 @@ public record CliArgs(
         String first = argv[0];
         if (first.equals("--help") || first.equals("-h") || first.equals("help")) return HELP;
         if (!first.equals("serve")) {
-            throw new IllegalArgumentException("unknown command: " + first
-                    + " (expected: serve)");
+            throw new IllegalArgumentException("unknown command: " + first + " (expected: serve)");
         }
 
         Path configPath = null;
@@ -53,18 +52,54 @@ public record CliArgs(
         while (i < argv.length) {
             String a = argv[i];
             switch (a) {
-                case "--help", "-h" -> { help = true; i++; }
-                case "--config" -> { configPath = Path.of(requireValue(argv, ++i, a)); i++; }
-                case "--root" -> { root = Path.of(requireValue(argv, ++i, a)); i++; }
-                case "--port" -> { port = Integer.parseInt(requireValue(argv, ++i, a)); i++; }
-                case "--bind" -> { bind = requireValue(argv, ++i, a); i++; }
-                case "--fallback" -> { fallback = requireValue(argv, ++i, a); i++; }
-                case "--spa-fallback" -> { spaFallback = requireValue(argv, ++i, a); i++; }
-                case "--cache-control" -> { cacheControl = requireValue(argv, ++i, a); i++; }
-                case "--gzip" -> { gzip = Boolean.TRUE; i++; }
-                case "--no-gzip" -> { gzip = Boolean.FALSE; i++; }
-                case "--access-log" -> { accessLog = Boolean.TRUE; i++; }
-                case "--no-access-log" -> { accessLog = Boolean.FALSE; i++; }
+                case "--help", "-h" -> {
+                    help = true;
+                    i++;
+                }
+                case "--config" -> {
+                    configPath = Path.of(requireValue(argv, ++i, a));
+                    i++;
+                }
+                case "--root" -> {
+                    root = Path.of(requireValue(argv, ++i, a));
+                    i++;
+                }
+                case "--port" -> {
+                    port = Integer.parseInt(requireValue(argv, ++i, a));
+                    i++;
+                }
+                case "--bind" -> {
+                    bind = requireValue(argv, ++i, a);
+                    i++;
+                }
+                case "--fallback" -> {
+                    fallback = requireValue(argv, ++i, a);
+                    i++;
+                }
+                case "--spa-fallback" -> {
+                    spaFallback = requireValue(argv, ++i, a);
+                    i++;
+                }
+                case "--cache-control" -> {
+                    cacheControl = requireValue(argv, ++i, a);
+                    i++;
+                }
+                case "--gzip" -> {
+                    gzip = Boolean.TRUE;
+                    i++;
+                }
+                case "--no-gzip" -> {
+                    gzip = Boolean.FALSE;
+                    i++;
+                }
+                case "--access-log" -> {
+                    accessLog = Boolean.TRUE;
+                    i++;
+                }
+                case "--no-access-log" -> {
+                    accessLog = Boolean.FALSE;
+                    i++;
+                }
                 case "--header" -> {
                     String kv = requireValue(argv, ++i, a);
                     int eq = kv.indexOf('=');
@@ -78,8 +113,18 @@ public record CliArgs(
             }
         }
 
-        return new CliArgs(configPath, root, port, bind, fallback, spaFallback,
-                cacheControl, gzip, accessLog, Map.copyOf(extraHeaders), help);
+        return new CliArgs(
+                configPath,
+                root,
+                port,
+                bind,
+                fallback,
+                spaFallback,
+                cacheControl,
+                gzip,
+                accessLog,
+                Map.copyOf(extraHeaders),
+                help);
     }
 
     private static String requireValue(String[] argv, int idx, String flag) {

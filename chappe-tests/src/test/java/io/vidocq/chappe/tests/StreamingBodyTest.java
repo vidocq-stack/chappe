@@ -1,11 +1,6 @@
 package io.vidocq.chappe.tests;
 
-import io.vidocq.chappe.api.Body;
-import io.vidocq.chappe.api.Response;
-import io.vidocq.chappe.api.Server;
-import io.vidocq.chappe.api.StatusCode;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -19,7 +14,13 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.*;
+import io.vidocq.chappe.api.Body;
+import io.vidocq.chappe.api.Response;
+import io.vidocq.chappe.api.Server;
+import io.vidocq.chappe.api.StatusCode;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
 
 /**
  * Tests d'intégration pour Body.streaming(InputStream).
@@ -60,7 +61,8 @@ class StreamingBodyTest {
                                 for (var event : events) {
                                     pos.write(event.getBytes(StandardCharsets.UTF_8));
                                 }
-                            } catch (IOException _) {}
+                            } catch (IOException _) {
+                            }
                         });
                         return Response.builder()
                                 .status(StatusCode.OK)
@@ -80,19 +82,17 @@ class StreamingBodyTest {
             var out = socket.getOutputStream();
             var in = socket.getInputStream();
 
-            out.write("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n"
-                    .getBytes(StandardCharsets.US_ASCII));
+            out.write("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n".getBytes(StandardCharsets.US_ASCII));
             out.flush();
 
             String headers = readHeaders(in);
-            assertTrue(headers.contains("Transfer-Encoding: chunked"),
+            assertTrue(
+                    headers.contains("Transfer-Encoding: chunked"),
                     "Doit utiliser Transfer-Encoding: chunked, headers reçus:\n" + headers);
-            assertTrue(headers.contains("text/event-stream"),
-                    "Doit avoir Content-Type: text/event-stream");
+            assertTrue(headers.contains("text/event-stream"), "Doit avoir Content-Type: text/event-stream");
 
             String body = readChunkedBody(in);
-            assertEquals(String.join("", events), body,
-                    "Corps décodé doit contenir tous les events SSE");
+            assertEquals(String.join("", events), body, "Corps décodé doit contenir tous les events SSE");
         }
     }
 
@@ -114,7 +114,8 @@ class StreamingBodyTest {
                                 for (var event : events) {
                                     pos.write(event.getBytes(StandardCharsets.UTF_8));
                                 }
-                            } catch (IOException _) {}
+                            } catch (IOException _) {
+                            }
                         });
                         return Response.builder()
                                 .status(StatusCode.OK)
@@ -128,9 +129,7 @@ class StreamingBodyTest {
                 .build();
         server.start();
 
-        var client = HttpClient.newBuilder()
-                .version(HttpClient.Version.HTTP_2)
-                .build();
+        var client = HttpClient.newBuilder().version(HttpClient.Version.HTTP_2).build();
         var request = HttpRequest.newBuilder()
                 .uri(URI.create("http://127.0.0.1:" + server.port() + "/"))
                 .GET()
@@ -151,8 +150,11 @@ class StreamingBodyTest {
             if (b == -1) break;
             sb.append((char) b);
             int len = sb.length();
-            if (len >= 4 && sb.charAt(len - 4) == '\r' && sb.charAt(len - 3) == '\n'
-                    && sb.charAt(len - 2) == '\r' && sb.charAt(len - 1) == '\n') {
+            if (len >= 4
+                    && sb.charAt(len - 4) == '\r'
+                    && sb.charAt(len - 3) == '\n'
+                    && sb.charAt(len - 2) == '\r'
+                    && sb.charAt(len - 1) == '\n') {
                 break;
             }
         }

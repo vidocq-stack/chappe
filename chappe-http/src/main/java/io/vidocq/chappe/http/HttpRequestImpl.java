@@ -1,7 +1,5 @@
 package io.vidocq.chappe.http;
 
-import io.vidocq.chappe.api.*;
-
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
@@ -10,6 +8,8 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 
+import io.vidocq.chappe.api.*;
+
 /**
  * Implémentation concrète mutable de {@link Request}.
  * <p>
@@ -17,7 +17,7 @@ import java.util.Optional;
  * puis l'objet est exposé en lecture seule au {@link Handler}.
  * Recyclable via {@link #reset()} pour les connexions keep-alive.
  */
-public final class HttpRequestImpl implements Request {
+public final class HttpRequestImpl implements Request, Headers {
 
     private static final int INITIAL_HEADER_CAPACITY = 16;
 
@@ -31,21 +31,63 @@ public final class HttpRequestImpl implements Request {
     Body body;
 
     // --- Setters publics pour accès depuis io.vidocq.chappe.http.h2 ---
-    public void setMethod(HttpMethod method) { this.method = method; }
-    public void setRawUri(String uri) { this.rawUri = uri; }
-    public void setVersion(HttpVersion version) { this.version = version; }
-    public void setBody(Body body) { this.body = body; }
-    public int headerCount() { return headerCount; }
-    public String headerName(int i) { return headerNames[i]; }
-    public String headerValue(int i) { return headerValues[i]; }
-    public void setHeaderCount(int count) { this.headerCount = count; }
-    public void setHeaderName(int i, String name) { this.headerNames[i] = name; }
-    public void setHeaderValue(int i, String value) { this.headerValues[i] = value; }
+    public void setMethod(HttpMethod method) {
+        this.method = method;
+    }
 
-    public void setContextPath(String contextPath) { this.contextPath = contextPath; this.pathInfoCache = null; }
-    public void setRemoteAddress(java.net.InetSocketAddress remoteAddress) { this.remoteAddress = remoteAddress; }
-    public void setLocalAddress(java.net.InetSocketAddress localAddress) { this.localAddress = localAddress; }
-    public void setSecure(boolean secure) { this.secure = secure; this.scheme = secure ? "https" : "http"; }
+    public void setRawUri(String uri) {
+        this.rawUri = uri;
+    }
+
+    public void setVersion(HttpVersion version) {
+        this.version = version;
+    }
+
+    public void setBody(Body body) {
+        this.body = body;
+    }
+
+    public int headerCount() {
+        return headerCount;
+    }
+
+    public String headerName(int i) {
+        return headerNames[i];
+    }
+
+    public String headerValue(int i) {
+        return headerValues[i];
+    }
+
+    public void setHeaderCount(int count) {
+        this.headerCount = count;
+    }
+
+    public void setHeaderName(int i, String name) {
+        this.headerNames[i] = name;
+    }
+
+    public void setHeaderValue(int i, String value) {
+        this.headerValues[i] = value;
+    }
+
+    public void setContextPath(String contextPath) {
+        this.contextPath = contextPath;
+        this.pathInfoCache = null;
+    }
+
+    public void setRemoteAddress(java.net.InetSocketAddress remoteAddress) {
+        this.remoteAddress = remoteAddress;
+    }
+
+    public void setLocalAddress(java.net.InetSocketAddress localAddress) {
+        this.localAddress = localAddress;
+    }
+
+    public void setSecure(boolean secure) {
+        this.secure = secure;
+        this.scheme = secure ? "https" : "http";
+    }
 
     /**
      * Initialise les informations de connexion à partir du canal socket.
@@ -141,8 +183,7 @@ public final class HttpRequestImpl implements Request {
     private URI buildUri() {
         if (rawUri == null) return URI.create("/");
         // Absolute-form (ex. proxy) : on prend la request-target telle quelle.
-        if (rawUri.regionMatches(true, 0, "http://", 0, 7)
-                || rawUri.regionMatches(true, 0, "https://", 0, 8)) {
+        if (rawUri.regionMatches(true, 0, "http://", 0, 7) || rawUri.regionMatches(true, 0, "https://", 0, 8)) {
             return URI.create(rawUri);
         }
         // Origin-form (RFC 9112 §3.2.1) ou :path HTTP/2 : reconstruire via Host.
@@ -179,10 +220,71 @@ public final class HttpRequestImpl implements Request {
 
     @Override
     public Headers headers() {
-        if (headersView == null) {
-            headersView = new ArrayHeaders(headerNames, headerValues, headerCount);
+        return this;
+    }
+
+    // --- Headers interface implementation (avoids ArrayHeaders allocation) ---
+
+    @Override
+    public Optional<String> first(String name) {
+        var v = firstOrNull(name);
+        return v != null ? Optional.of(v) : Optional.empty();
+    }
+
+    @Override
+    public String firstOrNull(String name) {
+        for (int i = 0; i < headerCount; i++) {
+            if (headerNames[i] != null && headerNames[i].equalsIgnoreCase(name)) {
+                return headerValues[i];
+            }
         }
-        return headersView;
+        return null;
+    }
+
+    @Override
+    public java.util.List<String> all(String name) {
+        var result = new java.util.ArrayList<String>();
+        for (int i = 0; i < headerCount; i++) {
+            if (headerNames[i] != null && headerNames[i].equalsIgnoreCase(name)) {
+                result.add(headerValues[i]);
+            }
+        }
+        return java.util.Collections.unmodifiableList(result);
+    }
+
+    @Override
+    public boolean contains(String name) {
+        for (int i = 0; i < headerCount; i++) {
+            if (headerNames[i] != null && headerNames[i].equalsIgnoreCase(name)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Override
+    public int size() {
+        return headerCount;
+    }
+
+    @Override
+    public java.util.Iterator<Entry> iterator() {
+        return new java.util.Iterator<>() {
+            private int index = 0;
+
+            @Override
+            public boolean hasNext() {
+                return index < headerCount;
+            }
+
+            @Override
+            public Entry next() {
+                if (index >= headerCount) throw new java.util.NoSuchElementException();
+                var entry = new Entry(headerNames[index], headerValues[index]);
+                index++;
+                return entry;
+            }
+        };
     }
 
     @Override
@@ -204,7 +306,9 @@ public final class HttpRequestImpl implements Request {
     }
 
     @Override
-    public String contextPath() { return contextPath; }
+    public String contextPath() {
+        return contextPath;
+    }
 
     @Override
     public String pathInfo() {
@@ -221,7 +325,9 @@ public final class HttpRequestImpl implements Request {
     }
 
     @Override
-    public Object attribute(String key) { return attributes.get(key); }
+    public Object attribute(String key) {
+        return attributes.get(key);
+    }
 
     @Override
     public Request attribute(String key, Object value) {
@@ -234,16 +340,24 @@ public final class HttpRequestImpl implements Request {
     }
 
     @Override
-    public java.net.InetSocketAddress remoteAddress() { return remoteAddress; }
+    public java.net.InetSocketAddress remoteAddress() {
+        return remoteAddress;
+    }
 
     @Override
-    public java.net.InetSocketAddress localAddress() { return localAddress; }
+    public java.net.InetSocketAddress localAddress() {
+        return localAddress;
+    }
 
     @Override
-    public boolean isSecure() { return secure; }
+    public boolean isSecure() {
+        return secure;
+    }
 
     @Override
-    public String scheme() { return scheme; }
+    public String scheme() {
+        return scheme;
+    }
 
     // --- Helpers privés ---
 

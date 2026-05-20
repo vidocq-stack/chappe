@@ -15,22 +15,37 @@ public final class FileBody implements Body {
         this.offset = offset;
         try {
             this.length = length >= 0 ? length : Files.size(path) - offset;
-        } catch (IOException e) { throw new UncheckedIOException(e); }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
-    @Override public long contentLength() { return length; }
-    public Path path() { return path; }
-    public long offset() { return offset; }
+    @Override
+    public long contentLength() {
+        return length;
+    }
 
-    @Override public InputStream asInputStream() {
+    public Path path() {
+        return path;
+    }
+
+    public long offset() {
+        return offset;
+    }
+
+    @Override
+    public InputStream asInputStream() {
         try {
             var fis = new FileInputStream(path.toFile());
             if (offset > 0) fis.skip(offset);
             return fis;
-        } catch (IOException e) { throw new UncheckedIOException(e); }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
-    @Override public Flow.Publisher<ByteBuffer> asPublisher() {
+    @Override
+    public Flow.Publisher<ByteBuffer> asPublisher() {
         return Body.of(asInputStream(), length).asPublisher();
     }
 }

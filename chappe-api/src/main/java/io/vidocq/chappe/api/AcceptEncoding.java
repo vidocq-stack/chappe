@@ -45,8 +45,11 @@ public final class AcceptEncoding {
                     String k = pt.substring(0, eq).trim().toLowerCase(Locale.ROOT);
                     String v = pt.substring(eq + 1).trim();
                     if (k.equals("q")) {
-                        try { q = Double.parseDouble(v); }
-                        catch (NumberFormatException _) { q = 0.0; }
+                        try {
+                            q = Double.parseDouble(v);
+                        } catch (NumberFormatException _) {
+                            q = 0.0;
+                        }
                     }
                 }
             }

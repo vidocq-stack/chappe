@@ -56,26 +56,42 @@ public interface Request {
     }
 
     /** Context path set by mount(), empty string "" by default. */
-    default String contextPath() { return ""; }
+    default String contextPath() {
+        return "";
+    }
 
     /** Path after context stripping. For unmounted handlers, equals path(). */
-    default String pathInfo() { return path(); }
+    default String pathInfo() {
+        return path();
+    }
 
     /** Per-request mutable attribute (for Servlet/JAX-RS state sharing). */
-    default Object attribute(String key) { return null; }
+    default Object attribute(String key) {
+        return null;
+    }
 
     /** Sets a per-request attribute. Returns this for chaining. */
-    default Request attribute(String key, Object value) { return this; }
+    default Request attribute(String key, Object value) {
+        return this;
+    }
 
     /** Remote (client) socket address. */
-    default java.net.InetSocketAddress remoteAddress() { return null; }
+    default java.net.InetSocketAddress remoteAddress() {
+        return null;
+    }
 
     /** Local (server) socket address. */
-    default java.net.InetSocketAddress localAddress() { return null; }
+    default java.net.InetSocketAddress localAddress() {
+        return null;
+    }
 
     /** True if the connection is TLS-secured. */
-    default boolean isSecure() { return false; }
+    default boolean isSecure() {
+        return false;
+    }
 
     /** URI scheme: "http" or "https". */
-    default String scheme() { return isSecure() ? "https" : "http"; }
+    default String scheme() {
+        return isSecure() ? "https" : "http";
+    }
 }

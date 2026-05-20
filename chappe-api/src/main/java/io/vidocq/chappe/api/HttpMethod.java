@@ -8,7 +8,6 @@ import java.util.stream.Stream;
  * Méthodes HTTP standard définies par la RFC 9110.
  */
 public enum HttpMethod {
-
     GET,
     HEAD,
     POST,
@@ -19,9 +18,8 @@ public enum HttpMethod {
     TRACE,
     PATCH;
 
-    private static final Map<String, HttpMethod> LOOKUP =
-            Stream.of(values()).collect(Collectors.toUnmodifiableMap(
-                    m -> m.name().toUpperCase(), m -> m));
+    private static final Map<String, HttpMethod> LOOKUP = Stream.of(values())
+            .collect(Collectors.toUnmodifiableMap(m -> m.name().toUpperCase(), m -> m));
 
     /**
      * Résout une méthode HTTP à partir de sa représentation textuelle.
