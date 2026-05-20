@@ -1,6 +1,5 @@
 package io.vidocq.chappe.api;
 
-import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;

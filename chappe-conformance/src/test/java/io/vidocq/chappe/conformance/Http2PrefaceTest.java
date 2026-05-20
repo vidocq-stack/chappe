@@ -1,20 +1,20 @@
 package io.vidocq.chappe.conformance;
 
-import io.vidocq.chappe.api.Response;
-import io.vidocq.chappe.api.Router;
-import io.vidocq.chappe.api.Server;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 
-import static org.junit.jupiter.api.Assertions.*;
+import io.vidocq.chappe.api.Response;
+import io.vidocq.chappe.api.Router;
+import io.vidocq.chappe.api.Server;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 /**
  * HTTP/2 Connection Preface conformance tests (RFC 9113, Section 3.4).
@@ -25,15 +25,19 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class Http2PrefaceTest {
 
-    private static final byte[] CLIENT_PREFACE =
-            "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] CLIENT_PREFACE = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
 
     /** SETTINGS frame: type=0x04, flags=0x00, streamId=0, length=0 */
     private static final byte[] EMPTY_SETTINGS_FRAME = {
-            0x00, 0x00, 0x00,       // length = 0
-            0x04,                   // type = SETTINGS
-            0x00,                   // flags = 0
-            0x00, 0x00, 0x00, 0x00  // stream ID = 0
+        0x00,
+        0x00,
+        0x00, // length = 0
+        0x04, // type = SETTINGS
+        0x00, // flags = 0
+        0x00,
+        0x00,
+        0x00,
+        0x00 // stream ID = 0
     };
 
     private Server server;
@@ -41,14 +45,10 @@ class Http2PrefaceTest {
 
     @BeforeEach
     void setUp() {
-        var router = Router.builder()
-                .get("/", _ -> Response.ok("Hello HTTP/2!"))
-                .build();
+        var router =
+                Router.builder().get("/", _ -> Response.ok("Hello HTTP/2!")).build();
 
-        server = Server.builder()
-                .port(0)
-                .handler(router)
-                .build();
+        server = Server.builder().port(0).handler(router).build();
         server.start();
         port = server.port();
     }
@@ -88,13 +88,11 @@ class Http2PrefaceTest {
                     if ((frame.flags() & 0x01) != 0) {
                         // SETTINGS ACK
                         receivedSettingsAck = true;
-                        assertEquals(0, frame.payloadLength(),
-                                "SETTINGS ACK must have empty payload");
+                        assertEquals(0, frame.payloadLength(), "SETTINGS ACK must have empty payload");
                     } else {
                         // Server SETTINGS
                         receivedSettings = true;
-                        assertEquals(0, frame.streamId(),
-                                "SETTINGS must be on stream 0");
+                        assertEquals(0, frame.streamId(), "SETTINGS must be on stream 0");
                     }
                 }
             }
@@ -123,9 +121,9 @@ class Http2PrefaceTest {
             // Should get an HTTP/1.1 response (not a crash)
             var response = readAll(in);
             assertNotNull(response);
-            assertTrue(response.contains("HTTP/1.1"),
-                    "Server should respond with HTTP/1.1: " + response);
-            assertTrue(response.contains("200") || response.contains("404"),
+            assertTrue(response.contains("HTTP/1.1"), "Server should respond with HTTP/1.1: " + response);
+            assertTrue(
+                    response.contains("200") || response.contains("404"),
                     "Server should respond with a valid status: " + response);
         }
     }

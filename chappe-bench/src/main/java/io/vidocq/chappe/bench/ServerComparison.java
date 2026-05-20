@@ -1,19 +1,18 @@
 package io.vidocq.chappe.bench;
 
-import io.vidocq.chappe.api.Response;
-import io.vidocq.chappe.api.Server;
+import static java.nio.charset.StandardCharsets.US_ASCII;
+import static java.nio.charset.StandardCharsets.UTF_8;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
-import java.nio.charset.StandardCharsets;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
-import static java.nio.charset.StandardCharsets.US_ASCII;
-import static java.nio.charset.StandardCharsets.UTF_8;
+import io.vidocq.chappe.api.Response;
+import io.vidocq.chappe.api.Server;
 
 /**
  * Benchmark comparatif de 5 serveurs HTTP avec un client NIO ultra-léger.
@@ -21,12 +20,10 @@ import static java.nio.charset.StandardCharsets.UTF_8;
  * Mesure le throughput brut (req/s) avec 1, 4, 8 et 16 threads concurrents.
  * Chaque thread maintient une connexion keep-alive et envoie des requêtes GET en boucle.
  */
+@SuppressWarnings({"FutureReturnValueIgnored", "AddressSelection", "StringCaseLocaleUsage"}) // Bench code
 public class ServerComparison {
 
-    private static final byte[] REQUEST_BYTES =
-            "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n".getBytes(US_ASCII);
-
-    private static final byte[] HEADER_END = "\r\n\r\n".getBytes(US_ASCII);
+    private static final byte[] REQUEST_BYTES = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n".getBytes(US_ASCII);
 
     // ─── BenchServer interface ─────────────────────────────────────────
 
@@ -45,10 +42,7 @@ public class ServerComparison {
 
         @Override
         public void start(int port) throws Exception {
-            server = Server.builder()
-                    .port(port)
-                    .handler(_ -> Response.ok("ok"))
-                    .build();
+            server = Server.builder().port(port).handler(_ -> Response.OK_TEXT).build();
             server.start();
         }
 
@@ -104,28 +98,42 @@ public class ServerComparison {
                         protected void initChannel(io.netty.channel.socket.SocketChannel ch) {
                             ch.pipeline().addLast(new io.netty.handler.codec.http.HttpServerCodec());
                             ch.pipeline().addLast(new io.netty.handler.codec.http.HttpObjectAggregator(8192));
-                            ch.pipeline().addLast(new io.netty.channel.SimpleChannelInboundHandler<io.netty.handler.codec.http.FullHttpRequest>() {
-                                @Override
-                                protected void channelRead0(io.netty.channel.ChannelHandlerContext ctx,
-                                                            io.netty.handler.codec.http.FullHttpRequest req) {
-                                    io.netty.buffer.ByteBuf content =
-                                            io.netty.buffer.Unpooled.copiedBuffer("ok", io.netty.util.CharsetUtil.UTF_8);
-                                    io.netty.handler.codec.http.FullHttpResponse resp =
-                                            new io.netty.handler.codec.http.DefaultFullHttpResponse(
-                                                    io.netty.handler.codec.http.HttpVersion.HTTP_1_1,
-                                                    io.netty.handler.codec.http.HttpResponseStatus.OK,
-                                                    content);
-                                    resp.headers()
-                                            .set(io.netty.handler.codec.http.HttpHeaderNames.CONTENT_TYPE, "text/plain")
-                                            .setInt(io.netty.handler.codec.http.HttpHeaderNames.CONTENT_LENGTH,
-                                                    content.readableBytes());
-                                    if (io.netty.handler.codec.http.HttpUtil.isKeepAlive(req)) {
-                                        resp.headers().set(io.netty.handler.codec.http.HttpHeaderNames.CONNECTION,
-                                                io.netty.handler.codec.http.HttpHeaderValues.KEEP_ALIVE);
-                                    }
-                                    ctx.writeAndFlush(resp);
-                                }
-                            });
+                            ch.pipeline()
+                                    .addLast(
+                                            new io.netty.channel.SimpleChannelInboundHandler<
+                                                    io.netty.handler.codec.http.FullHttpRequest>() {
+                                                @Override
+                                                protected void channelRead0(
+                                                        io.netty.channel.ChannelHandlerContext ctx,
+                                                        io.netty.handler.codec.http.FullHttpRequest req) {
+                                                    io.netty.buffer.ByteBuf content =
+                                                            io.netty.buffer.Unpooled.copiedBuffer(
+                                                                    "ok", io.netty.util.CharsetUtil.UTF_8);
+                                                    io.netty.handler.codec.http.FullHttpResponse resp =
+                                                            new io.netty.handler.codec.http.DefaultFullHttpResponse(
+                                                                    io.netty.handler.codec.http.HttpVersion.HTTP_1_1,
+                                                                    io.netty.handler.codec.http.HttpResponseStatus.OK,
+                                                                    content);
+                                                    resp.headers()
+                                                            .set(
+                                                                    io.netty.handler.codec.http.HttpHeaderNames
+                                                                            .CONTENT_TYPE,
+                                                                    "text/plain")
+                                                            .setInt(
+                                                                    io.netty.handler.codec.http.HttpHeaderNames
+                                                                            .CONTENT_LENGTH,
+                                                                    content.readableBytes());
+                                                    if (io.netty.handler.codec.http.HttpUtil.isKeepAlive(req)) {
+                                                        resp.headers()
+                                                                .set(
+                                                                        io.netty.handler.codec.http.HttpHeaderNames
+                                                                                .CONNECTION,
+                                                                        io.netty.handler.codec.http.HttpHeaderValues
+                                                                                .KEEP_ALIVE);
+                                                    }
+                                                    ctx.writeAndFlush(resp);
+                                                }
+                                            });
                         }
                     });
             channel = b.bind(port).sync().channel();
@@ -151,10 +159,9 @@ public class ServerComparison {
         @Override
         public void start(int port) throws Exception {
             vertx = io.vertx.core.Vertx.vertx();
-            server = vertx.createHttpServer()
-                    .requestHandler(req -> req.response()
-                            .putHeader("content-type", "text/plain")
-                            .end("ok"));
+            server = vertx.createHttpServer().requestHandler(req -> req.response()
+                    .putHeader("content-type", "text/plain")
+                    .end("ok"));
             server.listen(port).toCompletionStage().toCompletableFuture().get();
         }
 
@@ -308,8 +315,7 @@ public class ServerComparison {
      */
     private static int findHeaderEnd(ByteBuffer buf, int limit) {
         for (int i = 0; i <= limit - 4; i++) {
-            if (buf.get(i) == '\r' && buf.get(i + 1) == '\n'
-                    && buf.get(i + 2) == '\r' && buf.get(i + 3) == '\n') {
+            if (buf.get(i) == '\r' && buf.get(i + 1) == '\n' && buf.get(i + 2) == '\r' && buf.get(i + 3) == '\n') {
                 return i;
             }
         }

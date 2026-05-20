@@ -3,6 +3,7 @@ package io.vidocq.chappe.cli.yaml;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Mini-parser YAML in-house pour la config {@code chappe-cli}.
@@ -54,10 +55,12 @@ public final class YamlReader {
             int indent = 0;
             while (indent < line.length()) {
                 char ch = line.charAt(indent);
-                if (ch == ' ') { indent++; continue; }
+                if (ch == ' ') {
+                    indent++;
+                    continue;
+                }
                 if (ch == '\t') {
-                    throw new YamlParseException(lineNo, indent + 1,
-                            "tab indentation forbidden — use spaces only");
+                    throw new YamlParseException(lineNo, indent + 1, "tab indentation forbidden — use spaces only");
                 }
                 break;
             }
@@ -90,8 +93,7 @@ public final class YamlReader {
             }
         }
         if (quote != 0) {
-            throw new YamlParseException(lineNo, indentCols + n + 1,
-                    "unterminated quoted string");
+            throw new YamlParseException(lineNo, indentCols + n + 1, "unterminated quoted string");
         }
         return s;
     }
@@ -101,10 +103,22 @@ public final class YamlReader {
     private static final class Cursor {
         private final List<Line> lines;
         private int pos;
-        Cursor(List<Line> lines) { this.lines = lines; }
-        Line peek() { return pos < lines.size() ? lines.get(pos) : null; }
-        Line next() { return lines.get(pos++); }
-        boolean hasMore() { return pos < lines.size(); }
+
+        Cursor(List<Line> lines) {
+            this.lines = lines;
+        }
+
+        Line peek() {
+            return pos < lines.size() ? lines.get(pos) : null;
+        }
+
+        Line next() {
+            return lines.get(pos++);
+        }
+
+        boolean hasMore() {
+            return pos < lines.size();
+        }
     }
 
     // ── Parser récursif ──
@@ -112,27 +126,27 @@ public final class YamlReader {
     private static YamlNode.Map parseMap(Cursor c, int indent) {
         LinkedHashMap<String, YamlNode> entries = new LinkedHashMap<>();
         while (c.hasMore()) {
-            Line line = c.peek();
+            Line line = Objects.requireNonNull(c.peek()); // garanti non-null par hasMore()
             if (line.indent < indent) break;
             if (line.indent > indent) {
-                throw new YamlParseException(line.lineNo, line.indent + 1,
+                throw new YamlParseException(
+                        line.lineNo,
+                        line.indent + 1,
                         "unexpected indentation (expected " + indent + ", got " + line.indent + ")");
             }
             if (line.content.startsWith("- ")) {
-                throw new YamlParseException(line.lineNo, line.indent + 1,
-                        "list item not expected here — looks like a map context");
+                throw new YamlParseException(
+                        line.lineNo, line.indent + 1, "list item not expected here — looks like a map context");
             }
             c.next();
 
             int colonAt = findUnquotedColon(line.content);
             if (colonAt < 0) {
-                throw new YamlParseException(line.lineNo, line.indent + 1,
-                        "missing ':' separator in map entry");
+                throw new YamlParseException(line.lineNo, line.indent + 1, "missing ':' separator in map entry");
             }
             String key = line.content.substring(0, colonAt).trim();
             if (key.isEmpty()) {
-                throw new YamlParseException(line.lineNo, line.indent + 1,
-                        "empty key");
+                throw new YamlParseException(line.lineNo, line.indent + 1, "empty key");
             }
             String rest = line.content.substring(colonAt + 1).trim();
 
@@ -160,15 +174,16 @@ public final class YamlReader {
     private static YamlNode.Seq parseList(Cursor c, int indent) {
         List<YamlNode> items = new ArrayList<>();
         while (c.hasMore()) {
-            Line line = c.peek();
+            Line line = Objects.requireNonNull(c.peek()); // garanti non-null par hasMore()
             if (line.indent < indent) break;
             if (line.indent > indent) {
-                throw new YamlParseException(line.lineNo, line.indent + 1,
-                        "unexpected indentation in list (expected " + indent + ")");
+                throw new YamlParseException(
+                        line.lineNo, line.indent + 1, "unexpected indentation in list (expected " + indent + ")");
             }
             if (!line.content.startsWith("- ") && !line.content.equals("-")) break;
             c.next();
-            String rest = line.content.length() <= 2 ? "" : line.content.substring(2).trim();
+            String rest =
+                    line.content.length() <= 2 ? "" : line.content.substring(2).trim();
             if (rest.isEmpty()) {
                 Line peek = c.peek();
                 if (peek == null || peek.indent <= indent) {
@@ -214,8 +229,16 @@ public final class YamlReader {
                 if (c == quote) quote = 0;
                 continue;
             }
-            if (c == '"' || c == '\'') { quote = c; buf.append(c); continue; }
-            if (c == ',') { out.add(buf.toString()); buf.setLength(0); continue; }
+            if (c == '"' || c == '\'') {
+                quote = c;
+                buf.append(c);
+                continue;
+            }
+            if (c == ',') {
+                out.add(buf.toString());
+                buf.setLength(0);
+                continue;
+            }
             buf.append(c);
         }
         if (quote != 0) {
@@ -234,7 +257,10 @@ public final class YamlReader {
                 if (c == quote) quote = 0;
                 continue;
             }
-            if (c == '"' || c == '\'') { quote = c; continue; }
+            if (c == '"' || c == '\'') {
+                quote = c;
+                continue;
+            }
             if (c == ':') return i;
         }
         return -1;

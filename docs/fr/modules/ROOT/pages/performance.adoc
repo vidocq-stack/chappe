@@ -47,11 +47,10 @@ En-dessous de cette charge, Chappe est strictement au niveau de Helidon SE 4
   (2 octets, text/plain).
 * Le filtre `p99 < 10 ms` retient le rate le plus haut où la latence p99 reste
   sous 10 ms — c'est la qualité de service vue par un client HTTP réel.
-* Mesure complémentaire `p99 < 20 ms` : Chappe avec warmup progressif
-  (5 s @ 100k puis 200k) tient *200k req/s @ p99 ≈ 15 ms*. Sous cold-start
-  direct à 200k req/s, p99 dérive (~200 ms) — la JIT + le scheduler Loom
-  n'ont pas le temps de s'aligner. Cf. BENCHMARKS.md, section
-  _Nuance importante : warmup progressif vs cold-start_.
+* Tentative de warmup progressif (10 s @ 100k puis mesure @ 200k) :
+  *n'aide pas* Chappe à passer 200k @ p99 < 10 ms — le p99 reste à ~210 ms
+  même avec un container fresh et warmup soigné. La limite est architecturale
+  (modèle Loom 1 VT par connection, cf. profil JFR dans BENCHMARKS.md).
 
 == Pourquoi Chappe est en mid-tier et pas en top-tier ?
 

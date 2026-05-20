@@ -1,11 +1,12 @@
 package io.vidocq.chappe.bench;
 
-import io.vidocq.chappe.api.MimeTypes;
-import org.openjdk.jmh.annotations.*;
-import org.openjdk.jmh.infra.Blackhole;
-
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+
+import io.vidocq.chappe.api.MimeTypes;
+
+import org.openjdk.jmh.annotations.*;
+import org.openjdk.jmh.infra.Blackhole;
 
 /**
  * Compare la nouvelle implémentation zéro-alloc ({@code regionMatches(true, …)} sur tableau
@@ -17,23 +18,36 @@ import java.util.concurrent.TimeUnit;
 @Warmup(iterations = 3, time = 1)
 @Measurement(iterations = 5, time = 1)
 @Fork(value = 1, jvmArgsAppend = "--enable-preview")
+@SuppressWarnings("StringCaseLocaleUsage") // Reproduit l'ancien code à benchmarker
 public class MimeTypesBench {
 
     private static final Map<String, String> OLD_TYPES = Map.ofEntries(
-            Map.entry("html", "text/html"), Map.entry("htm", "text/html"),
+            Map.entry("html", "text/html"),
+            Map.entry("htm", "text/html"),
             Map.entry("css", "text/css"),
-            Map.entry("js", "text/javascript"), Map.entry("mjs", "text/javascript"),
-            Map.entry("json", "application/json"), Map.entry("xml", "application/xml"),
+            Map.entry("js", "text/javascript"),
+            Map.entry("mjs", "text/javascript"),
+            Map.entry("json", "application/json"),
+            Map.entry("xml", "application/xml"),
             Map.entry("png", "image/png"),
-            Map.entry("jpg", "image/jpeg"), Map.entry("jpeg", "image/jpeg"),
-            Map.entry("svg", "image/svg+xml"), Map.entry("gif", "image/gif"),
-            Map.entry("webp", "image/webp"), Map.entry("ico", "image/x-icon"),
-            Map.entry("woff", "font/woff"), Map.entry("woff2", "font/woff2"),
-            Map.entry("ttf", "font/ttf"), Map.entry("otf", "font/otf"),
-            Map.entry("txt", "text/plain"), Map.entry("csv", "text/csv"),
-            Map.entry("pdf", "application/pdf"), Map.entry("zip", "application/zip"),
-            Map.entry("gz", "application/gzip"), Map.entry("wasm", "application/wasm"),
-            Map.entry("mp4", "video/mp4"), Map.entry("webm", "video/webm"));
+            Map.entry("jpg", "image/jpeg"),
+            Map.entry("jpeg", "image/jpeg"),
+            Map.entry("svg", "image/svg+xml"),
+            Map.entry("gif", "image/gif"),
+            Map.entry("webp", "image/webp"),
+            Map.entry("ico", "image/x-icon"),
+            Map.entry("woff", "font/woff"),
+            Map.entry("woff2", "font/woff2"),
+            Map.entry("ttf", "font/ttf"),
+            Map.entry("otf", "font/otf"),
+            Map.entry("txt", "text/plain"),
+            Map.entry("csv", "text/csv"),
+            Map.entry("pdf", "application/pdf"),
+            Map.entry("zip", "application/zip"),
+            Map.entry("gz", "application/gzip"),
+            Map.entry("wasm", "application/wasm"),
+            Map.entry("mp4", "video/mp4"),
+            Map.entry("webm", "video/webm"));
 
     @Param({"index.html", "APP.CSS", "main.js", "Logo.PNG", "unknown.xyz"})
     public String filename;

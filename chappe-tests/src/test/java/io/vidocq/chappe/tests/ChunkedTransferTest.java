@@ -1,10 +1,6 @@
 package io.vidocq.chappe.tests;
 
-import io.vidocq.chappe.api.Response;
-import io.vidocq.chappe.api.Server;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -12,7 +8,12 @@ import java.io.OutputStream;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 
-import static org.junit.jupiter.api.Assertions.*;
+import io.vidocq.chappe.api.Response;
+import io.vidocq.chappe.api.Server;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 class ChunkedTransferTest {
 
@@ -68,7 +69,8 @@ class ChunkedTransferTest {
             // Lire la réponse
             var response = readResponse(in);
             assertTrue(response.contains("200"), "Should be 200 OK: " + response);
-            assertTrue(response.contains("received:Hello World"),
+            assertTrue(
+                    response.contains("received:Hello World"),
                     "Body should contain 'received:Hello World': " + response);
         }
     }
@@ -93,8 +95,7 @@ class ChunkedTransferTest {
 
             var response = readResponse(in);
             assertTrue(response.contains("200"), "Should be 200 OK: " + response);
-            assertTrue(response.contains("received:"),
-                    "Body should contain 'received:': " + response);
+            assertTrue(response.contains("received:"), "Body should contain 'received:': " + response);
         }
     }
 

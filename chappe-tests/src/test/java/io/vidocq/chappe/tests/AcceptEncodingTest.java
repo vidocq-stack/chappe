@@ -1,11 +1,12 @@
 package io.vidocq.chappe.tests;
 
-import io.vidocq.chappe.api.AcceptEncoding;
-import org.junit.jupiter.api.Test;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import io.vidocq.chappe.api.AcceptEncoding;
+
+import org.junit.jupiter.api.Test;
 
 class AcceptEncodingTest {
 

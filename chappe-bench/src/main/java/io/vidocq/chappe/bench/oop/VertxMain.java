@@ -10,11 +10,9 @@ public final class VertxMain {
         int port = OopArgs.port(args, 8080);
         Vertx vertx = Vertx.vertx();
         HttpServer server = vertx.createHttpServer()
-                .requestHandler(req -> req.response()
-                        .putHeader("content-type", "text/plain")
-                        .end("ok"));
-        server.listen(port, "0.0.0.0")
-                .toCompletionStage().toCompletableFuture().get();
+                .requestHandler(req ->
+                        req.response().putHeader("content-type", "text/plain").end("ok"));
+        server.listen(port, "0.0.0.0").toCompletionStage().toCompletableFuture().get();
         System.out.println("vertx listening on :" + server.actualPort());
         Thread.currentThread().join();
     }

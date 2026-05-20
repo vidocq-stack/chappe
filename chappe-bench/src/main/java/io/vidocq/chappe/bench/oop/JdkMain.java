@@ -1,10 +1,10 @@
 package io.vidocq.chappe.bench.oop;
 
-import com.sun.net.httpserver.HttpServer;
-
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.Executors;
+
+import com.sun.net.httpserver.HttpServer;
 
 public final class JdkMain {
     private JdkMain() {}

@@ -1,20 +1,18 @@
 package io.vidocq.chappe.tests;
 
+import static org.junit.jupiter.api.Assertions.*;
+
 import io.vidocq.chappe.api.ChappeException;
 import io.vidocq.chappe.api.Response;
 import io.vidocq.chappe.api.Server;
-import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.*;
+import org.junit.jupiter.api.Test;
 
 class ServerLifecycleTest {
 
     @Test
     void startAndStop() {
-        var server = Server.builder()
-                .port(0)
-                .handler(_ -> Response.ok("hello"))
-                .build();
+        var server = Server.builder().port(0).handler(_ -> Response.ok("hello")).build();
 
         assertFalse(server.isRunning());
 
@@ -28,10 +26,7 @@ class ServerLifecycleTest {
 
     @Test
     void ephemeralPort() {
-        try (var server = Server.builder()
-                .port(0)
-                .handler(_ -> Response.ok())
-                .build()) {
+        try (var server = Server.builder().port(0).handler(_ -> Response.ok()).build()) {
             server.start();
             int port = server.port();
             assertTrue(port > 0 && port < 65536, "Port should be valid: " + port);
@@ -42,10 +37,7 @@ class ServerLifecycleTest {
 
     @Test
     void doubleStartThrows() {
-        try (var server = Server.builder()
-                .port(0)
-                .handler(_ -> Response.ok())
-                .build()) {
+        try (var server = Server.builder().port(0).handler(_ -> Response.ok()).build()) {
             server.start();
             assertThrows(ChappeException.ServerException.class, server::start);
         }
@@ -53,10 +45,7 @@ class ServerLifecycleTest {
 
     @Test
     void stopIdempotent() {
-        var server = Server.builder()
-                .port(0)
-                .handler(_ -> Response.ok())
-                .build();
+        var server = Server.builder().port(0).handler(_ -> Response.ok()).build();
         server.start();
         server.stop();
         // Second stop should not throw
@@ -66,10 +55,7 @@ class ServerLifecycleTest {
     @Test
     void tryWithResources() {
         Server server;
-        try (var s = Server.builder()
-                .port(0)
-                .handler(_ -> Response.ok())
-                .build()) {
+        try (var s = Server.builder().port(0).handler(_ -> Response.ok()).build()) {
             s.start();
             server = s;
             assertTrue(server.isRunning());
@@ -98,7 +84,6 @@ class ServerLifecycleTest {
 
     @Test
     void builderRequiresHandler() {
-        assertThrows(IllegalStateException.class, () ->
-                Server.builder().port(0).build());
+        assertThrows(IllegalStateException.class, () -> Server.builder().port(0).build());
     }
 }

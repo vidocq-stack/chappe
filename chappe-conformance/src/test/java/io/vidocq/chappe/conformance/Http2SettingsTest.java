@@ -1,43 +1,37 @@
 package io.vidocq.chappe.conformance;
 
-import io.vidocq.chappe.api.Response;
-import io.vidocq.chappe.api.Router;
-import io.vidocq.chappe.api.Server;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
 
-import static org.junit.jupiter.api.Assertions.*;
+import io.vidocq.chappe.api.Response;
+import io.vidocq.chappe.api.Router;
+import io.vidocq.chappe.api.Server;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 /**
  * HTTP/2 SETTINGS and PING conformance tests (RFC 9113, Sections 6.5 and 6.7).
  */
 class Http2SettingsTest {
 
-    private static final byte[] CLIENT_PREFACE =
-            "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] CLIENT_PREFACE = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
 
     private Server server;
     private int port;
 
     @BeforeEach
     void setUp() {
-        var router = Router.builder()
-                .get("/", _ -> Response.ok("Hello HTTP/2!"))
-                .build();
+        var router =
+                Router.builder().get("/", _ -> Response.ok("Hello HTTP/2!")).build();
 
-        server = Server.builder()
-                .port(0)
-                .handler(router)
-                .build();
+        server = Server.builder().port(0).handler(router).build();
         server.start();
         port = server.port();
     }
@@ -73,16 +67,15 @@ class Http2SettingsTest {
                 if (frame.type() == 0x04) { // SETTINGS
                     if ((frame.flags() & 0x01) != 0) {
                         receivedSettingsAck = true;
-                        assertEquals(0, frame.payloadLength(),
-                                "SETTINGS ACK payload must be empty");
-                        assertEquals(0, frame.streamId(),
-                                "SETTINGS ACK must be on stream 0");
+                        assertEquals(0, frame.payloadLength(), "SETTINGS ACK payload must be empty");
+                        assertEquals(0, frame.streamId(), "SETTINGS ACK must be on stream 0");
                     } else {
                         receivedServerSettings = true;
-                        assertEquals(0, frame.streamId(),
-                                "SETTINGS must be on stream 0");
+                        assertEquals(0, frame.streamId(), "SETTINGS must be on stream 0");
                         // Payload length must be a multiple of 6 (each setting is 6 bytes)
-                        assertEquals(0, frame.payloadLength() % 6,
+                        assertEquals(
+                                0,
+                                frame.payloadLength() % 6,
                                 "SETTINGS payload must be a multiple of 6 bytes, got " + frame.payloadLength());
                     }
                 }
@@ -140,12 +133,9 @@ class Http2SettingsTest {
                 if (frame.type() == 0x06 && (frame.flags() & 0x01) != 0) {
                     // PING ACK
                     receivedPingAck = true;
-                    assertEquals(8, frame.payloadLength(),
-                            "PING ACK payload must be 8 bytes");
-                    assertArrayEquals(pingData, frame.payload(),
-                            "PING ACK must echo the same opaque data");
-                    assertEquals(0, frame.streamId(),
-                            "PING must be on stream 0");
+                    assertEquals(8, frame.payloadLength(), "PING ACK payload must be 8 bytes");
+                    assertArrayEquals(pingData, frame.payload(), "PING ACK must echo the same opaque data");
+                    assertEquals(0, frame.streamId(), "PING must be on stream 0");
                 }
             }
 
@@ -156,20 +146,30 @@ class Http2SettingsTest {
     // --- Frame construction ---
 
     private byte[] emptySettingsFrame() {
-        return new byte[]{
-                0x00, 0x00, 0x00,       // length = 0
-                0x04,                   // type = SETTINGS
-                0x00,                   // flags = 0
-                0x00, 0x00, 0x00, 0x00  // stream ID = 0
+        return new byte[] {
+            0x00,
+            0x00,
+            0x00, // length = 0
+            0x04, // type = SETTINGS
+            0x00, // flags = 0
+            0x00,
+            0x00,
+            0x00,
+            0x00 // stream ID = 0
         };
     }
 
     private byte[] settingsAckFrame() {
-        return new byte[]{
-                0x00, 0x00, 0x00,       // length = 0
-                0x04,                   // type = SETTINGS
-                0x01,                   // flags = ACK
-                0x00, 0x00, 0x00, 0x00  // stream ID = 0
+        return new byte[] {
+            0x00,
+            0x00,
+            0x00, // length = 0
+            0x04, // type = SETTINGS
+            0x01, // flags = ACK
+            0x00,
+            0x00,
+            0x00,
+            0x00 // stream ID = 0
         };
     }
 
@@ -182,7 +182,7 @@ class Http2SettingsTest {
         buf.put((byte) 0x00).put((byte) 0x00).put((byte) 0x08); // length = 8
         buf.put((byte) 0x06); // type = PING
         buf.put((byte) 0x00); // flags = 0 (not ACK)
-        buf.putInt(0);        // stream ID = 0
+        buf.putInt(0); // stream ID = 0
         buf.put(data);
         return buf.array();
     }

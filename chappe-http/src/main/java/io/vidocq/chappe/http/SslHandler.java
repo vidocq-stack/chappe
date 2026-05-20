@@ -1,9 +1,5 @@
 package io.vidocq.chappe.http;
 
-import javax.net.ssl.SSLEngine;
-import javax.net.ssl.SSLEngineResult;
-import javax.net.ssl.SSLEngineResult.HandshakeStatus;
-import javax.net.ssl.SSLEngineResult.Status;
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -11,6 +7,11 @@ import java.nio.channels.ReadableByteChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.channels.WritableByteChannel;
 import java.util.concurrent.locks.ReentrantLock;
+
+import javax.net.ssl.SSLEngine;
+import javax.net.ssl.SSLEngineResult;
+import javax.net.ssl.SSLEngineResult.HandshakeStatus;
+import javax.net.ssl.SSLEngineResult.Status;
 
 /**
  * Wraps a {@link SocketChannel} and {@link SSLEngine} to provide transparent TLS
@@ -85,8 +86,9 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
                         if (result.getStatus() == Status.CLOSED) {
                             throw new IOException("SSLEngine closed during handshake");
                         }
-                    } while (netInBuffer.hasRemaining() && result.getStatus() == Status.OK
-                             && result.getHandshakeStatus() == HandshakeStatus.NEED_UNWRAP);
+                    } while (netInBuffer.hasRemaining()
+                            && result.getStatus() == Status.OK
+                            && result.getHandshakeStatus() == HandshakeStatus.NEED_UNWRAP);
 
                     netInBuffer.compact();
                     hs = result.getHandshakeStatus();
@@ -166,7 +168,9 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
                     if (bytesRead < 0) return -1;
                 }
                 case BUFFER_OVERFLOW -> throw new IOException("appInBuffer overflow");
-                case CLOSED -> { return -1; }
+                case CLOSED -> {
+                    return -1;
+                }
             }
         }
     }
@@ -274,9 +278,14 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
                 }
             }
         } catch (IOException _) {
+            // best-effort : flush du close_notify sortant
         } finally {
             writeLock.unlock();
-            try { engine.closeInbound(); } catch (javax.net.ssl.SSLException _) {}
+            try {
+                engine.closeInbound();
+            } catch (javax.net.ssl.SSLException _) {
+                // best-effort : peer n'a pas envoyé close_notify
+            }
             channel.close();
         }
     }

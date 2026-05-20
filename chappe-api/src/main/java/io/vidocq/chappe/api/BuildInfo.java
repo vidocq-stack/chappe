@@ -44,17 +44,27 @@ public final class BuildInfo {
     private BuildInfo() {}
 
     /** Version Maven (ex: {@code 0.1.0-SNAPSHOT}). */
-    public static String version() { return VERSION; }
+    public static String version() {
+        return VERSION;
+    }
 
     /** Short hash du commit HEAD au build (ex: {@code ef864e8}), ou {@code "unknown"}. */
-    public static String gitCommit() { return GIT_COMMIT; }
+    public static String gitCommit() {
+        return GIT_COMMIT;
+    }
 
     /** Timestamp ISO-8601 UTC du build (ex: {@code 2026-05-09T18:14:52Z}). */
-    public static String buildTimestamp() { return BUILD_TIMESTAMP; }
+    public static String buildTimestamp() {
+        return BUILD_TIMESTAMP;
+    }
 
     /** Version Java utilisée pour compiler. */
-    public static String javaVersion() { return JAVA_VERSION; }
+    public static String javaVersion() {
+        return JAVA_VERSION;
+    }
 
     /** Valeur prête à coller dans un header HTTP {@code Server}. */
-    public static String serverHeader() { return SERVER_HEADER; }
+    public static String serverHeader() {
+        return SERVER_HEADER;
+    }
 }

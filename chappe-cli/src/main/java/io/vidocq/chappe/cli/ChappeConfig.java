@@ -1,10 +1,10 @@
 package io.vidocq.chappe.cli;
 
-import io.vidocq.chappe.cli.yaml.YamlNode;
-
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+
+import io.vidocq.chappe.cli.yaml.YamlNode;
 
 /**
  * Configuration résolue de la CLI {@code chappe serve}, projection d'un
@@ -19,8 +19,13 @@ public record ChappeConfig(Server server, Static staticCfg, Headers headers, Log
         public static final Server EMPTY = new Server(null, null);
     }
 
-    public record Static(String root, String fallback, String spaFallback,
-                         List<String> indexFiles, String cacheControl, Boolean gzip) {
+    public record Static(
+            String root,
+            String fallback,
+            String spaFallback,
+            List<String> indexFiles,
+            String cacheControl,
+            Boolean gzip) {
         public static final Static EMPTY = new Static(null, null, null, null, null, null);
     }
 
@@ -32,8 +37,7 @@ public record ChappeConfig(Server server, Static staticCfg, Headers headers, Log
         public static final Logging EMPTY = new Logging(null, null);
     }
 
-    public static final ChappeConfig EMPTY = new ChappeConfig(
-            Server.EMPTY, Static.EMPTY, Headers.EMPTY, Logging.EMPTY);
+    public static final ChappeConfig EMPTY = new ChappeConfig(Server.EMPTY, Static.EMPTY, Headers.EMPTY, Logging.EMPTY);
 
     /** Projette un nœud YAML racine sur un {@code ChappeConfig}. */
     public static ChappeConfig from(YamlNode root) {
@@ -63,8 +67,9 @@ public record ChappeConfig(Server server, Static staticCfg, Headers headers, Log
 
     private static Headers parseHeaders(YamlNode.Map m) {
         if (m == null) return Headers.EMPTY;
-        return new Headers(flatStringMap(m.map("always").orElse(null)),
-                           flatStringMap(m.map("staging").orElse(null)));
+        return new Headers(
+                flatStringMap(m.map("always").orElse(null)),
+                flatStringMap(m.map("staging").orElse(null)));
     }
 
     private static Logging parseLogging(YamlNode.Map m) {

@@ -18,6 +18,9 @@ public interface Response {
 
     // --- Factories ---
 
+    /** Réponse 200 OK "ok" pré-allouée (hot path benchmark). */
+    Response OK_TEXT = Response.ok("ok");
+
     /** 200 OK sans corps. */
     static Response ok() {
         return builder().status(StatusCode.OK).build();

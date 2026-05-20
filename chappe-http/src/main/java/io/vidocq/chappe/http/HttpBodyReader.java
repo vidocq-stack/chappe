@@ -15,8 +15,7 @@ public final class HttpBodyReader {
     /**
      * Crée un InputStream pour un body de taille fixe (Content-Length).
      */
-    static InputStream fixedLength(ByteBuffer buffer, ReadableByteChannel channel,
-                                   long contentLength) {
+    static InputStream fixedLength(ByteBuffer buffer, ReadableByteChannel channel, long contentLength) {
         return new FixedLengthInputStream(buffer, channel, contentLength);
     }
 

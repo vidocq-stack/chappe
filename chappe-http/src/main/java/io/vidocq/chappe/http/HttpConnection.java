@@ -1,7 +1,5 @@
 package io.vidocq.chappe.http;
 
-import io.vidocq.chappe.api.*;
-
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
@@ -9,6 +7,9 @@ import java.nio.ByteBuffer;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.channels.WritableByteChannel;
+import java.nio.charset.StandardCharsets;
+
+import io.vidocq.chappe.api.*;
 
 /**
  * Gestion d'une connexion HTTP/1.1 — boucle keep-alive.
@@ -30,23 +31,28 @@ public final class HttpConnection {
     private final HttpRequestParser parser;
     private final HttpResponseWriter writer;
     private final HttpRequestImpl request;
+    private final RequestContext context;
     private volatile boolean open = true;
 
     public HttpConnection(SocketChannel channel, Handler handler, ServerConfig config) {
         this(channel, channel, channel, handler, config, null, null);
     }
 
-    public HttpConnection(SocketChannel channel, Handler handler, ServerConfig config,
-                          ByteBuffer prefilledBuffer) {
+    public HttpConnection(SocketChannel channel, Handler handler, ServerConfig config, ByteBuffer prefilledBuffer) {
         this(channel, channel, channel, handler, config, prefilledBuffer, null);
     }
 
     /**
      * Constructeur pour TLS — accepte des channels séparés (SslHandler).
      */
-    public HttpConnection(ReadableByteChannel readChannel, WritableByteChannel writeChannel,
-                          Closeable closeable, Handler handler, ServerConfig config,
-                          ByteBuffer prefilledBuffer, ByteBuffer writeBuffer) {
+    public HttpConnection(
+            ReadableByteChannel readChannel,
+            WritableByteChannel writeChannel,
+            Closeable closeable,
+            Handler handler,
+            ServerConfig config,
+            ByteBuffer prefilledBuffer,
+            ByteBuffer writeBuffer) {
         this.readChannel = readChannel;
         this.writeChannel = writeChannel;
         this.closeable = closeable;
@@ -62,6 +68,7 @@ public final class HttpConnection {
         this.parser = new HttpRequestParser();
         this.writer = new HttpResponseWriter();
         this.request = new HttpRequestImpl();
+        this.context = new RequestContext(request);
 
         // Populate connection-level metadata once
         if (closeable instanceof SocketChannel sc) {
@@ -106,10 +113,9 @@ public final class HttpConnection {
                 }
 
                 // 3. Expect: 100-continue (RFC 9110 §10.1.1)
-                if ("100-continue".equalsIgnoreCase(
-                        request.headers().firstOrNull("Expect"))) {
+                if ("100-continue".equalsIgnoreCase(request.headers().firstOrNull("Expect"))) {
                     // Envoyer 100 Continue avant la lecture du body
-                    var continueBytes = "HTTP/1.1 100 Continue\r\n\r\n".getBytes();
+                    var continueBytes = "HTTP/1.1 100 Continue\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
                     var buf = ByteBuffer.wrap(continueBytes);
                     while (buf.hasRemaining()) {
                         writeChannel.write(buf);
@@ -132,9 +138,8 @@ public final class HttpConnection {
                 boolean keepAlive = isKeepAlive();
                 Response response;
                 try {
-                    var ctx = new RequestContext(request);
-                    response = ScopedValue.where(RequestContext.CURRENT, ctx)
-                            .call(() -> handler.handle(request));
+                    response =
+                            ScopedValue.where(RequestContext.CURRENT, context).call(() -> handler.handle(request));
                 } catch (Exception e) {
                     response = Response.builder()
                             .status(StatusCode.INTERNAL_SERVER_ERROR)
@@ -210,7 +215,9 @@ public final class HttpConnection {
     }
 
     private static final class BadBodyException extends Exception {
-        BadBodyException(String message) { super(message); }
+        BadBodyException(String message) {
+            super(message);
+        }
     }
 
     private long contentLength() {
@@ -220,8 +227,11 @@ public final class HttpConnection {
 
         return headers.first("Content-Length")
                 .map(s -> {
-                    try { return Long.parseLong(s); }
-                    catch (NumberFormatException _) { return -1L; }
+                    try {
+                        return Long.parseLong(s);
+                    } catch (NumberFormatException _) {
+                        return -1L;
+                    }
                 })
                 .orElse(-1L);
     }

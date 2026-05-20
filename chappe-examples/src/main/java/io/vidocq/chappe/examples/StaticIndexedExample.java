@@ -19,17 +19,16 @@ public final class StaticIndexedExample {
 
     public static void main(String[] args) throws Exception {
         var router = Router.builder()
-                .mount("/assets", StaticFileHandler.builder()
-                        .addClasspath("static")
-                        .cacheInMemory(true)
-                        .cacheControl("public, max-age=3600")
-                        .build())
+                .mount(
+                        "/assets",
+                        StaticFileHandler.builder()
+                                .addClasspath("static")
+                                .cacheInMemory(true)
+                                .cacheControl("public, max-age=3600")
+                                .build())
                 .build();
 
-        var server = Server.builder()
-                .port(8080)
-                .handler(router)
-                .build();
+        var server = Server.builder().port(8080).handler(router).build();
 
         server.start();
         System.out.println("http://localhost:8080/assets/index.html");

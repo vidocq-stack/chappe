@@ -1,24 +1,22 @@
 package io.vidocq.chappe.tests;
 
-import io.vidocq.chappe.api.Response;
-import io.vidocq.chappe.api.Router;
-import io.vidocq.chappe.api.Server;
-import io.vidocq.chappe.api.StatusCode;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 
-import static org.junit.jupiter.api.Assertions.*;
+import io.vidocq.chappe.api.Response;
+import io.vidocq.chappe.api.Router;
+import io.vidocq.chappe.api.Server;
+import io.vidocq.chappe.api.StatusCode;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 /**
  * Tests d'intégration HTTP/2 (h2c cleartext).
@@ -54,18 +52,13 @@ class Http2Test {
                 })
                 .build();
 
-        server = Server.builder()
-                .port(0)
-                .handler(router)
-                .build();
+        server = Server.builder().port(0).handler(router).build();
         server.start();
         port = server.port();
         baseUrl = "http://127.0.0.1:" + port;
 
         // HttpClient avec HTTP/2 — fera un prior-knowledge h2c
-        client = HttpClient.newBuilder()
-                .version(HttpClient.Version.HTTP_2)
-                .build();
+        client = HttpClient.newBuilder().version(HttpClient.Version.HTTP_2).build();
     }
 
     @AfterEach
@@ -129,10 +122,8 @@ class Http2Test {
     }
 
     private HttpResponse<String> get(String path) throws IOException, InterruptedException {
-        var request = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl + path))
-                .GET()
-                .build();
+        var request =
+                HttpRequest.newBuilder().uri(URI.create(baseUrl + path)).GET().build();
         return client.send(request, HttpResponse.BodyHandlers.ofString());
     }
 }

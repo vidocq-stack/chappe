@@ -23,7 +23,6 @@ final class ChunkedInputStream extends InputStream {
     private final ReadableByteChannel channel;
     private ChunkState chunkState = ChunkState.READ_SIZE;
     private long chunkRemaining;
-    private boolean crSeen;
 
     ChunkedInputStream(ByteBuffer buffer, ReadableByteChannel channel) {
         this.buffer = buffer;
@@ -47,7 +46,6 @@ final class ChunkedInputStream extends InputStream {
                         return buffer.get() & 0xFF;
                     }
                     chunkState = ChunkState.READ_DATA_CRLF;
-                    crSeen = false;
                 }
                 case READ_DATA_CRLF -> {
                     consumeCrlf();
@@ -78,14 +76,14 @@ final class ChunkedInputStream extends InputStream {
                         if (!ensureData()) {
                             return totalRead > 0 ? totalRead : -1;
                         }
-                        int toRead = (int) Math.min(Math.min(len - totalRead, chunkRemaining), buffer.remaining());
+                        int toRead =
+                                (int) Math.min(Math.min((long) len - totalRead, chunkRemaining), buffer.remaining());
                         buffer.get(b, off + totalRead, toRead);
                         chunkRemaining -= toRead;
                         totalRead += toRead;
                     }
                     if (chunkRemaining == 0) {
                         chunkState = ChunkState.READ_DATA_CRLF;
-                        crSeen = false;
                     }
                 }
                 case READ_DATA_CRLF -> {
@@ -111,7 +109,6 @@ final class ChunkedInputStream extends InputStream {
     private void readChunkSize() throws IOException {
         long size = 0;
         boolean started = false;
-        crSeen = false;
 
         while (true) {
             if (!ensureData()) {
@@ -120,7 +117,6 @@ final class ChunkedInputStream extends InputStream {
             int b = buffer.get() & 0xFF;
 
             if (b == '\r') {
-                crSeen = true;
                 continue;
             }
             if (b == '\n') {
@@ -150,7 +146,6 @@ final class ChunkedInputStream extends InputStream {
                 return;
             }
 
-            crSeen = false;
             started = true;
             int digit = hexDigit(b);
             if (digit < 0) {

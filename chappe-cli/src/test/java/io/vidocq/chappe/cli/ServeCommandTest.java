@@ -1,9 +1,8 @@
 package io.vidocq.chappe.cli;
 
-import io.vidocq.chappe.api.Server;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -13,17 +12,18 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import io.vidocq.chappe.api.Server;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /** Tests d'intégration end-to-end de la sous-commande {@code chappe serve}. */
 class ServeCommandTest {
 
     private Server server;
-    private final HttpClient client = HttpClient.newBuilder()
-            .version(HttpClient.Version.HTTP_1_1)
-            .build();
+    private final HttpClient client =
+            HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build();
 
     @AfterEach
     void tearDown() {
@@ -48,7 +48,7 @@ class ServeCommandTest {
                     X-Content-Type-Options: nosniff
                 """.formatted(docroot));
 
-        CliArgs args = CliArgs.parse(new String[]{"serve", "--config", yml.toString()});
+        CliArgs args = CliArgs.parse(new String[] {"serve", "--config", yml.toString()});
         ChappeConfig yaml = ConfigLoader.load(yml);
         ServeCommand.Effective eff = ServeCommand.Effective.resolve(args, yaml);
         server = ServeCommand.start(eff);
@@ -74,11 +74,8 @@ class ServeCommandTest {
         Path yml = tmp.resolve("c.yml");
         Files.writeString(yml, "static:\n  root: " + doc1 + "\n");
 
-        CliArgs args = CliArgs.parse(new String[]{
-                "serve", "--config", yml.toString(),
-                "--root", doc2.toString(),
-                "--port", "0"
-        });
+        CliArgs args = CliArgs.parse(
+                new String[] {"serve", "--config", yml.toString(), "--root", doc2.toString(), "--port", "0"});
         ChappeConfig yaml = ConfigLoader.load(yml);
         ServeCommand.Effective eff = ServeCommand.Effective.resolve(args, yaml);
         server = ServeCommand.start(eff);
@@ -101,7 +98,7 @@ class ServeCommandTest {
                   fallback: /404.html
                 """.formatted(docroot));
 
-        CliArgs args = CliArgs.parse(new String[]{"serve", "--config", yml.toString()});
+        CliArgs args = CliArgs.parse(new String[] {"serve", "--config", yml.toString()});
         ChappeConfig yaml = ConfigLoader.load(yml);
         ServeCommand.Effective eff = ServeCommand.Effective.resolve(args, yaml);
         server = ServeCommand.start(eff);
@@ -123,7 +120,7 @@ class ServeCommandTest {
                   staging:
                     X-Robots-Tag: "noindex, nofollow"
                 """.formatted(docroot)));
-        CliArgs args = CliArgs.parse(new String[]{"serve", "--port", "0"});
+        CliArgs args = CliArgs.parse(new String[] {"serve", "--port", "0"});
         ServeCommand.Effective eff = ServeCommand.Effective.resolve(args, yaml);
         server = ServeCommand.start(eff);
 
@@ -137,10 +134,8 @@ class ServeCommandTest {
         Path docroot = Files.createDirectory(tmp.resolve("site"));
         Files.writeString(docroot.resolve("index.html"), "home");
 
-        CliArgs args = CliArgs.parse(new String[]{
-                "serve", "--root", docroot.toString(), "--port", "0",
-                "--header", "X-Foo=bar"
-        });
+        CliArgs args = CliArgs.parse(
+                new String[] {"serve", "--root", docroot.toString(), "--port", "0", "--header", "X-Foo=bar"});
         ServeCommand.Effective eff = ServeCommand.Effective.resolve(args, ChappeConfig.EMPTY);
         server = ServeCommand.start(eff);
 
@@ -150,7 +145,7 @@ class ServeCommandTest {
 
     @Test
     void rootMissingRaisesAtStart(@TempDir Path tmp) {
-        CliArgs args = CliArgs.parse(new String[]{"serve", "--port", "0"});
+        CliArgs args = CliArgs.parse(new String[] {"serve", "--port", "0"});
         ServeCommand.Effective eff = ServeCommand.Effective.resolve(args, ChappeConfig.EMPTY);
         try {
             server = ServeCommand.start(eff);

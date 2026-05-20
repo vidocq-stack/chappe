@@ -4,7 +4,6 @@ package io.vidocq.chappe.http.h2;
  * Codes d'erreur HTTP/2 (RFC 9113, Section 7).
  */
 public enum Http2ErrorCode {
-
     NO_ERROR(0x0),
     PROTOCOL_ERROR(0x1),
     INTERNAL_ERROR(0x2),

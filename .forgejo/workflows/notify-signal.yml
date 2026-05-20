@@ -1,0 +1,44 @@
+name: Notify Signal
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+
+jobs:
+  notify-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Signal message on PR open
+        env:
+          SIGNAL_API_URL: ${{ vars.SIGNAL_API_URL }}
+          SIGNAL_AUTH: ${{ secrets.SIGNAL_AUTH }}
+          SIGNAL_FROM: ${{ vars.SIGNAL_FROM }}
+          SIGNAL_TO: ${{ vars.SIGNAL_TO }}
+          REPO: ${{ github.repository }}
+          PR_NUM: ${{ github.event.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [ -z "${SIGNAL_API_URL:-}" ] && missing+=("SIGNAL_API_URL")
+          [ -z "${SIGNAL_AUTH:-}" ]    && missing+=("SIGNAL_AUTH")
+          [ -z "${SIGNAL_FROM:-}" ]    && missing+=("SIGNAL_FROM")
+          [ -z "${SIGNAL_TO:-}" ]      && missing+=("SIGNAL_TO")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "❌ Secret(s) Forgejo manquant(s) : ${missing[*]}" >&2
+            echo "→ Settings du repo → Actions → Secrets, ou Settings de l'org" >&2
+            exit 1
+          fi
+          payload=$(node <<'JS'
+          process.stdout.write(JSON.stringify({
+            number: process.env.SIGNAL_FROM,
+            recipients: [process.env.SIGNAL_TO],
+            message: `[ViBot]: 📬 PR ouverte sur ${process.env.REPO}#${process.env.PR_NUM} par ${process.env.PR_AUTHOR} — ${process.env.PR_TITLE}\n${process.env.PR_URL}`
+          }))
+          JS
+          )
+          curl -fsS -u "$SIGNAL_AUTH" -X POST "$SIGNAL_API_URL/v2/send" \
+            -H 'Content-Type: application/json' \
+            -d "$payload"

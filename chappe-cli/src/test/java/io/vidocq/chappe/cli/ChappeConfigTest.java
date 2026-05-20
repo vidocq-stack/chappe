@@ -1,13 +1,14 @@
 package io.vidocq.chappe.cli;
 
-import io.vidocq.chappe.cli.yaml.YamlReader;
-import org.junit.jupiter.api.Test;
-
-import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.List;
+
+import io.vidocq.chappe.cli.yaml.YamlReader;
+
+import org.junit.jupiter.api.Test;
 
 class ChappeConfigTest {
 

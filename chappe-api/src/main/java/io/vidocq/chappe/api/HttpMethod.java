@@ -1,5 +1,6 @@
 package io.vidocq.chappe.api;
 
+import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -8,7 +9,6 @@ import java.util.stream.Stream;
  * Méthodes HTTP standard définies par la RFC 9110.
  */
 public enum HttpMethod {
-
     GET,
     HEAD,
     POST,
@@ -19,9 +19,8 @@ public enum HttpMethod {
     TRACE,
     PATCH;
 
-    private static final Map<String, HttpMethod> LOOKUP =
-            Stream.of(values()).collect(Collectors.toUnmodifiableMap(
-                    m -> m.name().toUpperCase(), m -> m));
+    private static final Map<String, HttpMethod> LOOKUP = Stream.of(values())
+            .collect(Collectors.toUnmodifiableMap(m -> m.name().toUpperCase(Locale.ROOT), m -> m));
 
     /**
      * Résout une méthode HTTP à partir de sa représentation textuelle.
@@ -32,7 +31,7 @@ public enum HttpMethod {
      * @throws IllegalArgumentException si la méthode est inconnue
      */
     public static HttpMethod of(String method) {
-        var m = LOOKUP.get(method.toUpperCase());
+        var m = LOOKUP.get(method.toUpperCase(Locale.ROOT));
         if (m == null) {
             throw new IllegalArgumentException("Unknown HTTP method: " + method);
         }

@@ -1,12 +1,13 @@
 package io.vidocq.chappe.core;
 
+import java.time.Duration;
+import java.util.List;
+
+import javax.net.ssl.SSLContext;
+
 import io.vidocq.chappe.api.Handler;
 import io.vidocq.chappe.api.Server;
 import io.vidocq.chappe.api.ServerConfig;
-
-import javax.net.ssl.SSLContext;
-import java.time.Duration;
-import java.util.List;
 
 /**
  * Implémentation de {@link Server.Builder} — accumule la configuration
@@ -104,8 +105,17 @@ final class ChappeServerBuilder implements Server.Builder {
         if (handler == null) {
             throw new IllegalStateException("Handler is required — call handler(Handler) before build()");
         }
-        var config = new ServerConfig(host, port, backlog, readTimeout, writeTimeout,
-                idleTimeout, maxRequestSize, maxHeaderSize, sslContext, alpnProtocols,
+        var config = new ServerConfig(
+                host,
+                port,
+                backlog,
+                readTimeout,
+                writeTimeout,
+                idleTimeout,
+                maxRequestSize,
+                maxHeaderSize,
+                sslContext,
+                alpnProtocols,
                 shutdownGracePeriod);
         return new ChappeServer(config, handler);
     }

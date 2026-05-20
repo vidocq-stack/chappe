@@ -11,7 +11,6 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 
@@ -21,6 +20,7 @@ import java.util.function.Consumer;
 final class DefaultRouterBuilder implements Router.Builder {
 
     private record Route(HttpMethod method, String pattern, Handler handler, List<Filter> filters) {}
+
     private record Mount(String prefix, Handler handler, List<Filter> filters) {}
 
     private final List<Route> routes = new ArrayList<>();
@@ -172,8 +172,8 @@ final class DefaultRouterBuilder implements Router.Builder {
                     }
                     allowedMethods.add(route.method());
 
-                    boolean methodMatch = (route.method() == method)
-                            || (tryHeadAsGet && route.method() == HttpMethod.GET);
+                    boolean methodMatch =
+                            (route.method() == method) || (tryHeadAsGet && route.method() == HttpMethod.GET);
 
                     if (methodMatch) {
                         return invoke(route, request, params, globalFilters);
@@ -184,7 +184,8 @@ final class DefaultRouterBuilder implements Router.Builder {
             // 405 Method Not Allowed si le path matche mais pas la méthode (RFC 9110 §15.5.6)
             if (pathMatched) {
                 if (tryHeadAsGet) allowedMethods.add(HttpMethod.HEAD);
-                var allow = String.join(", ", allowedMethods.stream().map(Enum::name).toList());
+                var allow = String.join(
+                        ", ", allowedMethods.stream().map(Enum::name).toList());
                 return Response.builder()
                         .status(StatusCode.METHOD_NOT_ALLOWED)
                         .header("Allow", allow)
@@ -196,7 +197,9 @@ final class DefaultRouterBuilder implements Router.Builder {
                 if (path.equals(mount.prefix()) || path.startsWith(mount.prefix() + "/")) {
                     Handler h = mount.handler();
                     var mf = mount.filters();
-                    for (int i = mf.size() - 1; i >= 0; i--) { h = mf.get(i).apply(h); }
+                    for (int i = mf.size() - 1; i >= 0; i--) {
+                        h = mf.get(i).apply(h);
+                    }
                     return h.handle(withMount(request, mount.prefix(), path));
                 }
             }
@@ -205,8 +208,8 @@ final class DefaultRouterBuilder implements Router.Builder {
         };
     }
 
-    private static Response invoke(Route route, Request request, Map<String, String> params,
-                                    List<Filter> globalFilters) throws Exception {
+    private static Response invoke(Route route, Request request, Map<String, String> params, List<Filter> globalFilters)
+            throws Exception {
         var routedRequest = params.isEmpty() ? request : withPathParams(request, params);
         Handler h = route.handler();
         var routeFilters = route.filters();
@@ -222,8 +225,7 @@ final class DefaultRouterBuilder implements Router.Builder {
     }
 
     private static String normalize(String pattern) {
-        return (pattern.length() > 1 && pattern.endsWith("/"))
-                ? pattern.substring(0, pattern.length() - 1) : pattern;
+        return (pattern.length() > 1 && pattern.endsWith("/")) ? pattern.substring(0, pattern.length() - 1) : pattern;
     }
 
     private static boolean isStaticPattern(String pattern) {
@@ -235,8 +237,8 @@ final class DefaultRouterBuilder implements Router.Builder {
      */
     private static Map<String, String> matchPath(String pattern, String path) {
         // Normalisation trailing slash sur le pattern aussi
-        String normPattern = (pattern.length() > 1 && pattern.endsWith("/"))
-                ? pattern.substring(0, pattern.length() - 1) : pattern;
+        String normPattern =
+                (pattern.length() > 1 && pattern.endsWith("/")) ? pattern.substring(0, pattern.length() - 1) : pattern;
         if (normPattern.equals(path)) return Collections.emptyMap();
 
         if (normPattern.endsWith("/*")) {
@@ -256,8 +258,7 @@ final class DefaultRouterBuilder implements Router.Builder {
             var pp = patternParts[i];
             if (pp.startsWith("{") && pp.endsWith("}")) {
                 if (params == null) params = new LinkedHashMap<>();
-                params.put(pp.substring(1, pp.length() - 1),
-                        URLDecoder.decode(pathParts[i], StandardCharsets.UTF_8));
+                params.put(pp.substring(1, pp.length() - 1), URLDecoder.decode(pathParts[i], StandardCharsets.UTF_8));
             } else if (!pp.equals(pathParts[i])) {
                 return null;
             }
@@ -270,23 +271,91 @@ final class DefaultRouterBuilder implements Router.Builder {
      */
     private static Request withPathParams(Request delegate, Map<String, String> pathParams) {
         return new Request() {
-            @Override public HttpMethod method() { return delegate.method(); }
-            @Override public URI uri() { return delegate.uri(); }
-            @Override public String path() { return delegate.path(); }
-            @Override public String contextPath() { return delegate.contextPath(); }
-            @Override public String pathInfo() { return delegate.pathInfo(); }
-            @Override public String query() { return delegate.query(); }
-            @Override public HttpVersion version() { return delegate.version(); }
-            @Override public Headers headers() { return delegate.headers(); }
-            @Override public Body body() { return delegate.body(); }
-            @Override public Map<String, String> pathParams() { return pathParams; }
-            @Override public Map<String, String> queryParams() { return delegate.queryParams(); }
-            @Override public Object attribute(String key) { return delegate.attribute(key); }
-            @Override public Request attribute(String key, Object value) { delegate.attribute(key, value); return this; }
-            @Override public java.net.InetSocketAddress remoteAddress() { return delegate.remoteAddress(); }
-            @Override public java.net.InetSocketAddress localAddress() { return delegate.localAddress(); }
-            @Override public boolean isSecure() { return delegate.isSecure(); }
-            @Override public String scheme() { return delegate.scheme(); }
+            @Override
+            public HttpMethod method() {
+                return delegate.method();
+            }
+
+            @Override
+            public URI uri() {
+                return delegate.uri();
+            }
+
+            @Override
+            public String path() {
+                return delegate.path();
+            }
+
+            @Override
+            public String contextPath() {
+                return delegate.contextPath();
+            }
+
+            @Override
+            public String pathInfo() {
+                return delegate.pathInfo();
+            }
+
+            @Override
+            public String query() {
+                return delegate.query();
+            }
+
+            @Override
+            public HttpVersion version() {
+                return delegate.version();
+            }
+
+            @Override
+            public Headers headers() {
+                return delegate.headers();
+            }
+
+            @Override
+            public Body body() {
+                return delegate.body();
+            }
+
+            @Override
+            public Map<String, String> pathParams() {
+                return pathParams;
+            }
+
+            @Override
+            public Map<String, String> queryParams() {
+                return delegate.queryParams();
+            }
+
+            @Override
+            public Object attribute(String key) {
+                return delegate.attribute(key);
+            }
+
+            @Override
+            public Request attribute(String key, Object value) {
+                delegate.attribute(key, value);
+                return this;
+            }
+
+            @Override
+            public java.net.InetSocketAddress remoteAddress() {
+                return delegate.remoteAddress();
+            }
+
+            @Override
+            public java.net.InetSocketAddress localAddress() {
+                return delegate.localAddress();
+            }
+
+            @Override
+            public boolean isSecure() {
+                return delegate.isSecure();
+            }
+
+            @Override
+            public String scheme() {
+                return delegate.scheme();
+            }
         };
     }
 
@@ -295,23 +364,91 @@ final class DefaultRouterBuilder implements Router.Builder {
         if (stripped.isEmpty()) stripped = "/";
         final String mountedPath = stripped;
         return new Request() {
-            @Override public HttpMethod method() { return delegate.method(); }
-            @Override public URI uri() { return delegate.uri(); }
-            @Override public String path() { return mountedPath; }
-            @Override public String contextPath() { return mountPrefix; }
-            @Override public String pathInfo() { return mountedPath; }
-            @Override public String query() { return delegate.query(); }
-            @Override public HttpVersion version() { return delegate.version(); }
-            @Override public Headers headers() { return delegate.headers(); }
-            @Override public Body body() { return delegate.body(); }
-            @Override public Map<String, String> pathParams() { return delegate.pathParams(); }
-            @Override public Map<String, String> queryParams() { return delegate.queryParams(); }
-            @Override public Object attribute(String key) { return delegate.attribute(key); }
-            @Override public Request attribute(String key, Object value) { delegate.attribute(key, value); return this; }
-            @Override public java.net.InetSocketAddress remoteAddress() { return delegate.remoteAddress(); }
-            @Override public java.net.InetSocketAddress localAddress() { return delegate.localAddress(); }
-            @Override public boolean isSecure() { return delegate.isSecure(); }
-            @Override public String scheme() { return delegate.scheme(); }
+            @Override
+            public HttpMethod method() {
+                return delegate.method();
+            }
+
+            @Override
+            public URI uri() {
+                return delegate.uri();
+            }
+
+            @Override
+            public String path() {
+                return mountedPath;
+            }
+
+            @Override
+            public String contextPath() {
+                return mountPrefix;
+            }
+
+            @Override
+            public String pathInfo() {
+                return mountedPath;
+            }
+
+            @Override
+            public String query() {
+                return delegate.query();
+            }
+
+            @Override
+            public HttpVersion version() {
+                return delegate.version();
+            }
+
+            @Override
+            public Headers headers() {
+                return delegate.headers();
+            }
+
+            @Override
+            public Body body() {
+                return delegate.body();
+            }
+
+            @Override
+            public Map<String, String> pathParams() {
+                return delegate.pathParams();
+            }
+
+            @Override
+            public Map<String, String> queryParams() {
+                return delegate.queryParams();
+            }
+
+            @Override
+            public Object attribute(String key) {
+                return delegate.attribute(key);
+            }
+
+            @Override
+            public Request attribute(String key, Object value) {
+                delegate.attribute(key, value);
+                return this;
+            }
+
+            @Override
+            public java.net.InetSocketAddress remoteAddress() {
+                return delegate.remoteAddress();
+            }
+
+            @Override
+            public java.net.InetSocketAddress localAddress() {
+                return delegate.localAddress();
+            }
+
+            @Override
+            public boolean isSecure() {
+                return delegate.isSecure();
+            }
+
+            @Override
+            public String scheme() {
+                return delegate.scheme();
+            }
         };
     }
 }

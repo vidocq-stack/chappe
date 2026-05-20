@@ -1,16 +1,7 @@
 package io.vidocq.chappe.tests;
 
-import io.vidocq.chappe.api.Response;
-import io.vidocq.chappe.api.Server;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
 
-import javax.net.ssl.KeyManagerFactory;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.X509TrustManager;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -21,7 +12,18 @@ import java.nio.file.Path;
 import java.security.KeyStore;
 import java.security.cert.X509Certificate;
 
-import static org.junit.jupiter.api.Assertions.*;
+import javax.net.ssl.KeyManagerFactory;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.X509TrustManager;
+
+import io.vidocq.chappe.api.Response;
+import io.vidocq.chappe.api.Server;
+
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 /**
  * Tests d'intégration TLS — HTTPS avec certificat auto-signé.
@@ -45,18 +47,19 @@ class TlsTest {
         keystorePath = Files.createTempFile("chappe-test-", ".p12");
         Files.delete(keystorePath); // keytool refuse d'écraser un fichier existant
         var process = new ProcessBuilder(
-                "keytool", "-genkeypair",
-                "-alias", "chappe",
-                "-keyalg", "RSA",
-                "-keysize", "2048",
-                "-validity", "1",
-                "-dname", "CN=localhost",
-                "-storetype", "PKCS12",
-                "-keystore", keystorePath.toString(),
-                "-storepass", "changeit",
-                "-keypass", "changeit",
-                "-ext", "san=ip:127.0.0.1"
-        ).redirectErrorStream(true).start();
+                        "keytool", "-genkeypair",
+                        "-alias", "chappe",
+                        "-keyalg", "RSA",
+                        "-keysize", "2048",
+                        "-validity", "1",
+                        "-dname", "CN=localhost",
+                        "-storetype", "PKCS12",
+                        "-keystore", keystorePath.toString(),
+                        "-storepass", "changeit",
+                        "-keypass", "changeit",
+                        "-ext", "san=ip:127.0.0.1")
+                .redirectErrorStream(true)
+                .start();
         process.waitFor();
         assertEquals(0, process.exitValue(), "keytool failed");
 
@@ -73,13 +76,20 @@ class TlsTest {
 
         // SSLContext client qui fait confiance à tout
         trustAllContext = SSLContext.getInstance("TLS");
-        trustAllContext.init(null, new javax.net.ssl.TrustManager[]{
-                new X509TrustManager() {
-                    public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
-                    public void checkClientTrusted(X509Certificate[] c, String a) {}
-                    public void checkServerTrusted(X509Certificate[] c, String a) {}
-                }
-        }, null);
+        trustAllContext.init(
+                null,
+                new javax.net.ssl.TrustManager[] {
+                    new X509TrustManager() {
+                        public X509Certificate[] getAcceptedIssuers() {
+                            return new X509Certificate[0];
+                        }
+
+                        public void checkClientTrusted(X509Certificate[] c, String a) {}
+
+                        public void checkServerTrusted(X509Certificate[] c, String a) {}
+                    }
+                },
+                null);
     }
 
     @AfterAll
@@ -128,20 +138,16 @@ class TlsTest {
                 .version(HttpClient.Version.HTTP_2)
                 .sslContext(trustAllContext)
                 .build();
-        var request = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl + "/"))
-                .GET()
-                .build();
+        var request =
+                HttpRequest.newBuilder().uri(URI.create(baseUrl + "/")).GET().build();
         var response = h2Client.send(request, HttpResponse.BodyHandlers.ofString());
         assertEquals(200, response.statusCode());
         assertEquals("Hello TLS!", response.body());
     }
 
     private HttpResponse<String> get(String path) throws IOException, InterruptedException {
-        var request = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl + path))
-                .GET()
-                .build();
+        var request =
+                HttpRequest.newBuilder().uri(URI.create(baseUrl + path)).GET().build();
         return client.send(request, HttpResponse.BodyHandlers.ofString());
     }
 }

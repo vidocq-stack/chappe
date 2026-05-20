@@ -282,7 +282,7 @@ Benchmarks sur macOS, Java 25, NIO client ultra-léger ([détails](BENCHMARKS.md
 | **Helidon SE 4** | 34 861 | 94 620 | 90 798 |
 | **JDK HttpServer** | 31 883 | 85 410 | 105 533 |
 
-**Latence p99 = 50 µs** (20× sous l'objectif de 1ms).
+**Latence p99 = 57 µs** sur raw socket keep-alive (run JMH 2026-05-20, 317k samples). Validé sans régression après cleanup ErrorProne + Spotless — détails dans [BENCHMARKS.md](BENCHMARKS.md#2026-05-20--validation-jmh-post-cleanup-errorprone--spotless--systemlogger).
 
 ## Architecture
 
@@ -290,7 +290,7 @@ Benchmarks sur macOS, Java 25, NIO client ultra-léger ([détails](BENCHMARKS.md
 ┌─────────────────────────────────────────────────────┐
 │       chappe-cli  ·  chappe-examples                 │
 ├─────────────────────────────────────────────────────┤
-│  chappe-tests (113)  chappe-bench  chappe-conf (45)  │
+│  chappe-tests (114)  chappe-bench  chappe-conf (45)  │
 ├─────────────────────────────────────────────────────┤
 │                    chappe-core                        │
 │   (moteur serveur, virtual threads, TLS, pooling)    │
@@ -315,7 +315,7 @@ Benchmarks sur macOS, Java 25, NIO client ultra-léger ([détails](BENCHMARKS.md
 | `chappe-http` | Protocoles HTTP/1.1 et HTTP/2, TLS, buffer pool |
 | `chappe-core` | Moteur serveur, virtual threads, protocol detection |
 | `chappe-cli` | Launcher CLI standalone `chappe serve` (mini-YAML, fat jar, jlink) |
-| `chappe-tests` | 113 tests d'intégration |
+| `chappe-tests` | 114 tests d'intégration |
 | `chappe-conformance` | 45 tests de conformité RFC |
 | `chappe-bench` | Benchmarks comparatifs |
 | `chappe-static-index-maven-plugin` | Plugin Maven : index O(1) + sidecars `.gz` au build |

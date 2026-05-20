@@ -1,10 +1,6 @@
 package io.vidocq.chappe.tests;
 
-import io.vidocq.chappe.api.*;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
 import java.net.URI;
@@ -14,7 +10,11 @@ import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-import static org.junit.jupiter.api.Assertions.*;
+import io.vidocq.chappe.api.*;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Tests des SPI d'extension : mount(), StaticFileHandler, RequestContext,
@@ -25,7 +25,9 @@ class ExtensionSpiTest {
     private Server server;
     private HttpClient client;
     private String baseUrl;
-    @TempDir Path tempDir;
+
+    @TempDir
+    Path tempDir;
 
     @AfterEach
     void tearDown() {
@@ -40,7 +42,8 @@ class ExtensionSpiTest {
     }
 
     private HttpResponse<String> get(String path) throws IOException, InterruptedException {
-        return client.send(HttpRequest.newBuilder().uri(URI.create(baseUrl + path)).GET().build(),
+        return client.send(
+                HttpRequest.newBuilder().uri(URI.create(baseUrl + path)).GET().build(),
                 HttpResponse.BodyHandlers.ofString());
     }
 
@@ -64,8 +67,7 @@ class ExtensionSpiTest {
     @Test
     void mountContextPath() throws Exception {
         var router = Router.builder()
-                .mount("/servlet", req -> Response.ok(
-                        "ctx=" + req.contextPath() + " pathInfo=" + req.pathInfo()))
+                .mount("/servlet", req -> Response.ok("ctx=" + req.contextPath() + " pathInfo=" + req.pathInfo()))
                 .build();
         startServer(router);
 
@@ -106,9 +108,8 @@ class ExtensionSpiTest {
         Files.writeString(tempDir.resolve("hello.txt"), "Hello World");
         Files.writeString(tempDir.resolve("style.css"), "body { color: red; }");
 
-        var router = Router.builder()
-                .mount("/static", StaticFileHandler.of(tempDir))
-                .build();
+        var router =
+                Router.builder().mount("/static", StaticFileHandler.of(tempDir)).build();
         startServer(router);
 
         var txt = get("/static/hello.txt");
@@ -123,9 +124,8 @@ class ExtensionSpiTest {
 
     @Test
     void staticFileNotFound() throws Exception {
-        var router = Router.builder()
-                .mount("/static", StaticFileHandler.of(tempDir))
-                .build();
+        var router =
+                Router.builder().mount("/static", StaticFileHandler.of(tempDir)).build();
         startServer(router);
 
         assertEquals(404, get("/static/nonexistent.txt").statusCode());
@@ -133,9 +133,8 @@ class ExtensionSpiTest {
 
     @Test
     void staticFilePathTraversal() throws Exception {
-        var router = Router.builder()
-                .mount("/static", StaticFileHandler.of(tempDir))
-                .build();
+        var router =
+                Router.builder().mount("/static", StaticFileHandler.of(tempDir)).build();
         startServer(router);
 
         assertEquals(403, get("/static/../../../etc/passwd").statusCode());
@@ -145,9 +144,8 @@ class ExtensionSpiTest {
     void staticFileDirectoryIndex() throws Exception {
         Files.writeString(tempDir.resolve("index.html"), "<html>Home</html>");
 
-        var router = Router.builder()
-                .mount("/static", StaticFileHandler.of(tempDir))
-                .build();
+        var router =
+                Router.builder().mount("/static", StaticFileHandler.of(tempDir)).build();
         startServer(router);
 
         var resp = get("/static/");
@@ -215,7 +213,8 @@ class ExtensionSpiTest {
                     try {
                         out.write("streaming ".getBytes());
                         out.write("body".getBytes());
-                    } catch (IOException _) {}
+                    } catch (IOException _) {
+                    }
                 }))
                 .build());
 
@@ -257,9 +256,7 @@ class ExtensionSpiTest {
 
     @Test
     void classpathResourceServing() throws Exception {
-        var handler = StaticFileHandler.builder()
-                .addClasspath("static")
-                .build();
+        var handler = StaticFileHandler.builder().addClasspath("static").build();
         startServer(Router.builder().mount("/res", handler).build());
 
         var html = get("/res/page.html");
@@ -287,9 +284,7 @@ class ExtensionSpiTest {
 
     @Test
     void classpathNotFound() throws Exception {
-        var handler = StaticFileHandler.builder()
-                .addClasspath("static")
-                .build();
+        var handler = StaticFileHandler.builder().addClasspath("static").build();
         startServer(Router.builder().mount("/res", handler).build());
 
         assertEquals(404, get("/res/nonexistent.txt").statusCode());
@@ -301,8 +296,8 @@ class ExtensionSpiTest {
         Files.writeString(tempDir.resolve("local.txt"), "from filesystem");
 
         var handler = StaticFileHandler.builder()
-                .addPath(tempDir)               // filesystem d'abord
-                .addClasspath("static")          // puis classpath
+                .addPath(tempDir) // filesystem d'abord
+                .addClasspath("static") // puis classpath
                 .build();
         startServer(Router.builder().mount("/assets", handler).build());
 
@@ -330,7 +325,8 @@ class ExtensionSpiTest {
         var req = java.net.http.HttpRequest.newBuilder()
                 .uri(java.net.URI.create(baseUrl + "/cached/data.json"))
                 .header("If-None-Match", etag)
-                .GET().build();
+                .GET()
+                .build();
         var resp2 = client.send(req, java.net.http.HttpResponse.BodyHandlers.ofString());
         assertEquals(304, resp2.statusCode());
     }
@@ -344,14 +340,15 @@ class ExtensionSpiTest {
         startServer(Router.builder().mount("/cc", handler).build());
 
         var resp = get("/cc/page.html");
-        assertEquals("max-age=3600, public",
+        assertEquals(
+                "max-age=3600, public",
                 resp.headers().firstValue("Cache-Control").orElse(""));
     }
 
     @Test
     void builderRequiresAtLeastOneSource() {
-        assertThrows(IllegalStateException.class, () ->
-                StaticFileHandler.builder().build());
+        assertThrows(
+                IllegalStateException.class, () -> StaticFileHandler.builder().build());
     }
 
     // ── Bugs upstream signalés par vidocq-rest-cassini-extension ──
@@ -360,8 +357,9 @@ class ExtensionSpiTest {
     @Test
     void mountPreservesQueryString() throws Exception {
         var router = Router.builder()
-                .mount("/ctx", req -> Response.ok(
-                        "path=" + req.path()
+                .mount(
+                        "/ctx",
+                        req -> Response.ok("path=" + req.path()
                                 + " query=" + req.query()
                                 + " bpe=" + req.queryParams().get("bpeQuery")))
                 .build();
@@ -369,39 +367,79 @@ class ExtensionSpiTest {
 
         var resp = get("/ctx/resource/queryfield?bpeQuery=FIRST&innerQuery=SECOND");
         assertEquals(200, resp.statusCode());
-        assertEquals("path=/resource/queryfield query=bpeQuery=FIRST&innerQuery=SECOND bpe=FIRST",
-                resp.body());
+        assertEquals("path=/resource/queryfield query=bpeQuery=FIRST&innerQuery=SECOND bpe=FIRST", resp.body());
     }
 
     /** Bug #5 bis : query() via wrapper externe qui ne réécrit que path(). */
     @Test
     void externalWrapperPreservesQueryString() throws Exception {
-        Handler inner = req -> Response.ok(
-                "path=" + req.path() + " query=" + req.query());
+        Handler inner = req -> Response.ok("path=" + req.path() + " query=" + req.query());
         // Wrapper qui réécrit path() mais délègue query() à delegate
         Handler wrapper = req -> {
             String stripped = req.path().substring("/ctx".length());
             final String newPath = stripped.isEmpty() ? "/" : stripped;
             return inner.handle(new Request() {
-                @Override public HttpMethod method() { return req.method(); }
-                @Override public java.net.URI uri() { return req.uri(); }
-                @Override public String path() { return newPath; }
-                @Override public String query() { return req.query(); }
-                @Override public HttpVersion version() { return req.version(); }
-                @Override public Headers headers() { return req.headers(); }
-                @Override public Body body() { return req.body(); }
-                @Override public java.util.Map<String, String> pathParams() { return req.pathParams(); }
-                @Override public java.util.Map<String, String> queryParams() { return req.queryParams(); }
-                @Override public String contextPath() { return "/ctx"; }
-                @Override public String pathInfo() { return newPath; }
+                @Override
+                public HttpMethod method() {
+                    return req.method();
+                }
+
+                @Override
+                public java.net.URI uri() {
+                    return req.uri();
+                }
+
+                @Override
+                public String path() {
+                    return newPath;
+                }
+
+                @Override
+                public String query() {
+                    return req.query();
+                }
+
+                @Override
+                public HttpVersion version() {
+                    return req.version();
+                }
+
+                @Override
+                public Headers headers() {
+                    return req.headers();
+                }
+
+                @Override
+                public Body body() {
+                    return req.body();
+                }
+
+                @Override
+                public java.util.Map<String, String> pathParams() {
+                    return req.pathParams();
+                }
+
+                @Override
+                public java.util.Map<String, String> queryParams() {
+                    return req.queryParams();
+                }
+
+                @Override
+                public String contextPath() {
+                    return "/ctx";
+                }
+
+                @Override
+                public String pathInfo() {
+                    return newPath;
+                }
             });
         };
         startServer(wrapper);
 
         var resp = get("/ctx/resource/queryfield?bpeQuery=FIRST&innerQuery=SECOND");
         assertEquals(200, resp.statusCode());
-        assertEquals("path=/resource/queryfield query=bpeQuery=FIRST&innerQuery=SECOND",
-                resp.body());
+        assertEquals("path=/resource/queryfield query=bpeQuery=FIRST&innerQuery=SECOND", resp.body());
     }
 
     /** Bug #4 : uri() doit renvoyer une URI absolue (authority = Host header). */

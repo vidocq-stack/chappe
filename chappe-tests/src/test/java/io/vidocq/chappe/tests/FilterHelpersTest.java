@@ -1,5 +1,12 @@
 package io.vidocq.chappe.tests;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+
+import java.net.URI;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
+
 import io.vidocq.chappe.api.Body;
 import io.vidocq.chappe.api.Filter;
 import io.vidocq.chappe.api.Handler;
@@ -8,15 +15,8 @@ import io.vidocq.chappe.api.HttpMethod;
 import io.vidocq.chappe.api.HttpVersion;
 import io.vidocq.chappe.api.Request;
 import io.vidocq.chappe.api.Response;
+
 import org.junit.jupiter.api.Test;
-
-import java.net.URI;
-import java.util.Map;
-import java.util.concurrent.atomic.AtomicBoolean;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FilterHelpersTest {
 
@@ -87,8 +87,9 @@ class FilterHelpersTest {
     @Test
     void addHeaderIfEnvMismatchSkips() throws Exception {
         Handler h = Filter.addHeaderIfEnv(
-                "CHAPPE_TEST_VAR_THAT_DOES_NOT_EXIST_42", "yes",
-                "X-Env", "no").apply(OK);
+                        "CHAPPE_TEST_VAR_THAT_DOES_NOT_EXIST_42", "yes",
+                        "X-Env", "no")
+                .apply(OK);
         assertFalse(h.handle(req()).headers().contains("X-Env"));
     }
 
@@ -103,15 +104,50 @@ class FilterHelpersTest {
 
     private static Request req() {
         return new Request() {
-            @Override public HttpMethod method() { return HttpMethod.GET; }
-            @Override public URI uri() { return URI.create("http://test/"); }
-            @Override public String path() { return "/"; }
-            @Override public String query() { return null; }
-            @Override public HttpVersion version() { return HttpVersion.HTTP_1_1; }
-            @Override public Headers headers() { return Headers.empty(); }
-            @Override public Body body() { return Body.empty(); }
-            @Override public Map<String, String> pathParams() { return Map.of(); }
-            @Override public Map<String, String> queryParams() { return Map.of(); }
+            @Override
+            public HttpMethod method() {
+                return HttpMethod.GET;
+            }
+
+            @Override
+            public URI uri() {
+                return URI.create("http://test/");
+            }
+
+            @Override
+            public String path() {
+                return "/";
+            }
+
+            @Override
+            public String query() {
+                return null;
+            }
+
+            @Override
+            public HttpVersion version() {
+                return HttpVersion.HTTP_1_1;
+            }
+
+            @Override
+            public Headers headers() {
+                return Headers.empty();
+            }
+
+            @Override
+            public Body body() {
+                return Body.empty();
+            }
+
+            @Override
+            public Map<String, String> pathParams() {
+                return Map.of();
+            }
+
+            @Override
+            public Map<String, String> queryParams() {
+                return Map.of();
+            }
         };
     }
 }

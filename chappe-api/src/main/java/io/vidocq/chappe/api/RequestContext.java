@@ -8,9 +8,19 @@ public final class RequestContext {
 
     private final Request request;
 
-    public RequestContext(Request request) { this.request = request; }
-    public Request request() { return request; }
+    public RequestContext(Request request) {
+        this.request = request;
+    }
 
-    public static RequestContext current() { return CURRENT.get(); }
-    public static Request currentRequest() { return current().request(); }
+    public Request request() {
+        return request;
+    }
+
+    public static RequestContext current() {
+        return CURRENT.get();
+    }
+
+    public static Request currentRequest() {
+        return current().request();
+    }
 }

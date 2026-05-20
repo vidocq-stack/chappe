@@ -1,10 +1,10 @@
 package io.vidocq.chappe.cli;
 
-import io.vidocq.chappe.cli.yaml.YamlReader;
-
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+
+import io.vidocq.chappe.cli.yaml.YamlReader;
 
 /** Charge un {@link ChappeConfig} depuis un fichier YAML sur disque. */
 public final class ConfigLoader {

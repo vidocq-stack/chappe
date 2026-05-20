@@ -1,12 +1,6 @@
 package io.vidocq.chappe.tests;
 
-import io.vidocq.chappe.api.Response;
-import io.vidocq.chappe.api.Router;
-import io.vidocq.chappe.api.Server;
-import io.vidocq.chappe.api.StatusCode;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
 import java.net.URI;
@@ -15,7 +9,14 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 
-import static org.junit.jupiter.api.Assertions.*;
+import io.vidocq.chappe.api.Response;
+import io.vidocq.chappe.api.Router;
+import io.vidocq.chappe.api.Server;
+import io.vidocq.chappe.api.StatusCode;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 class HttpMethodsTest {
 
@@ -46,10 +47,7 @@ class HttpMethodsTest {
                 })
                 .build();
 
-        server = Server.builder()
-                .port(0)
-                .handler(router)
-                .build();
+        server = Server.builder().port(0).handler(router).build();
         server.start();
         baseUrl = "http://127.0.0.1:" + server.port();
         client = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build();

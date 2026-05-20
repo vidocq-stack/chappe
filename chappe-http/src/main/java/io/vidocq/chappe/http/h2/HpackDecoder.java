@@ -1,9 +1,9 @@
 package io.vidocq.chappe.http.h2;
 
-import io.vidocq.chappe.http.HttpRequestImpl;
-
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+
+import io.vidocq.chappe.http.HttpRequestImpl;
 
 /**
  * Décodeur HPACK (RFC 7541) — décode un header block compressé
@@ -22,8 +22,7 @@ public final class HpackDecoder {
     /**
      * Décode un header block complet dans la requête cible.
      */
-    public void decode(ByteBuffer headerBlock, HttpRequestImpl target)
-            throws Http2ConnectionException {
+    public void decode(ByteBuffer headerBlock, HttpRequestImpl target) throws Http2ConnectionException {
         int totalSize = 0;
 
         while (headerBlock.hasRemaining()) {
@@ -65,8 +64,8 @@ public final class HpackDecoder {
 
             totalSize += name.length() + value.length() + 32;
             if (totalSize > maxHeaderListSize) {
-                throw new Http2ConnectionException(Http2ErrorCode.ENHANCE_YOUR_CALM,
-                        "Header list exceeds max size " + maxHeaderListSize);
+                throw new Http2ConnectionException(
+                        Http2ErrorCode.ENHANCE_YOUR_CALM, "Header list exceeds max size " + maxHeaderListSize);
             }
 
             target.addHeader(name, value);
@@ -123,8 +122,7 @@ public final class HpackDecoder {
         }
         int dynIndex = index - HpackStaticTable.size();
         if (dynIndex > dynamicTable.count()) {
-            throw new Http2ConnectionException(Http2ErrorCode.COMPRESSION_ERROR,
-                    "Invalid HPACK index: " + index);
+            throw new Http2ConnectionException(Http2ErrorCode.COMPRESSION_ERROR, "Invalid HPACK index: " + index);
         }
         return dynamicTable.name(dynIndex);
     }
@@ -135,8 +133,7 @@ public final class HpackDecoder {
         }
         int dynIndex = index - HpackStaticTable.size();
         if (dynIndex > dynamicTable.count()) {
-            throw new Http2ConnectionException(Http2ErrorCode.COMPRESSION_ERROR,
-                    "Invalid HPACK index: " + index);
+            throw new Http2ConnectionException(Http2ErrorCode.COMPRESSION_ERROR, "Invalid HPACK index: " + index);
         }
         return dynamicTable.value(dynIndex);
     }

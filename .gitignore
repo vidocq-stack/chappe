@@ -19,6 +19,7 @@ replay_pid*
 # Maven
 # ============================================================
 target/
+.errorprone/
 pom.xml.tag
 pom.xml.releaseBackup
 pom.xml.versionsBackup

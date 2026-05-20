@@ -53,33 +53,34 @@ public final class Http2FrameReader {
         ensureReadable(FRAME_HEADER_SIZE);
 
         // Length: 24-bit big-endian unsigned integer
-        int length = ((buffer.get() & 0xFF) << 16)
-                   | ((buffer.get() & 0xFF) << 8)
-                   |  (buffer.get() & 0xFF);
+        int length = ((buffer.get() & 0xFF) << 16) | ((buffer.get() & 0xFF) << 8) | (buffer.get() & 0xFF);
 
-        int type     = buffer.get() & 0xFF;
-        int flags    = buffer.get() & 0xFF;
+        int type = buffer.get() & 0xFF;
+        int flags = buffer.get() & 0xFF;
         int streamId = buffer.getInt() & 0x7FFFFFFF;
 
         if (length > maxFrameSize) {
             throw new Http2ConnectionException(
-                Http2ErrorCode.FRAME_SIZE_ERROR,
-                "Frame length " + length + " exceeds max frame size " + maxFrameSize);
+                    Http2ErrorCode.FRAME_SIZE_ERROR,
+                    "Frame length " + length + " exceeds max frame size " + maxFrameSize);
         }
 
         ensureReadable(length);
 
         return switch (type) {
-            case Http2Frame.TYPE_DATA          -> readDataFrame(streamId, flags, length);
-            case Http2Frame.TYPE_HEADERS       -> readHeadersFrame(streamId, flags, length);
-            case Http2Frame.TYPE_PRIORITY      -> { skipBytes(length); yield null; }
-            case Http2Frame.TYPE_RST_STREAM    -> readRstStreamFrame(streamId, flags, length);
-            case Http2Frame.TYPE_SETTINGS      -> readSettingsFrame(streamId, flags, length);
-            case Http2Frame.TYPE_PING          -> readPingFrame(streamId, flags, length);
-            case Http2Frame.TYPE_GOAWAY        -> readGoawayFrame(streamId, flags, length);
+            case Http2Frame.TYPE_DATA -> readDataFrame(streamId, flags, length);
+            case Http2Frame.TYPE_HEADERS -> readHeadersFrame(streamId, flags, length);
+            case Http2Frame.TYPE_PRIORITY -> {
+                skipBytes(length);
+                yield null;
+            }
+            case Http2Frame.TYPE_RST_STREAM -> readRstStreamFrame(streamId, flags, length);
+            case Http2Frame.TYPE_SETTINGS -> readSettingsFrame(streamId, flags, length);
+            case Http2Frame.TYPE_PING -> readPingFrame(streamId, flags, length);
+            case Http2Frame.TYPE_GOAWAY -> readGoawayFrame(streamId, flags, length);
             case Http2Frame.TYPE_WINDOW_UPDATE -> readWindowUpdateFrame(streamId, flags, length);
-            case Http2Frame.TYPE_CONTINUATION  -> readContinuationFrame(streamId, flags, length);
-            default                            -> readUnknownFrame(type, streamId, flags, length);
+            case Http2Frame.TYPE_CONTINUATION -> readContinuationFrame(streamId, flags, length);
+            default -> readUnknownFrame(type, streamId, flags, length);
         };
     }
 
@@ -87,8 +88,7 @@ public final class Http2FrameReader {
     // Frame-specific readers
     // -------------------------------------------------------------------------
 
-    private Http2Frame.DataFrame readDataFrame(int streamId, int flags, int length)
-            throws IOException {
+    private Http2Frame.DataFrame readDataFrame(int streamId, int flags, int length) throws IOException {
         int consumed = 0;
         int padding = 0;
 
@@ -100,8 +100,7 @@ public final class Http2FrameReader {
         int dataLength = length - consumed - padding;
         if (dataLength < 0) {
             throw new Http2ConnectionException(
-                Http2ErrorCode.PROTOCOL_ERROR,
-                "DATA frame: pad length exceeds payload length");
+                    Http2ErrorCode.PROTOCOL_ERROR, "DATA frame: pad length exceeds payload length");
         }
 
         byte[] dataBytes = new byte[dataLength];
@@ -112,8 +111,7 @@ public final class Http2FrameReader {
         return new Http2Frame.DataFrame(streamId, flags, ByteBuffer.wrap(dataBytes), padding);
     }
 
-    private Http2Frame.HeadersFrame readHeadersFrame(int streamId, int flags, int length)
-            throws IOException {
+    private Http2Frame.HeadersFrame readHeadersFrame(int streamId, int flags, int length) throws IOException {
         int consumed = 0;
         int padding = 0;
 
@@ -135,8 +133,7 @@ public final class Http2FrameReader {
         int headerBlockLength = length - consumed - padding;
         if (headerBlockLength < 0) {
             throw new Http2ConnectionException(
-                Http2ErrorCode.PROTOCOL_ERROR,
-                "HEADERS frame: pad length exceeds payload length");
+                    Http2ErrorCode.PROTOCOL_ERROR, "HEADERS frame: pad length exceeds payload length");
         }
 
         byte[] headerBytes = new byte[headerBlockLength];
@@ -145,33 +142,28 @@ public final class Http2FrameReader {
         skipBytes(padding);
 
         return new Http2Frame.HeadersFrame(
-            streamId, flags, ByteBuffer.wrap(headerBytes),
-            hasPriority, streamDependency, weight);
+                streamId, flags, ByteBuffer.wrap(headerBytes), hasPriority, streamDependency, weight);
     }
 
-    private Http2Frame.RstStreamFrame readRstStreamFrame(int streamId, int flags, int length)
-            throws IOException {
+    private Http2Frame.RstStreamFrame readRstStreamFrame(int streamId, int flags, int length) throws IOException {
         if (length != 4) {
             throw new Http2ConnectionException(
-                Http2ErrorCode.FRAME_SIZE_ERROR,
-                "RST_STREAM frame length must be 4, got " + length);
+                    Http2ErrorCode.FRAME_SIZE_ERROR, "RST_STREAM frame length must be 4, got " + length);
         }
         int errorCode = buffer.getInt();
         return new Http2Frame.RstStreamFrame(streamId, flags, errorCode);
     }
 
-    private Http2Frame.SettingsFrame readSettingsFrame(int streamId, int flags, int length)
-            throws IOException {
+    private Http2Frame.SettingsFrame readSettingsFrame(int streamId, int flags, int length) throws IOException {
         boolean ack = (flags & Http2Frame.FLAG_ACK) != 0;
         if (!ack && (length % 6 != 0)) {
             throw new Http2ConnectionException(
-                Http2ErrorCode.FRAME_SIZE_ERROR,
-                "SETTINGS frame payload length must be a multiple of 6, got " + length);
+                    Http2ErrorCode.FRAME_SIZE_ERROR,
+                    "SETTINGS frame payload length must be a multiple of 6, got " + length);
         }
         if (ack && length != 0) {
             throw new Http2ConnectionException(
-                Http2ErrorCode.FRAME_SIZE_ERROR,
-                "SETTINGS ACK frame must have empty payload, got " + length);
+                    Http2ErrorCode.FRAME_SIZE_ERROR, "SETTINGS ACK frame must have empty payload, got " + length);
         }
 
         byte[] payload = new byte[length];
@@ -179,26 +171,22 @@ public final class Http2FrameReader {
         return new Http2Frame.SettingsFrame(streamId, flags, ByteBuffer.wrap(payload));
     }
 
-    private Http2Frame.PingFrame readPingFrame(int streamId, int flags, int length)
-            throws IOException {
+    private Http2Frame.PingFrame readPingFrame(int streamId, int flags, int length) throws IOException {
         if (length != 8) {
             throw new Http2ConnectionException(
-                Http2ErrorCode.FRAME_SIZE_ERROR,
-                "PING frame length must be 8, got " + length);
+                    Http2ErrorCode.FRAME_SIZE_ERROR, "PING frame length must be 8, got " + length);
         }
         long opaqueData = buffer.getLong();
         return new Http2Frame.PingFrame(streamId, flags, opaqueData);
     }
 
-    private Http2Frame.GoawayFrame readGoawayFrame(int streamId, int flags, int length)
-            throws IOException {
+    private Http2Frame.GoawayFrame readGoawayFrame(int streamId, int flags, int length) throws IOException {
         if (length < 8) {
             throw new Http2ConnectionException(
-                Http2ErrorCode.FRAME_SIZE_ERROR,
-                "GOAWAY frame length must be at least 8, got " + length);
+                    Http2ErrorCode.FRAME_SIZE_ERROR, "GOAWAY frame length must be at least 8, got " + length);
         }
         int lastStreamId = buffer.getInt() & 0x7FFFFFFF;
-        int errorCode    = buffer.getInt();
+        int errorCode = buffer.getInt();
 
         int debugLength = length - 8;
         byte[] debugBytes = new byte[debugLength];
@@ -206,16 +194,13 @@ public final class Http2FrameReader {
             buffer.get(debugBytes);
         }
 
-        return new Http2Frame.GoawayFrame(
-            streamId, flags, lastStreamId, errorCode, ByteBuffer.wrap(debugBytes));
+        return new Http2Frame.GoawayFrame(streamId, flags, lastStreamId, errorCode, ByteBuffer.wrap(debugBytes));
     }
 
-    private Http2Frame.WindowUpdateFrame readWindowUpdateFrame(int streamId, int flags, int length)
-            throws IOException {
+    private Http2Frame.WindowUpdateFrame readWindowUpdateFrame(int streamId, int flags, int length) throws IOException {
         if (length != 4) {
             throw new Http2ConnectionException(
-                Http2ErrorCode.FRAME_SIZE_ERROR,
-                "WINDOW_UPDATE frame length must be 4, got " + length);
+                    Http2ErrorCode.FRAME_SIZE_ERROR, "WINDOW_UPDATE frame length must be 4, got " + length);
         }
         int increment = buffer.getInt() & 0x7FFFFFFF;
         return new Http2Frame.WindowUpdateFrame(streamId, flags, increment);
@@ -253,8 +238,7 @@ public final class Http2FrameReader {
             int read = channel.read(buffer);
             buffer.flip();
             if (read == -1) {
-                throw new EOFException(
-                    "Channel closed while waiting for " + needed + " bytes");
+                throw new EOFException("Channel closed while waiting for " + needed + " bytes");
             }
         }
     }

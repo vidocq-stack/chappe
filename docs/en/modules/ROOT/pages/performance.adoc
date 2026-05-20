@@ -48,10 +48,10 @@ build vs 389 MB / 38 MiB on the JVM.
 * The `p99 < 10 ms` filter retains the highest rate at which the p99 latency
   stays below 10 ms — that is the quality of service seen by an actual HTTP
   client.
-* Companion measurement with `p99 < 20 ms`: Chappe with progressive warmup
-  (5 s @ 100k then 200k) sustains *200k req/s @ p99 ≈ 15 ms*. Under direct
-  cold-start at 200k req/s, p99 drifts (~200 ms) — JIT + Loom scheduler
-  need time to settle. See BENCHMARKS.md, _Progressive warmup vs cold-start_.
+* Progressive warmup attempt (10 s @ 100k then measurement @ 200k):
+  *does NOT* help Chappe reach 200k @ p99 < 10 ms — p99 stays around ~210 ms
+  even with a fresh container and careful warmup. The limit is architectural
+  (Loom model: 1 VT per connection — see the JFR profile in BENCHMARKS.md).
 
 == Why is Chappe in mid-tier and not top-tier?
 

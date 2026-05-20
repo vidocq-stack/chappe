@@ -1,5 +1,15 @@
 package io.vidocq.chappe.tests;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+
+import java.io.ByteArrayInputStream;
+import java.net.URI;
+import java.util.Map;
+import java.util.zip.GZIPInputStream;
+
 import io.vidocq.chappe.api.Body;
 import io.vidocq.chappe.api.Filter;
 import io.vidocq.chappe.api.Handler;
@@ -9,21 +19,13 @@ import io.vidocq.chappe.api.HttpVersion;
 import io.vidocq.chappe.api.Request;
 import io.vidocq.chappe.api.Response;
 import io.vidocq.chappe.api.StatusCode;
+
 import org.junit.jupiter.api.Test;
-
-import java.io.ByteArrayInputStream;
-import java.net.URI;
-import java.util.Map;
-import java.util.zip.GZIPInputStream;
-
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 
 class GzipFilterTest {
 
     private static final String LARGE_PAYLOAD;
+
     static {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < 200; i++) sb.append("Hello, gzip world! ");
@@ -44,7 +46,7 @@ class GzipFilterTest {
 
         byte[] decompressed;
         try (var in = r.body().asInputStream();
-             var gin = new GZIPInputStream(in)) {
+                var gin = new GZIPInputStream(in)) {
             decompressed = gin.readAllBytes();
         }
         assertArrayEquals(LARGE_PAYLOAD.getBytes(java.nio.charset.StandardCharsets.UTF_8), decompressed);
@@ -144,21 +146,57 @@ class GzipFilterTest {
     private static Request reqAccepting(String acceptEncoding) {
         Headers h = Headers.builder().add("Accept-Encoding", acceptEncoding).build();
         return new Request() {
-            @Override public HttpMethod method() { return HttpMethod.GET; }
-            @Override public URI uri() { return URI.create("http://test/"); }
-            @Override public String path() { return "/"; }
-            @Override public String query() { return null; }
-            @Override public HttpVersion version() { return HttpVersion.HTTP_1_1; }
-            @Override public Headers headers() { return h; }
-            @Override public Body body() { return Body.empty(); }
-            @Override public Map<String, String> pathParams() { return Map.of(); }
-            @Override public Map<String, String> queryParams() { return Map.of(); }
+            @Override
+            public HttpMethod method() {
+                return HttpMethod.GET;
+            }
+
+            @Override
+            public URI uri() {
+                return URI.create("http://test/");
+            }
+
+            @Override
+            public String path() {
+                return "/";
+            }
+
+            @Override
+            public String query() {
+                return null;
+            }
+
+            @Override
+            public HttpVersion version() {
+                return HttpVersion.HTTP_1_1;
+            }
+
+            @Override
+            public Headers headers() {
+                return h;
+            }
+
+            @Override
+            public Body body() {
+                return Body.empty();
+            }
+
+            @Override
+            public Map<String, String> pathParams() {
+                return Map.of();
+            }
+
+            @Override
+            public Map<String, String> queryParams() {
+                return Map.of();
+            }
         };
     }
 
     @SuppressWarnings("unused")
     private static byte[] readAll(Body b) throws Exception {
-        try (var in = b.asInputStream(); var bin = new ByteArrayInputStream(new byte[0])) {
+        try (var in = b.asInputStream();
+                var bin = new ByteArrayInputStream(new byte[0])) {
             return in.readAllBytes();
         }
     }

@@ -1,17 +1,18 @@
 package io.vidocq.chappe.bench;
 
-import io.vidocq.chappe.api.Response;
-import io.vidocq.chappe.api.Server;
-import org.openjdk.jmh.annotations.*;
-import org.openjdk.jmh.runner.Runner;
-import org.openjdk.jmh.runner.RunnerException;
-import org.openjdk.jmh.runner.options.OptionsBuilder;
-
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.concurrent.TimeUnit;
+
+import io.vidocq.chappe.api.Response;
+import io.vidocq.chappe.api.Server;
+
+import org.openjdk.jmh.annotations.*;
+import org.openjdk.jmh.runner.Runner;
+import org.openjdk.jmh.runner.RunnerException;
+import org.openjdk.jmh.runner.options.OptionsBuilder;
 
 /**
  * Throughput benchmark for large (1 MB) response bodies.
@@ -37,31 +38,19 @@ public class LargeResponseBench {
     public void setup() throws Exception {
         String largeBody = "x".repeat(PAYLOAD_SIZE);
 
-        server = Server.builder()
-                .port(0)
-                .handler(req -> Response.ok(largeBody))
-                .build();
+        server = Server.builder().port(0).handler(req -> Response.ok(largeBody)).build();
         server.start();
 
-        http11Client = HttpClient.newBuilder()
-                .version(HttpClient.Version.HTTP_1_1)
-                .build();
+        http11Client =
+                HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build();
 
-        http2Client = HttpClient.newBuilder()
-                .version(HttpClient.Version.HTTP_2)
-                .build();
+        http2Client = HttpClient.newBuilder().version(HttpClient.Version.HTTP_2).build();
 
         String url = "http://127.0.0.1:" + server.port() + "/";
 
-        http11Request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .GET()
-                .build();
+        http11Request = HttpRequest.newBuilder().uri(URI.create(url)).GET().build();
 
-        http2Request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .GET()
-                .build();
+        http2Request = HttpRequest.newBuilder().uri(URI.create(url)).GET().build();
     }
 
     @TearDown(Level.Trial)

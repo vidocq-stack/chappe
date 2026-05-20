@@ -10,6 +10,7 @@ import java.util.Locale;
  * <p>Subset géré : codings nommés (gzip, br, deflate, identity, …), q-values
  * ({@code ;q=0}…{@code ;q=1}), wildcard {@code *}.</p>
  */
+@SuppressWarnings("StringSplitter") // Les empty strings sont filtrées explicitement plus bas
 public final class AcceptEncoding {
 
     private AcceptEncoding() {}
@@ -45,8 +46,11 @@ public final class AcceptEncoding {
                     String k = pt.substring(0, eq).trim().toLowerCase(Locale.ROOT);
                     String v = pt.substring(eq + 1).trim();
                     if (k.equals("q")) {
-                        try { q = Double.parseDouble(v); }
-                        catch (NumberFormatException _) { q = 0.0; }
+                        try {
+                            q = Double.parseDouble(v);
+                        } catch (NumberFormatException _) {
+                            q = 0.0;
+                        }
                     }
                 }
             }

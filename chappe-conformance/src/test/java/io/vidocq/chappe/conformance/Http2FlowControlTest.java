@@ -1,24 +1,20 @@
 package io.vidocq.chappe.conformance;
 
-import io.vidocq.chappe.api.Response;
-import io.vidocq.chappe.api.Router;
-import io.vidocq.chappe.api.Server;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 
-import static org.junit.jupiter.api.Assertions.*;
+import io.vidocq.chappe.api.Response;
+import io.vidocq.chappe.api.Router;
+import io.vidocq.chappe.api.Server;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 /**
  * HTTP/2 flow control conformance tests (RFC 9113, Section 5.2).
@@ -45,16 +41,11 @@ class Http2FlowControlTest {
                 })
                 .build();
 
-        server = Server.builder()
-                .port(0)
-                .handler(router)
-                .build();
+        server = Server.builder().port(0).handler(router).build();
         server.start();
         baseUrl = "http://127.0.0.1:" + server.port();
 
-        client = HttpClient.newBuilder()
-                .version(HttpClient.Version.HTTP_2)
-                .build();
+        client = HttpClient.newBuilder().version(HttpClient.Version.HTTP_2).build();
     }
 
     @AfterEach
@@ -79,10 +70,11 @@ class Http2FlowControlTest {
         var response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
         assertEquals(200, response.statusCode());
-        assertEquals(LARGE_RESPONSE_SIZE, response.body().length(),
+        assertEquals(
+                LARGE_RESPONSE_SIZE,
+                response.body().length(),
                 "Full 200 KB response should be received (requires WINDOW_UPDATE flow control)");
         // Verify content integrity
-        assertTrue(response.body().chars().allMatch(c -> c == 'A'),
-                "All bytes should be 'A'");
+        assertTrue(response.body().chars().allMatch(c -> c == 'A'), "All bytes should be 'A'");
     }
 }

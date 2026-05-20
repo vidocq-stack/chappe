@@ -204,8 +204,7 @@ public final class HpackDynamicTable {
 
     private void checkIndex(int index) {
         if (index < 1 || index > count) {
-            throw new IndexOutOfBoundsException(
-                    "Dynamic table index " + index + " out of bounds [1, " + count + "]");
+            throw new IndexOutOfBoundsException("Dynamic table index " + index + " out of bounds [1, " + count + "]");
         }
     }
 }

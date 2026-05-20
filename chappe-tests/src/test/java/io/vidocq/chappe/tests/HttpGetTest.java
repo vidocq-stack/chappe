@@ -1,12 +1,6 @@
 package io.vidocq.chappe.tests;
 
-import io.vidocq.chappe.api.Response;
-import io.vidocq.chappe.api.Router;
-import io.vidocq.chappe.api.Server;
-import io.vidocq.chappe.api.StatusCode;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
 import java.net.URI;
@@ -14,7 +8,14 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 
-import static org.junit.jupiter.api.Assertions.*;
+import io.vidocq.chappe.api.Response;
+import io.vidocq.chappe.api.Router;
+import io.vidocq.chappe.api.Server;
+import io.vidocq.chappe.api.StatusCode;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 class HttpGetTest {
 
@@ -42,10 +43,7 @@ class HttpGetTest {
                         .build())
                 .build();
 
-        server = Server.builder()
-                .port(0)
-                .handler(router)
-                .build();
+        server = Server.builder().port(0).handler(router).build();
         server.start();
         baseUrl = "http://127.0.0.1:" + server.port();
         client = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build();
@@ -100,8 +98,7 @@ class HttpGetTest {
         var response = get("/json");
         assertEquals(200, response.statusCode());
         assertEquals("{\"status\":\"ok\"}", response.body());
-        assertTrue(response.headers().firstValue("Content-Type")
-                .orElse("").contains("application/json"));
+        assertTrue(response.headers().firstValue("Content-Type").orElse("").contains("application/json"));
     }
 
     @Test
@@ -113,10 +110,8 @@ class HttpGetTest {
     }
 
     private HttpResponse<String> get(String path) throws IOException, InterruptedException {
-        var request = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl + path))
-                .GET()
-                .build();
+        var request =
+                HttpRequest.newBuilder().uri(URI.create(baseUrl + path)).GET().build();
         return client.send(request, HttpResponse.BodyHandlers.ofString());
     }
 }

@@ -1,12 +1,6 @@
 package io.vidocq.chappe.tests;
 
-import io.vidocq.chappe.api.Response;
-import io.vidocq.chappe.api.Router;
-import io.vidocq.chappe.api.Server;
-import io.vidocq.chappe.api.StatusCode;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
 import java.net.URI;
@@ -15,7 +9,14 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static org.junit.jupiter.api.Assertions.*;
+import io.vidocq.chappe.api.Response;
+import io.vidocq.chappe.api.Router;
+import io.vidocq.chappe.api.Server;
+import io.vidocq.chappe.api.StatusCode;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 class RouterTest {
 
@@ -36,12 +37,9 @@ class RouterTest {
                     var name = req.pathParams().get("name");
                     return Response.ok("download:" + name);
                 })
-                .group("/api/v1", api -> api
-                        .get("/health", _ -> Response.ok("UP"))
-                        .get("/version", _ -> Response.ok("1.0"))
-                )
-                .group("/admin", admin -> admin
-                        .filter(next -> request -> {
+                .group("/api/v1", api -> api.get("/health", _ -> Response.ok("UP"))
+                        .get("/version", _ -> Response.ok("1.0")))
+                .group("/admin", admin -> admin.filter(next -> request -> {
                             filterCallCount.incrementAndGet();
                             var auth = request.header("Authorization").orElse(null);
                             if (auth == null) {
@@ -49,8 +47,7 @@ class RouterTest {
                             }
                             return next.handle(request);
                         })
-                        .get("/dashboard", _ -> Response.ok("admin"))
-                )
+                        .get("/dashboard", _ -> Response.ok("admin")))
                 .get("/static/*", req -> Response.ok("static:" + req.path()))
                 .notFound(_ -> Response.builder()
                         .status(StatusCode.NOT_FOUND)
@@ -58,10 +55,7 @@ class RouterTest {
                         .build())
                 .build();
 
-        server = Server.builder()
-                .port(0)
-                .handler(router)
-                .build();
+        server = Server.builder().port(0).handler(router).build();
         server.start();
         baseUrl = "http://127.0.0.1:" + server.port();
         client = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build();
@@ -112,7 +106,8 @@ class RouterTest {
 
     @Test
     void wildcardRoute() throws IOException, InterruptedException {
-        assertEquals("static:/static/css/style.css", get("/static/css/style.css").body());
+        assertEquals(
+                "static:/static/css/style.css", get("/static/css/style.css").body());
         assertEquals("static:/static/js/app.js", get("/static/js/app.js").body());
     }
 
@@ -124,10 +119,8 @@ class RouterTest {
     }
 
     private HttpResponse<String> get(String path) throws IOException, InterruptedException {
-        var request = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl + path))
-                .GET()
-                .build();
+        var request =
+                HttpRequest.newBuilder().uri(URI.create(baseUrl + path)).GET().build();
         return client.send(request, HttpResponse.BodyHandlers.ofString());
     }
 }

@@ -1,6 +1,5 @@
 package io.vidocq.chappe.api;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -16,7 +15,6 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.HashMap;
@@ -47,8 +45,8 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class StaticFileHandler implements Handler {
 
-    private static final DateTimeFormatter IMF_FIXDATE = DateTimeFormatter
-            .ofPattern("EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.US)
+    private static final DateTimeFormatter IMF_FIXDATE = DateTimeFormatter.ofPattern(
+                    "EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.US)
             .withZone(ZoneOffset.UTC);
 
     private static final int MAX_CACHE_ENTRY_SIZE = 64 * 1024; // 64 Ko max par entrée
@@ -56,16 +54,23 @@ public final class StaticFileHandler implements Handler {
     private final List<ResourceSource> sources;
     private final String indexFile;
     private final String cacheControl;
+
+    @SuppressWarnings("UnusedVariable") // API exposée via Builder.cacheInMemory(), implémentation à compléter
     private final boolean cacheInMemory;
+
     private final String notFoundFile;
     private final String spaFallback;
     private final boolean preferPrecompressed;
     private final ConcurrentHashMap<String, CachedResource> cache;
 
-    private StaticFileHandler(List<ResourceSource> sources, String indexFile,
-                              String cacheControl, boolean cacheInMemory,
-                              String notFoundFile, String spaFallback,
-                              boolean preferPrecompressed) {
+    private StaticFileHandler(
+            List<ResourceSource> sources,
+            String indexFile,
+            String cacheControl,
+            boolean cacheInMemory,
+            String notFoundFile,
+            String spaFallback,
+            boolean preferPrecompressed) {
         this.sources = List.copyOf(sources);
         this.indexFile = indexFile;
         this.cacheControl = cacheControl;
@@ -111,7 +116,7 @@ public final class StaticFileHandler implements Handler {
         // Précompression : tente .br puis .gz si client compatible
         if (preferPrecompressed && !relative.isEmpty() && !relative.endsWith("/")) {
             String acceptEnc = request.header("Accept-Encoding").orElse(null);
-            String[][] sidecars = { {"br", ".br"}, {"gzip", ".gz"} };
+            String[][] sidecars = {{"br", ".br"}, {"gzip", ".gz"}};
             for (var s : sidecars) {
                 if (!AcceptEncoding.accepts(acceptEnc, s[0])) continue;
                 String sidecarPath = relative + s[1];
@@ -197,13 +202,13 @@ public final class StaticFileHandler implements Handler {
                     if (!resource.lastModified().isAfter(clientTime)) {
                         return Response.of(StatusCode.NOT_MODIFIED);
                     }
-                } catch (Exception _) {}
+                } catch (Exception _) {
+                    // If-Modified-Since mal formé — on ignore et on sert la ressource (RFC 9110 §13.1.3)
+                }
             }
         }
 
-        var builder = Response.builder()
-                .status(status)
-                .header("Content-Type", MimeTypes.detect(resource.name()));
+        var builder = Response.builder().status(status).header("Content-Type", MimeTypes.detect(resource.name()));
 
         if (resource.lastModified() != null) {
             builder.header("Last-Modified", IMF_FIXDATE.format(resource.lastModified()));
@@ -252,6 +257,8 @@ public final class StaticFileHandler implements Handler {
 
     private static String computeEtag(byte[] data) {
         try {
+            // MD5 utilisé pour l'identifiant ETag HTTP, pas pour de l'intégrité cryptographique.
+            // Le contenu n'est jamais validé via ce hash — pas de surface d'attaque.
             var md = MessageDigest.getInstance("MD5");
             var hash = md.digest(data);
             return HexFormat.of().formatHex(hash).substring(0, 16);
@@ -262,12 +269,16 @@ public final class StaticFileHandler implements Handler {
 
     // ── Types internes ──
 
+    @SuppressWarnings("ArrayRecordComponent") // record interne, jamais comparé via equals/hashCode
     private record CachedResource(byte[] data, String contentType, String etag) {}
 
     /** Ressource résolue depuis une source. */
-    private record ResolvedResource(String name, long size, Instant lastModified,
-                                    java.util.function.Supplier<InputStream> streamSupplier,
-                                    Path filePath) {
+    private record ResolvedResource(
+            String name,
+            long size,
+            Instant lastModified,
+            java.util.function.Supplier<InputStream> streamSupplier,
+            Path filePath) {
         InputStream inputStream() {
             return streamSupplier.get();
         }
@@ -298,13 +309,20 @@ public final class StaticFileHandler implements Handler {
                 }
                 if (!Files.isRegularFile(file)) return null;
 
-                Instant lastMod = Files.getLastModifiedTime(file).toInstant()
-                        .truncatedTo(ChronoUnit.SECONDS);
+                Instant lastMod = Files.getLastModifiedTime(file).toInstant().truncatedTo(ChronoUnit.SECONDS);
                 long size = Files.size(file);
                 Path f = file;
-                return new ResolvedResource(file.getFileName().toString(), size, lastMod,
-                        () -> { try { return Files.newInputStream(f); }
-                                catch (IOException e) { throw new UncheckedIOException(e); } },
+                return new ResolvedResource(
+                        file.getFileName().toString(),
+                        size,
+                        lastMod,
+                        () -> {
+                            try {
+                                return Files.newInputStream(f);
+                            } catch (IOException e) {
+                                throw new UncheckedIOException(e);
+                            }
+                        },
                         f);
             } catch (IOException _) {
                 return null;
@@ -332,23 +350,24 @@ public final class StaticFileHandler implements Handler {
             // Skip URLConnection.openConnection() entièrement — tout est déjà connu.
             IndexedEntry idx = StaticIndex.lookup(loader, resourcePath);
             if (idx == null) {
-                String indexPath = resourcePath.endsWith("/")
-                        ? resourcePath + indexFile
-                        : resourcePath + "/" + indexFile;
+                String indexPath =
+                        resourcePath.endsWith("/") ? resourcePath + indexFile : resourcePath + "/" + indexFile;
                 idx = StaticIndex.lookup(loader, indexPath);
                 if (idx != null) resourcePath = indexPath;
             }
             if (idx != null) {
                 String name = lastSegment(resourcePath);
                 String path = resourcePath;
-                Instant lastMod = idx.mtime() > 0
-                        ? Instant.ofEpochMilli(idx.mtime()).truncatedTo(ChronoUnit.SECONDS)
-                        : null;
-                return new ResolvedResource(name, idx.size(), lastMod,
+                Instant lastMod =
+                        idx.mtime() > 0 ? Instant.ofEpochMilli(idx.mtime()).truncatedTo(ChronoUnit.SECONDS) : null;
+                return new ResolvedResource(
+                        name,
+                        idx.size(),
+                        lastMod,
                         () -> {
                             InputStream in = loader.getResourceAsStream(path);
-                            if (in == null) throw new UncheckedIOException(
-                                    new IOException("Indexed resource vanished: " + path));
+                            if (in == null)
+                                throw new UncheckedIOException(new IOException("Indexed resource vanished: " + path));
                             return in;
                         },
                         null);
@@ -357,9 +376,8 @@ public final class StaticFileHandler implements Handler {
             // Slow path : lookup classique via URL.openConnection (hors index).
             URL url = loader.getResource(resourcePath);
             if (url == null) {
-                String indexPath = resourcePath.endsWith("/")
-                        ? resourcePath + indexFile
-                        : resourcePath + "/" + indexFile;
+                String indexPath =
+                        resourcePath.endsWith("/") ? resourcePath + indexFile : resourcePath + "/" + indexFile;
                 url = loader.getResource(indexPath);
                 if (url != null) resourcePath = indexPath;
             }
@@ -370,16 +388,23 @@ public final class StaticFileHandler implements Handler {
                 conn.setUseCaches(false); // évite le lock sur les jar files
                 long size = conn.getContentLengthLong();
                 long lastMod = conn.getLastModified();
-                Instant lastModified = lastMod > 0
-                        ? Instant.ofEpochMilli(lastMod).truncatedTo(ChronoUnit.SECONDS)
-                        : null;
+                Instant lastModified =
+                        lastMod > 0 ? Instant.ofEpochMilli(lastMod).truncatedTo(ChronoUnit.SECONDS) : null;
 
                 String name = lastSegment(resourcePath);
 
                 URL finalUrl = url;
-                return new ResolvedResource(name, size, lastModified,
-                        () -> { try { return finalUrl.openStream(); }
-                                catch (IOException e) { throw new UncheckedIOException(e); } },
+                return new ResolvedResource(
+                        name,
+                        size,
+                        lastModified,
+                        () -> {
+                            try {
+                                return finalUrl.openStream();
+                            } catch (IOException e) {
+                                throw new UncheckedIOException(e);
+                            }
+                        },
                         null); // pas de filePath pour classpath (pas de zero-copy)
             } catch (IOException _) {
                 return null;
@@ -401,8 +426,8 @@ public final class StaticFileHandler implements Handler {
      */
     private static final class StaticIndex {
         private static final String RESOURCE = "META-INF/chappe-static-index.properties";
-        private static final ConcurrentHashMap<ClassLoader, Map<String, IndexedEntry>> PER_LOADER
-                = new ConcurrentHashMap<>();
+        private static final ConcurrentHashMap<ClassLoader, Map<String, IndexedEntry>> PER_LOADER =
+                new ConcurrentHashMap<>();
 
         static IndexedEntry lookup(ClassLoader loader, String path) {
             ClassLoader key = loader == null ? ClassLoader.getSystemClassLoader() : loader;
@@ -424,11 +449,10 @@ public final class StaticFileHandler implements Handler {
                         String[] parts = p.getProperty(key).split("\\|", 4);
                         if (parts.length != 4) continue;
                         try {
-                            merged.putIfAbsent(key, new IndexedEntry(
-                                    Long.parseLong(parts[0]),
-                                    Long.parseLong(parts[1]),
-                                    parts[2],
-                                    parts[3]));
+                            merged.putIfAbsent(
+                                    key,
+                                    new IndexedEntry(
+                                            Long.parseLong(parts[0]), Long.parseLong(parts[1]), parts[2], parts[3]));
                         } catch (NumberFormatException _) {
                             // entrée corrompue, on ignore
                         }
@@ -531,8 +555,8 @@ public final class StaticFileHandler implements Handler {
             if (notFoundFile != null && spaFallback != null) {
                 throw new IllegalStateException("notFoundFile and spaFallback are mutually exclusive");
             }
-            return new StaticFileHandler(sources, indexFile, cacheControl, cacheInMemory,
-                    notFoundFile, spaFallback, preferPrecompressed);
+            return new StaticFileHandler(
+                    sources, indexFile, cacheControl, cacheInMemory, notFoundFile, spaFallback, preferPrecompressed);
         }
     }
 }

@@ -1,9 +1,10 @@
 package io.vidocq.chappe.http.h2;
 
-import io.vidocq.chappe.api.Headers;
-
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
+
+import io.vidocq.chappe.api.Headers;
 
 /**
  * Encodeur HPACK optimisé — RFC 7541.
@@ -44,7 +45,7 @@ public final class HpackEncoder {
 
         // Regular headers
         for (var entry : headers) {
-            encodeHeader(out, entry.name().toLowerCase(), entry.value());
+            encodeHeader(out, entry.name().toLowerCase(Locale.ROOT), entry.value());
         }
 
         return out.toByteArray();
@@ -139,7 +140,7 @@ public final class HpackEncoder {
      */
     static void encodeStringHuffman(ByteArrayOutputStream out, String s) {
         byte[] huffman = HpackHuffman.encode(s);
-        byte[] raw     = s.getBytes(StandardCharsets.ISO_8859_1);
+        byte[] raw = s.getBytes(StandardCharsets.ISO_8859_1);
         if (huffman.length < raw.length) {
             encodeInteger(out, huffman.length, 7, 0x80); // H=1
             out.write(huffman, 0, huffman.length);

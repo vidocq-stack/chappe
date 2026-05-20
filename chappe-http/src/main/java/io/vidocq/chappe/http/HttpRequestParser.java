@@ -1,14 +1,13 @@
 package io.vidocq.chappe.http;
 
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.ReadableByteChannel;
+
 import io.vidocq.chappe.api.HttpMethod;
 import io.vidocq.chappe.api.HttpVersion;
 import io.vidocq.chappe.api.ServerConfig;
 import io.vidocq.chappe.api.StatusCode;
-
-import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.channels.ReadableByteChannel;
-import java.nio.charset.StandardCharsets;
 
 /**
  * Parser incrémental HTTP/1.1 (RFC 9112) — state machine sur {@link ByteBuffer}.
@@ -75,8 +74,8 @@ public final class HttpRequestParser {
      * @throws ParseException si la requête est malformée
      * @throws IOException    si une erreur I/O survient
      */
-    public ParseResult parse(ByteBuffer buffer, ReadableByteChannel channel,
-                             HttpRequestImpl target, ServerConfig config)
+    public ParseResult parse(
+            ByteBuffer buffer, ReadableByteChannel channel, HttpRequestImpl target, ServerConfig config)
             throws ParseException, IOException {
 
         while (true) {
@@ -120,10 +119,10 @@ public final class HttpRequestParser {
                     case REQUEST_LINE_URI -> {
                         if (b == SP) {
                             if (token.length() > MAX_URI_LENGTH) {
-                                throw new ParseException(StatusCode.URI_TOO_LONG,
-                                        "URI exceeds " + MAX_URI_LENGTH + " bytes");
+                                throw new ParseException(
+                                        StatusCode.URI_TOO_LONG, "URI exceeds " + MAX_URI_LENGTH + " bytes");
                             }
-                            target.rawUri = token.toString();
+                            target.rawUri = internUri(token);
                             token.setLength(0);
                             state = State.REQUEST_LINE_VERSION;
                         } else if (b == CR || b == LF) {
@@ -251,8 +250,7 @@ public final class HttpRequestParser {
         try {
             return HttpMethod.of(sb.toString());
         } catch (IllegalArgumentException e) {
-            throw new ParseException(StatusCode.NOT_IMPLEMENTED,
-                    "Unknown method: " + sb);
+            throw new ParseException(StatusCode.NOT_IMPLEMENTED, "Unknown method: " + sb);
         }
     }
 
@@ -301,7 +299,6 @@ public final class HttpRequestParser {
     private static final String V_TEXT_HTML = "text/html";
     private static final String V_TEXT_PLAIN = "text/plain";
     private static final String V_APP_JSON = "application/json";
-    private static final String V_APP_FORM = "application/x-www-form-urlencoded";
     private static final String V_ZERO = "0";
 
     private static String trimTrailingOws(StringBuilder sb) {
@@ -316,6 +313,14 @@ public final class HttpRequestParser {
         // Slow path : crée une substring
         sb.setLength(end);
         return internValue(sb);
+    }
+
+    private static final String V_TEXT_PLAIN_UTF8 = "text/plain; charset=utf-8";
+    private static final String U_ROOT = "/";
+
+    private static String internUri(StringBuilder sb) {
+        if (sb.length() == 1 && sb.charAt(0) == '/') return U_ROOT;
+        return sb.toString();
     }
 
     /** Intern des valeurs de headers courantes pour éviter les allocations. */
@@ -354,12 +359,15 @@ public final class HttpRequestParser {
                 if (matchesIgnoreCase(sb, V_APP_JSON)) yield V_APP_JSON;
                 yield sb.toString();
             }
+            case 25 -> {
+                if (matchesIgnoreCase(sb, V_TEXT_PLAIN_UTF8)) yield V_TEXT_PLAIN_UTF8;
+                yield sb.toString();
+            }
             default -> sb.toString();
         };
     }
 
-    private void addHeader(HttpRequestImpl target, String name, String value)
-            throws ParseException {
+    private void addHeader(HttpRequestImpl target, String name, String value) throws ParseException {
         if (target.headerCount >= MAX_HEADER_COUNT) {
             throw new ParseException(
                     StatusCode.of(431, "Request Header Fields Too Large"),

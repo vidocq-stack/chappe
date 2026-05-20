@@ -18,9 +18,8 @@ public final class JettyMain {
         server.addConnector(connector);
         server.setHandler(new Handler.Abstract.NonBlocking() {
             @Override
-            public boolean handle(org.eclipse.jetty.server.Request req,
-                                  org.eclipse.jetty.server.Response res,
-                                  Callback cb) {
+            public boolean handle(
+                    org.eclipse.jetty.server.Request req, org.eclipse.jetty.server.Response res, Callback cb) {
                 res.setStatus(200);
                 res.getHeaders().put("Content-Type", "text/plain");
                 Content.Sink.write(res, true, "ok", cb);

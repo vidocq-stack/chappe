@@ -24,6 +24,7 @@ import io.netty.handler.codec.http.HttpUtil;
 import io.netty.handler.codec.http.HttpVersion;
 import io.netty.util.CharsetUtil;
 
+@SuppressWarnings("FutureReturnValueIgnored") // Bench Netty : writeAndFlush + shutdown fire-and-forget
 public final class NettyMain {
     private NettyMain() {}
 
@@ -51,8 +52,7 @@ public final class NettyMain {
                                             .set(HttpHeaderNames.CONTENT_TYPE, "text/plain")
                                             .setInt(HttpHeaderNames.CONTENT_LENGTH, content.readableBytes());
                                     if (HttpUtil.isKeepAlive(req)) {
-                                        resp.headers().set(HttpHeaderNames.CONNECTION,
-                                                HttpHeaderValues.KEEP_ALIVE);
+                                        resp.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.KEEP_ALIVE);
                                     }
                                     ctx.writeAndFlush(resp);
                                 }
