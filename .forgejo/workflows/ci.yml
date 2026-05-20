@@ -76,14 +76,19 @@ jobs:
           SIGNAL_AUTH: ${{ secrets.SIGNAL_AUTH }}
           SIGNAL_FROM: ${{ secrets.SIGNAL_FROM }}
           SIGNAL_TO: ${{ secrets.SIGNAL_TO }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref_name }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          payload=$(jq -n \
-            --arg number "$SIGNAL_FROM" \
-            --arg recipient "$SIGNAL_TO" \
-            --arg msg "[ViBot]: ❌ Build CI échoué — ${{ github.repository }}@${{ github.ref_name }}\n$RUN_URL" \
-            '{number:$number, recipients:[$recipient], message:$msg}')
+          payload=$(node <<'JS'
+          process.stdout.write(JSON.stringify({
+            number: process.env.SIGNAL_FROM,
+            recipients: [process.env.SIGNAL_TO],
+            message: `[ViBot]: ❌ Build CI échoué — ${process.env.REPO}@${process.env.REF}\n${process.env.RUN_URL}`
+          }))
+          JS
+          )
           curl -fsS -u "$SIGNAL_AUTH" -X POST "$SIGNAL_API_URL/v2/send" \
             -H 'Content-Type: application/json' \
             -d "$payload"

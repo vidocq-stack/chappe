@@ -14,17 +14,21 @@ jobs:
           SIGNAL_AUTH: ${{ secrets.SIGNAL_AUTH }}
           SIGNAL_FROM: ${{ secrets.SIGNAL_FROM }}
           SIGNAL_TO: ${{ secrets.SIGNAL_TO }}
+          REPO: ${{ github.repository }}
+          PR_NUM: ${{ github.event.number }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           PR_URL: ${{ github.event.pull_request.html_url }}
-          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          payload=$(jq -n \
-            --arg number "$SIGNAL_FROM" \
-            --arg recipient "$SIGNAL_TO" \
-            --arg msg "[ViBot]: 📬 PR ouverte sur $REPO par $PR_AUTHOR — $PR_TITLE\n$PR_URL" \
-            '{number:$number, recipients:[$recipient], message:$msg}')
+          payload=$(node <<'JS'
+          process.stdout.write(JSON.stringify({
+            number: process.env.SIGNAL_FROM,
+            recipients: [process.env.SIGNAL_TO],
+            message: `[ViBot]: 📬 PR ouverte sur ${process.env.REPO}#${process.env.PR_NUM} par ${process.env.PR_AUTHOR} — ${process.env.PR_TITLE}\n${process.env.PR_URL}`
+          }))
+          JS
+          )
           curl -fsS -u "$SIGNAL_AUTH" -X POST "$SIGNAL_API_URL/v2/send" \
             -H 'Content-Type: application/json' \
             -d "$payload"
