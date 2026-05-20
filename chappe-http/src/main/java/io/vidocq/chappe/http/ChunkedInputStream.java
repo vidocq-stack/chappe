@@ -76,7 +76,8 @@ final class ChunkedInputStream extends InputStream {
                         if (!ensureData()) {
                             return totalRead > 0 ? totalRead : -1;
                         }
-                        int toRead = (int) Math.min(Math.min(len - totalRead, chunkRemaining), buffer.remaining());
+                        int toRead =
+                                (int) Math.min(Math.min((long) len - totalRead, chunkRemaining), buffer.remaining());
                         buffer.get(b, off + totalRead, toRead);
                         chunkRemaining -= toRead;
                         totalRead += toRead;

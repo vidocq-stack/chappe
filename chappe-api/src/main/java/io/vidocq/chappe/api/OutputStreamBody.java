@@ -22,6 +22,7 @@ final class OutputStreamBody implements Body {
         try {
             var pis = new PipedInputStream(8192);
             var pos = new PipedOutputStream(pis);
+            // pos est transféré au virtual thread qui le ferme via try-with-resources
             Thread.startVirtualThread(() -> {
                 try (pos) {
                     writer.accept(pos);

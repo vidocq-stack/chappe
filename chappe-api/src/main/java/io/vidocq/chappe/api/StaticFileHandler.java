@@ -257,6 +257,8 @@ public final class StaticFileHandler implements Handler {
 
     private static String computeEtag(byte[] data) {
         try {
+            // MD5 utilisé pour l'identifiant ETag HTTP, pas pour de l'intégrité cryptographique.
+            // Le contenu n'est jamais validé via ce hash — pas de surface d'attaque.
             var md = MessageDigest.getInstance("MD5");
             var hash = md.digest(data);
             return HexFormat.of().formatHex(hash).substring(0, 16);

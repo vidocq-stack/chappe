@@ -54,7 +54,8 @@ public final class HttpResponseWriter {
     private static final DateTimeFormatter IMF_FIXDATE =
             DateTimeFormatter.ofPattern("EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.US);
 
-    // Cache Date header (1 seconde)
+    // Cache Date header (1 seconde) — array publié en bloc via volatile reference,
+    // jamais muté après assignation : pattern thread-safe d'objet immuable
     private static volatile long lastDateSecond;
     private static volatile byte[] cachedDateValue;
 

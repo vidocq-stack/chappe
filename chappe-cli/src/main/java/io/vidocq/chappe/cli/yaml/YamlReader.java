@@ -3,6 +3,7 @@ package io.vidocq.chappe.cli.yaml;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Mini-parser YAML in-house pour la config {@code chappe-cli}.
@@ -125,7 +126,7 @@ public final class YamlReader {
     private static YamlNode.Map parseMap(Cursor c, int indent) {
         LinkedHashMap<String, YamlNode> entries = new LinkedHashMap<>();
         while (c.hasMore()) {
-            Line line = c.peek();
+            Line line = Objects.requireNonNull(c.peek()); // garanti non-null par hasMore()
             if (line.indent < indent) break;
             if (line.indent > indent) {
                 throw new YamlParseException(
@@ -173,7 +174,7 @@ public final class YamlReader {
     private static YamlNode.Seq parseList(Cursor c, int indent) {
         List<YamlNode> items = new ArrayList<>();
         while (c.hasMore()) {
-            Line line = c.peek();
+            Line line = Objects.requireNonNull(c.peek()); // garanti non-null par hasMore()
             if (line.indent < indent) break;
             if (line.indent > indent) {
                 throw new YamlParseException(

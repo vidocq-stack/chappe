@@ -37,7 +37,7 @@ public final class FileBody implements Body {
     public InputStream asInputStream() {
         try {
             var fis = new FileInputStream(path.toFile());
-            if (offset > 0) fis.skip(offset);
+            if (offset > 0) fis.skipNBytes(offset); // skipNBytes garantit le skip complet, contrairement à skip()
             return fis;
         } catch (IOException e) {
             throw new UncheckedIOException(e);

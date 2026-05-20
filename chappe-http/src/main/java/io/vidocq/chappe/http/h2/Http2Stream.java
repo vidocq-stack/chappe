@@ -150,12 +150,14 @@ public final class Http2Stream {
     // --- Données (body) ---
 
     public void offerData(ByteBuffer data) {
-        dataQueue.offer(data);
+        // .add() au lieu de .offer() : la queue est non-bornée (LinkedBlockingQueue par défaut),
+        // un échec d'ajout signale un état impossible et doit lever IllegalStateException
+        dataQueue.add(data);
     }
 
     public void signalEndStream() {
         endStreamReceived = true;
-        dataQueue.offer(ByteBuffer.allocate(0)); // sentinelle pour débloquer take()
+        dataQueue.add(ByteBuffer.allocate(0)); // sentinelle pour débloquer take()
     }
 
     ByteBuffer takeData() throws InterruptedException {
