@@ -281,6 +281,7 @@ public final class HttpResponseWriter {
         putBytes(CHUNK_TERMINATOR, buffer, channel);
     }
 
+    @SuppressWarnings("ThreadPriorityCheck") // Thread.yield() = workaround JDK-8264762 (sendfile retry)
     private void writeBody(Body body, ByteBuffer buffer, WritableByteChannel channel) throws IOException {
         if (body.contentLength() == 0) return;
 

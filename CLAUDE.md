@@ -150,8 +150,8 @@ Le serveur doit être validé sur trois axes :
 - Benchmarks avec JMH dans un module séparé si nécessaire
 
 ### Performance (résultats mesurés, voir BENCHMARKS.md)
-- **96K req/s** HTTP/1.1 (4 threads, NIO client) — #2 derrière Jetty, devant Helidon
-- **Latence p99 = 50 µs** — 20× sous l'objectif de 1ms
+- **101K ops/s** throughput concurrent JMH 8t (run 2026-05-20) ; **96K req/s** in-process closed-loop NIO (run 2026-04-16, validé)
+- **Latence p99 = 57 µs** raw socket (run JMH 2026-05-20, 317k samples) — 17× sous l'objectif de 1ms
 - Optimisations : write coalescing, zero-alloc headers, thread-local buffer pool, fast path 200 OK
 - Zero-allocation sur le hot path (réutiliser les buffers)
 

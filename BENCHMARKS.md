@@ -598,3 +598,98 @@ Le harness est documenté en détail dans
   sont vides — Chappe est compile-time first, `ServerProvider` ServiceLoader est
   résolu via JPMS (provides/uses) puis par le shade au runtime.
 
+---
+
+## 2026-05-20 — Validation JMH post-cleanup (ErrorProne + Spotless + System.Logger)
+
+Re-run complet de la suite JMH `chappe-bench` après le nettoyage qualité :
+- **Spotless / Palantir** : reformatage 100 fichiers (zéro impact runtime)
+- **Error Prone** : 44 → 0 findings (suppress justifiés + fixes ; cf. commit)
+- **`ChappeServer.submit() → execute()`** : suppression du Future ignoré sur l'accept loop
+- **`System.out → System.Logger`** dans `ChappeBenchmark` (sortie console)
+
+Objectif : valider qu'aucun changement n'a dégradé les chiffres in-process.
+
+### Méthodologie
+
+- **Hôte** : macOS local (Apple Silicon), JDK 25-tem
+- **JMH** : 1.37, warmup 3 iter × 1 s, measure 5 iter × 1 s, fork 1
+- **JVM options** : `--enable-preview`
+- **Commande** : `java -cp <classpath> org.openjdk.jmh.Main -rf json`
+- **Sortie complète** : `.bench-results/jmh-2026-05-20.txt[.json]`
+
+### Throughput (thrpt — plus c'est haut, mieux c'est)
+
+| Benchmark | Score (ops/s) | Erreur (±) | Notes |
+|:----------|--------------:|-----------:|:------|
+| `ConcurrentBench.concurrentThroughput` (8t) | **101 714** | 1 566 | confirme 100k req/s soutenu |
+| `RawSocketBench.throughputKeepAlive` (1t)   |  44 507 | 1 255 | baseline 1 thread |
+| `Http11ThroughputBench.smallGetKeepAlive`   |  17 225 |   992 | overhead HttpClient JDK |
+| `Http2ThroughputBench.smallGetHttp2`        |  16 933 | 1 417 | parité HTTP/1.1 |
+| `LargeResponseBench.largeResponseHttp11` (1 MB) |  2 058 |   184 | ≈ 2 Gio/s sortants |
+| `LargeResponseBench.largeResponseHttp2` (1 MB)  |  1 996 |   192 | parité H1/H2 |
+
+### Latence (sample — plus c'est bas, mieux c'est)
+
+`RawSocketBench.latencyKeepAlive` (zéro overhead client, 317k samples) :
+
+| Percentile | Latence |
+|:-----------|--------:|
+| min        |  12.8 µs |
+| **p50**    | **20.4 µs** |
+| p90        |  31.4 µs |
+| p95        |  37.6 µs |
+| **p99**    | **57.0 µs** |
+| p99.9      | 180.2 µs |
+| p99.99     |   1.46 ms |
+| max        |   8.09 ms |
+
+→ **p99 = 57 µs** confirme le claim "20× sous l'objectif 1 ms".
+
+`LatencyBench.getLatency` (HttpClient, 417k samples) : p50 54.7 µs, p99 124 µs, p99.9 303 µs — l'overhead `java.net.http.HttpClient` ajoute ~30 µs à p50 et ~70 µs à p99.
+
+### Micro-benchs (avgt ns/op — confirme les optimisations compile-time)
+
+| Optimisation | Current | Old | Speedup |
+|:-------------|--------:|----:|--------:|
+| **Classpath lookup** (static index) | 1.40 ns | 15 390 ns | **×11 000** |
+| **Router dispatch** (fast-path, hit) | 2.26 ns | 2.08 ns | parité (les deux O(1)) |
+| **Router dispatch** (fast-path, mid-trie) | 2.58 ns | 1 123 ns | **×435** |
+| **Router dispatch** (fast-path, miss) | 200 ns | 2 244 ns | **×11** |
+| **HPACK** `findByName` pseudo-header | 1.20 ns | 2.20 ns | ×1.8 (fast path inline) |
+| **HPACK** `findByName` custom header | 2.90 ns | 47.7 ns | **×16** (map vs scan O(61)) |
+| **HPACK** `findExact` custom + value | 3.82 ns | 47.3 ns | **×12** |
+| **MimeTypes.detect** `index.html` | 4.55 ns | 11.0 ns | ×2.4 (zero-alloc regionMatches) |
+| **MimeTypes.detect** `unknown.xyz` | 34.0 ns | 11.6 ns | ×0.34 (miss : parcours complet vs HashMap) |
+
+### Delta vs 2026-04-23 (post-optim baseline)
+
+| Métrique | 2026-04-23 | 2026-05-20 | Delta |
+|:---------|-----------:|-----------:|------:|
+| Concurrent throughput (8t) | — | 101 714 ops/s | — (1ère mesure JMH) |
+| HPACK findByName custom | ~3 ns | 2.90 ns | parité |
+| Router fast-path hit | ~2 ns | 2.26 ns | parité |
+| Classpath indexed lookup | 1.4 ns | 1.40 ns | identique |
+
+**Verdict** : **aucune régression mesurable**. Les chiffres clés (concurrent 100k, p99 57 µs, micro-benchs ns/op) sont stables au bruit près. Le passage `submit → execute` dans `ChappeServer` n'a pas dégradé l'accept loop, ce qui est attendu vu que `ExecutorService.execute()` est un cousin direct de `submit()` sans wrapping `FutureTask`.
+
+### Reproductibilité
+
+```bash
+# Build une fois
+mvn -ntp -q clean install -DskipTests
+
+# Construire le classpath chappe-bench
+mvn -ntp -q -pl chappe-bench -DincludeScope=runtime dependency:build-classpath \
+    -Dmdep.outputFile=/tmp/cp.txt
+
+# Lancer JMH (~3-5 min selon CPU)
+BENCH=chappe-bench
+CLASSES="$BENCH/target/classes:$BENCH/target/generated-sources/annotations"
+for m in chappe-api chappe-http chappe-core; do
+  CLASSES="$CLASSES:$m/target/classes"
+done
+java --enable-preview -cp "$CLASSES:$(cat /tmp/cp.txt)" \
+    org.openjdk.jmh.Main -rf json -rff .bench-results/jmh-$(date +%F).json
+```
+

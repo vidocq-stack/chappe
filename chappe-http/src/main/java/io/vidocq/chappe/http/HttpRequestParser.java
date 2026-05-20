@@ -299,7 +299,6 @@ public final class HttpRequestParser {
     private static final String V_TEXT_HTML = "text/html";
     private static final String V_TEXT_PLAIN = "text/plain";
     private static final String V_APP_JSON = "application/json";
-    private static final String V_APP_FORM = "application/x-www-form-urlencoded";
     private static final String V_ZERO = "0";
 
     private static String trimTrailingOws(StringBuilder sb) {

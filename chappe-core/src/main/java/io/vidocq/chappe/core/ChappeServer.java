@@ -228,7 +228,7 @@ final class ChappeServer implements Server {
                 clientChannel.setOption(java.net.StandardSocketOptions.TCP_NODELAY, true);
                 // Configurer le timeout de lecture (idle/read timeout)
                 clientChannel.socket().setSoTimeout(timeoutMs);
-                exec.submit(() -> handleConnection(clientChannel));
+                exec.execute(() -> handleConnection(clientChannel));
             } catch (AsynchronousCloseException _) {
                 break;
             } catch (IOException e) {

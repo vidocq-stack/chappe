@@ -10,6 +10,7 @@ import java.util.Locale;
  * <p>Subset géré : codings nommés (gzip, br, deflate, identity, …), q-values
  * ({@code ;q=0}…{@code ;q=1}), wildcard {@code *}.</p>
  */
+@SuppressWarnings("StringSplitter") // Les empty strings sont filtrées explicitement plus bas
 public final class AcceptEncoding {
 
     private AcceptEncoding() {}

@@ -136,6 +136,7 @@ public final class HpackStaticTable {
      *
      * @return 1-based index, or 0 if not found
      */
+    @SuppressWarnings("ReferenceEquality") // Comparaisons `==` intentionnelles : fast path HPACK
     public static int findExact(String name, String value) {
         // Fast path inline pour les pseudo-headers (>90 % du trafic HTTP/2).
         // Évite l'allocation du Key record + la traversée HashMap pour le cas chaud.
@@ -169,6 +170,7 @@ public final class HpackStaticTable {
      *
      * @return 1-based index, or 0 if not found
      */
+    @SuppressWarnings("ReferenceEquality") // Comparaisons `==` intentionnelles : fast path HPACK
     public static int findByName(String name) {
         // Fast path inline pour les pseudo-headers (>90 % du trafic HTTP/2).
         if (name == N_METHOD || ":method".equals(name)) return 2;

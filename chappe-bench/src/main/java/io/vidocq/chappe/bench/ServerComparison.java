@@ -20,11 +20,10 @@ import io.vidocq.chappe.api.Server;
  * Mesure le throughput brut (req/s) avec 1, 4, 8 et 16 threads concurrents.
  * Chaque thread maintient une connexion keep-alive et envoie des requêtes GET en boucle.
  */
+@SuppressWarnings({"FutureReturnValueIgnored", "AddressSelection", "StringCaseLocaleUsage"}) // Bench code
 public class ServerComparison {
 
     private static final byte[] REQUEST_BYTES = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n".getBytes(US_ASCII);
-
-    private static final byte[] HEADER_END = "\r\n\r\n".getBytes(US_ASCII);
 
     // ─── BenchServer interface ─────────────────────────────────────────
 

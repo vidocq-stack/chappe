@@ -24,6 +24,7 @@ import org.openjdk.jmh.runner.options.OptionsBuilder;
 @Measurement(iterations = 5, time = 3)
 @Fork(1)
 @Threads(8)
+@SuppressWarnings("AddressSelection") // Bench localhost
 public class ConcurrentBench {
 
     private static final byte[] GET_REQUEST =

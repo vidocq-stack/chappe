@@ -120,7 +120,6 @@ public final class HttpRequestImpl implements Request, Headers {
     private String query;
     private boolean pathQueryParsed;
     private Map<String, String> queryParams;
-    private Headers headersView;
     private Map<String, String> pathParams = Collections.emptyMap();
 
     public HttpRequestImpl() {
@@ -151,7 +150,6 @@ public final class HttpRequestImpl implements Request, Headers {
         rawUri = null;
         version = null;
         headerCount = 0;
-        headersView = null;
         body = Body.empty();
         uri = null;
         path = null;

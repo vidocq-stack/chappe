@@ -278,11 +278,13 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
                 }
             }
         } catch (IOException _) {
+            // best-effort : flush du close_notify sortant
         } finally {
             writeLock.unlock();
             try {
                 engine.closeInbound();
             } catch (javax.net.ssl.SSLException _) {
+                // best-effort : peer n'a pas envoyé close_notify
             }
             channel.close();
         }

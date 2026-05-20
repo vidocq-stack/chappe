@@ -25,6 +25,7 @@ import org.openjdk.jmh.runner.options.OptionsBuilder;
 @Warmup(iterations = 3, time = 2)
 @Measurement(iterations = 5, time = 3)
 @Fork(1)
+@SuppressWarnings("AddressSelection") // Bench localhost
 public class RawSocketBench {
 
     private static final byte[] GET_REQUEST =

@@ -54,7 +54,10 @@ public final class StaticFileHandler implements Handler {
     private final List<ResourceSource> sources;
     private final String indexFile;
     private final String cacheControl;
+
+    @SuppressWarnings("UnusedVariable") // API exposée via Builder.cacheInMemory(), implémentation à compléter
     private final boolean cacheInMemory;
+
     private final String notFoundFile;
     private final String spaFallback;
     private final boolean preferPrecompressed;
@@ -200,6 +203,7 @@ public final class StaticFileHandler implements Handler {
                         return Response.of(StatusCode.NOT_MODIFIED);
                     }
                 } catch (Exception _) {
+                    // If-Modified-Since mal formé — on ignore et on sert la ressource (RFC 9110 §13.1.3)
                 }
             }
         }
@@ -263,6 +267,7 @@ public final class StaticFileHandler implements Handler {
 
     // ── Types internes ──
 
+    @SuppressWarnings("ArrayRecordComponent") // record interne, jamais comparé via equals/hashCode
     private record CachedResource(byte[] data, String contentType, String etag) {}
 
     /** Ressource résolue depuis une source. */

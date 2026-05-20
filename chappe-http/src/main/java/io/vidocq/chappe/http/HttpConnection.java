@@ -7,6 +7,7 @@ import java.nio.ByteBuffer;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.channels.WritableByteChannel;
+import java.nio.charset.StandardCharsets;
 
 import io.vidocq.chappe.api.*;
 
@@ -114,7 +115,7 @@ public final class HttpConnection {
                 // 3. Expect: 100-continue (RFC 9110 §10.1.1)
                 if ("100-continue".equalsIgnoreCase(request.headers().firstOrNull("Expect"))) {
                     // Envoyer 100 Continue avant la lecture du body
-                    var continueBytes = "HTTP/1.1 100 Continue\r\n\r\n".getBytes();
+                    var continueBytes = "HTTP/1.1 100 Continue\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
                     var buf = ByteBuffer.wrap(continueBytes);
                     while (buf.hasRemaining()) {
                         writeChannel.write(buf);

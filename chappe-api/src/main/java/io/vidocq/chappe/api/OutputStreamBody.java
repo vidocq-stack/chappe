@@ -26,6 +26,7 @@ final class OutputStreamBody implements Body {
                 try (pos) {
                     writer.accept(pos);
                 } catch (IOException _) {
+                    // Le consumer du PipedInputStream a fermé : on arrête simplement le writer
                 }
             });
             return pis;

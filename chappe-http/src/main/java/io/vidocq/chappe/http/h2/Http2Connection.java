@@ -40,6 +40,8 @@ public final class Http2Connection {
     private final ReadableByteChannel readChannel;
     private final WritableByteChannel writeChannel;
     private final Handler handler;
+
+    @SuppressWarnings("UnusedVariable") // Réservé pour limits H2 (maxStreams, timeouts) — à câbler
     private final ServerConfig config;
 
     // --- Buffers ---
@@ -361,6 +363,7 @@ public final class Http2Connection {
         }
     }
 
+    @SuppressWarnings("UnusedVariable") // payload GOAWAY non interprété (best-effort)
     private void handleGoaway(Http2Frame.GoawayFrame frame) {
         goawaySent = true;
     }
@@ -658,14 +661,16 @@ public final class Http2Connection {
         }
         streams.clear();
 
-        // Close channels
+        // Close channels — best-effort, on ignore les erreurs de fermeture
         try {
             readChannel.close();
         } catch (IOException _) {
+            // ignored : best-effort cleanup
         }
         try {
             writeChannel.close();
         } catch (IOException _) {
+            // ignored : best-effort cleanup
         }
     }
 }

@@ -24,6 +24,8 @@ import io.vidocq.chappe.api.Server;
  * Mesure throughput et latence en utilisant des raw sockets (zéro overhead client)
  * et HttpClient (mesure réaliste).
  */
+@SuppressWarnings({"EmptyCatch", "AddressSelection"}) // Code de benchmark, pas runtime
+// NOSONAR
 public class ChappeBenchmark {
 
     private static final Logger LOG = System.getLogger(ChappeBenchmark.class.getName());

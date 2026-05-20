@@ -18,6 +18,7 @@ import org.openjdk.jmh.infra.Blackhole;
 @Warmup(iterations = 3, time = 1)
 @Measurement(iterations = 5, time = 1)
 @Fork(value = 1, jvmArgsAppend = "--enable-preview")
+@SuppressWarnings("StringCaseLocaleUsage") // Reproduit l'ancien code à benchmarker
 public class MimeTypesBench {
 
     private static final Map<String, String> OLD_TYPES = Map.ofEntries(

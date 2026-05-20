@@ -2,6 +2,7 @@ package io.vidocq.chappe.http.h2;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 
 import io.vidocq.chappe.api.Headers;
 
@@ -44,7 +45,7 @@ public final class HpackEncoder {
 
         // Regular headers
         for (var entry : headers) {
-            encodeHeader(out, entry.name().toLowerCase(), entry.value());
+            encodeHeader(out, entry.name().toLowerCase(Locale.ROOT), entry.value());
         }
 
         return out.toByteArray();

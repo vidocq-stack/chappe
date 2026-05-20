@@ -24,6 +24,7 @@ import io.netty.handler.codec.http.HttpUtil;
 import io.netty.handler.codec.http.HttpVersion;
 import io.netty.util.CharsetUtil;
 
+@SuppressWarnings("FutureReturnValueIgnored") // Bench Netty : writeAndFlush + shutdown fire-and-forget
 public final class NettyMain {
     private NettyMain() {}
 
