@@ -334,3 +334,30 @@ jobs:
           done
           echo "Timeout : certains downstreams n'ont pas reporté à temps." >&2
           exit 1
+
+  notify-success:
+    # Notification Signal unique quand toute la chaîne PR est validée
+    # (build + downstream verify OK). Dépend de verify-downstream qui agrège
+    # déjà tout — pas de message par sous-build.
+    needs: [verify-downstream]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify Signal on PR success
+        env:
+          SIGNAL_API_URL: ${{ secrets.SIGNAL_API_URL }}
+          SIGNAL_AUTH: ${{ secrets.SIGNAL_AUTH }}
+          SIGNAL_FROM: ${{ secrets.SIGNAL_FROM }}
+          SIGNAL_TO: ${{ secrets.SIGNAL_TO }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          set -euo pipefail
+          payload=$(jq -n \
+            --arg number "$SIGNAL_FROM" \
+            --arg recipient "$SIGNAL_TO" \
+            --arg msg "[ViBot]: ✅ PR validée — ${{ github.repository }}#${{ github.event.number }} par $PR_AUTHOR — $PR_TITLE\n$PR_URL" \
+            '{number:$number, recipients:[$recipient], message:$msg}')
+          curl -fsS -u "$SIGNAL_AUTH" -X POST "$SIGNAL_API_URL/v2/send" \
+            -H 'Content-Type: application/json' \
+            -d "$payload"
