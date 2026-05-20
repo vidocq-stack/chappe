@@ -344,10 +344,10 @@ jobs:
     steps:
       - name: Notify Signal on PR success
         env:
-          SIGNAL_API_URL: ${{ secrets.SIGNAL_API_URL }}
+          SIGNAL_API_URL: ${{ vars.SIGNAL_API_URL }}
           SIGNAL_AUTH: ${{ secrets.SIGNAL_AUTH }}
-          SIGNAL_FROM: ${{ secrets.SIGNAL_FROM }}
-          SIGNAL_TO: ${{ secrets.SIGNAL_TO }}
+          SIGNAL_FROM: ${{ vars.SIGNAL_FROM }}
+          SIGNAL_TO: ${{ vars.SIGNAL_TO }}
           REPO: ${{ github.repository }}
           PR_NUM: ${{ github.event.number }}
           PR_URL: ${{ github.event.pull_request.html_url }}

@@ -72,10 +72,10 @@ jobs:
       - name: Notify Signal on failure
         if: failure()
         env:
-          SIGNAL_API_URL: ${{ secrets.SIGNAL_API_URL }}
+          SIGNAL_API_URL: ${{ vars.SIGNAL_API_URL }}
           SIGNAL_AUTH: ${{ secrets.SIGNAL_AUTH }}
-          SIGNAL_FROM: ${{ secrets.SIGNAL_FROM }}
-          SIGNAL_TO: ${{ secrets.SIGNAL_TO }}
+          SIGNAL_FROM: ${{ vars.SIGNAL_FROM }}
+          SIGNAL_TO: ${{ vars.SIGNAL_TO }}
           REPO: ${{ github.repository }}
           REF: ${{ github.ref_name }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
