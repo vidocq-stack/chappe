@@ -355,6 +355,17 @@ jobs:
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
           set -euo pipefail
+          # Diagnostic explicite si un secret manque (sans révéler les valeurs)
+          missing=()
+          [ -z "${SIGNAL_API_URL:-}" ] && missing+=("SIGNAL_API_URL")
+          [ -z "${SIGNAL_AUTH:-}" ]    && missing+=("SIGNAL_AUTH")
+          [ -z "${SIGNAL_FROM:-}" ]    && missing+=("SIGNAL_FROM")
+          [ -z "${SIGNAL_TO:-}" ]      && missing+=("SIGNAL_TO")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "❌ Secret(s) Forgejo manquant(s) : ${missing[*]}" >&2
+            echo "→ Settings du repo → Actions → Secrets, ou Settings de l'org" >&2
+            exit 1
+          fi
           payload=$(node <<'JS'
           process.stdout.write(JSON.stringify({
             number: process.env.SIGNAL_FROM,

@@ -81,6 +81,15 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
+          missing=()
+          [ -z "${SIGNAL_API_URL:-}" ] && missing+=("SIGNAL_API_URL")
+          [ -z "${SIGNAL_AUTH:-}" ]    && missing+=("SIGNAL_AUTH")
+          [ -z "${SIGNAL_FROM:-}" ]    && missing+=("SIGNAL_FROM")
+          [ -z "${SIGNAL_TO:-}" ]      && missing+=("SIGNAL_TO")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "❌ Secret(s) Forgejo manquant(s) : ${missing[*]}" >&2
+            exit 1
+          fi
           payload=$(node <<'JS'
           process.stdout.write(JSON.stringify({
             number: process.env.SIGNAL_FROM,
