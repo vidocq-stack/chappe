@@ -1,0 +1,30 @@
+name: Notify Signal
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+
+jobs:
+  notify-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Signal message on PR open
+        env:
+          SIGNAL_API_URL: ${{ secrets.SIGNAL_API_URL }}
+          SIGNAL_AUTH: ${{ secrets.SIGNAL_AUTH }}
+          SIGNAL_FROM: ${{ secrets.SIGNAL_FROM }}
+          SIGNAL_TO: ${{ secrets.SIGNAL_TO }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          payload=$(jq -n \
+            --arg number "$SIGNAL_FROM" \
+            --arg recipient "$SIGNAL_TO" \
+            --arg msg "[ViBot]: 📬 PR ouverte sur $REPO par $PR_AUTHOR — $PR_TITLE\n$PR_URL" \
+            '{number:$number, recipients:[$recipient], message:$msg}')
+          curl -fsS -u "$SIGNAL_AUTH" -X POST "$SIGNAL_API_URL/v2/send" \
+            -H 'Content-Type: application/json' \
+            -d "$payload"
