@@ -69,35 +69,57 @@ jobs:
       - name: Deploy to Forgejo Maven registry
         run: mvn -B -ntp deploy -DskipTests
 
-      - name: Notify Signal on failure
+      - name: Notify Slack on failure
         if: failure()
         env:
-          SIGNAL_API_URL: ${{ vars.SIGNAL_API_URL }}
-          SIGNAL_AUTH: ${{ secrets.SIGNAL_AUTH }}
-          SIGNAL_FROM: ${{ vars.SIGNAL_FROM }}
-          SIGNAL_TO: ${{ vars.SIGNAL_TO }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           REPO: ${{ github.repository }}
           REF: ${{ github.ref_name }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          missing=()
-          [ -z "${SIGNAL_API_URL:-}" ] && missing+=("SIGNAL_API_URL")
-          [ -z "${SIGNAL_AUTH:-}" ]    && missing+=("SIGNAL_AUTH")
-          [ -z "${SIGNAL_FROM:-}" ]    && missing+=("SIGNAL_FROM")
-          [ -z "${SIGNAL_TO:-}" ]      && missing+=("SIGNAL_TO")
-          if [ ${#missing[@]} -gt 0 ]; then
-            echo "❌ Secret(s) Forgejo manquant(s) : ${missing[*]}" >&2
+          if [ -z "${SLACK_WEBHOOK_URL:-}" ]; then
+            echo "❌ Secret Forgejo manquant : SLACK_WEBHOOK_URL" >&2
             exit 1
           fi
           payload=$(node <<'JS'
           process.stdout.write(JSON.stringify({
-            number: process.env.SIGNAL_FROM,
-            recipients: [process.env.SIGNAL_TO],
-            message: `[ViBot]: ❌ Build CI échoué — ${process.env.REPO}@${process.env.REF}\n${process.env.RUN_URL}`
+            text: `[ViBot]: ❌ *Build CI échoué* — \`${process.env.REPO}\`@${process.env.REF}\n<${process.env.RUN_URL}|Voir le run>`
           }))
           JS
           )
-          curl -fsS -u "$SIGNAL_AUTH" -X POST "$SIGNAL_API_URL/v2/send" \
+          curl -fsS -X POST "$SLACK_WEBHOOK_URL" \
+            -H 'Content-Type: application/json' \
+            -d "$payload"
+
+      - name: Notify Slack on success
+        if: success()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          COMMIT_AUTHOR: ${{ github.event.head_commit.author.name }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SLACK_WEBHOOK_URL:-}" ]; then
+            echo "ℹ️ Secret SLACK_WEBHOOK_URL absent — notif success skipped"
+            exit 0
+          fi
+          VERSION=$(mvn -q -DforceStdout -N -Dexpression=project.version help:evaluate 2>/dev/null || echo "?")
+          export VERSION
+          export SHORT_SHA="${SHA:0:7}"
+          payload=$(node <<'JS'
+          const msg = process.env.COMMIT_MSG || '';
+          const subject = msg.split('\n')[0];
+          const author = process.env.COMMIT_AUTHOR ? ` par *${process.env.COMMIT_AUTHOR}*` : '';
+          process.stdout.write(JSON.stringify({
+            text: `[ViBot]: ✅ *Build CI réussi* — \`${process.env.REPO}\`@${process.env.REF} (v${process.env.VERSION})\n> \`${process.env.SHORT_SHA}\`${author} — _${subject}_\n<${process.env.RUN_URL}|Voir le run>`
+          }))
+          JS
+          )
+          curl -fsS -X POST "$SLACK_WEBHOOK_URL" \
             -H 'Content-Type: application/json' \
             -d "$payload"
