@@ -6,4 +6,5 @@ module io.vidocq.chappe.http {
 
     exports io.vidocq.chappe.http;
     exports io.vidocq.chappe.http.h2;
+    exports io.vidocq.chappe.http.ws;
 }

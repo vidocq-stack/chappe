@@ -68,6 +68,15 @@ public interface Router extends Handler {
         /** Mounts a sub-handler at the given path prefix (all methods, path stripping). */
         Builder mount(String prefix, Handler handler);
 
+        /**
+         * Enregistre un endpoint WebSocket (RFC 6455).
+         * <p>
+         * Sur une requête HTTP/1.1 {@code GET} avec les headers de handshake corrects,
+         * la connexion est upgradée et {@code handler} reçoit les événements de la session.
+         * Sinon une {@code 400 Bad Request} est retournée.
+         */
+        Builder webSocket(String pattern, WebSocketHandler handler);
+
         /** Handler pour les routes non trouvées (404 par défaut). */
         Builder notFound(Handler handler);
 

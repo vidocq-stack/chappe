@@ -71,6 +71,7 @@ void main() {
 - **HTTP/1.1** — RFC 9110/9112 (keep-alive, chunked, pipelining)
 - **HTTP/2** — RFC 9113 (multiplexage, HPACK, flow control, CONTINUATION)
 - **HTTPS** — TLS via SSLContext/SSLEngine, ALPN (h2 + http/1.1)
+- **WebSocket** — RFC 6455 sur HTTP/1.1 (handshake `Sec-WebSocket-Accept`, framing TEXT/BINARY, fragmentation, validation UTF-8, masking client obligatoire, close handshake, auto-PONG)
 
 ### Routage
 ```java
@@ -271,6 +272,50 @@ Le handler monté a accès à toute la metadata de connexion :
 | `Body.ofOutputStream(writer)` | Streaming body (Servlet OutputStream compat) |
 | `Body.ofFile(path)` | Zero-copy via `FileChannel.transferTo()` |
 
+### WebSocket (RFC 6455)
+
+Un endpoint WebSocket s'enregistre comme une route. Le handshake `Upgrade`/`Sec-WebSocket-Accept`
+est entièrement géré par Chappe ; le `WebSocketHandler` ne voit que les événements applicatifs.
+
+```java
+var router = Router.builder()
+    .webSocket("/echo", new WebSocketHandler() {
+        @Override public void onText(WebSocket ws, String message) throws Exception {
+            ws.sendText(message);
+        }
+        @Override public void onBinary(WebSocket ws, ByteBuffer data) throws Exception {
+            ws.sendBinary(data);
+        }
+        @Override public void onClose(WebSocket ws, int code, String reason) {
+            System.out.println("closed " + code + " " + reason);
+        }
+    })
+    .build();
+```
+
+Garanties du runtime :
+- **Handshake RFC 6455 §4.2** — valide `Upgrade: websocket`, `Connection: upgrade`,
+  `Sec-WebSocket-Version: 13`, `Sec-WebSocket-Key` ; renvoie `426 Upgrade Required`
+  si la version manque, `400 Bad Request` sinon.
+- **Framing §5.2** — opcodes TEXT/BINARY/PING/PONG/CLOSE/CONTINUATION, payload jusqu'à
+  64 MiB, fragmentation transparente (le handler ne voit que des messages complets).
+- **Masking client obligatoire** (§5.1) — une frame non masquée fait fermer la
+  connexion avec `1002 PROTOCOL_ERROR`.
+- **UTF-8 strict sur TEXT** (§8.1) — payload invalide → `1007 INVALID_PAYLOAD_DATA`.
+- **Auto-PONG** (§5.5.2) — la réponse au PING est envoyée avant que `onPing` ne soit
+  invoqué (callback purement observationnel par défaut).
+- **Close handshake bilatéral** — la frame Close reçue est echoée avec le même code,
+  puis la TCP est fermée. `onClose` est toujours appelé, même en cas d'EOF anormal
+  (`1006 ABNORMAL_CLOSURE`).
+- **Thread-safety** — les `send*` peuvent être appelés depuis n'importe quel thread
+  (ex. timer applicatif) ; un `ReentrantLock` interne sérialise les frames sortantes
+  pour éviter l'entrelacement (§5.4). Les callbacks sont séquentiels sur le virtual
+  thread de la connexion.
+
+Constantes utiles dans `CloseCodes` : `NORMAL_CLOSURE` (1000), `GOING_AWAY` (1001),
+`PROTOCOL_ERROR` (1002), `INVALID_PAYLOAD_DATA` (1007), `POLICY_VIOLATION` (1008),
+`MESSAGE_TOO_BIG` (1009), `INTERNAL_ERROR` (1011).
+
 ## Performance
 
 Benchmarks sur macOS, Java 25, NIO client ultra-léger ([détails](BENCHMARKS.md)) :
@@ -399,6 +444,7 @@ Router.builder()
 | RFC 9112 (HTTP/1.1) | Request parsing, chunked, keep-alive, pipelining |
 | RFC 9113 (HTTP/2) | Framing, HPACK, flow control, stream lifecycle, GOAWAY, SETTINGS |
 | RFC 7541 (HPACK) | Static table, dynamic table, Huffman encode/decode |
+| RFC 6455 (WebSocket) | Handshake (`Sec-WebSocket-Accept`), framing §5.2, masking obligatoire, UTF-8 strict TEXT, close handshake bilatéral, auto-PONG |
 
 ## Écosystème Vidocq
 

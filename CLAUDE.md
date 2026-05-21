@@ -13,6 +13,7 @@ de fondation aux futurs projets JAX-RS et Servlet de l'écosystème Vidocq.
 - **HTTP/1.1** — RFC 9110/9112 (keep-alive, chunked, pipelining, conformité testée)
 - **HTTP/2** — RFC 9113 (multiplexage, HPACK Huffman, flow control, CONTINUATION)
 - **HTTPS** — TLS via SSLContext/SSLEngine, ALPN h2 + http/1.1
+- **WebSocket** — RFC 6455 sur HTTP/1.1 (handshake `Sec-WebSocket-Accept`, framing TEXT/BINARY/PING/PONG/CLOSE, fragmentation, validation UTF-8, masking client obligatoire, close handshake bilatéral, auto-PONG)
 - **HTTP/3** — RFC 9114 (objectif futur, QUIC via JDK 26+)
 
 ### Architecture
@@ -32,18 +33,19 @@ le lifecycle des composants. Chappe lui-même utilise `ServiceLoader` (pas CDI).
 ### Modules
 | Module | Description |
 |---|---|
-| `chappe-api` | API publique : `Server`, `Router`, `Handler`, `Request`, `Response`, `Filter`, `StaticFileHandler`, `MimeTypes`, `AcceptEncoding`, `RequestContext` |
-| `chappe-http` | Protocoles HTTP/1.1 et HTTP/2, SslHandler TLS, ByteBufferPool |
+| `chappe-api` | API publique : `Server`, `Router`, `Handler`, `Request`, `Response`, `Filter`, `StaticFileHandler`, `MimeTypes`, `AcceptEncoding`, `RequestContext`, `WebSocket`, `WebSocketHandler`, `CloseCodes` |
+| `chappe-http` | Protocoles HTTP/1.1, HTTP/2 et WebSocket (RFC 6455), SslHandler TLS, ByteBufferPool |
 | `chappe-core` | Moteur serveur, virtual threads, protocol detection, lifecycle |
 | `chappe-cli` | Launcher CLI standalone `chappe serve` (mini-YAML, fat jar, jlink) — voir `chappe-cli/README.md` |
 | `chappe-tests` | Tests d'intégration |
 | `chappe-bench` | Benchmarks : comparatif Jetty/Helidon/JDK, throughput/latence |
-| `chappe-conformance` | Suite de conformité HTTP (45 tests RFC 9110/9112/9113) |
+| `chappe-conformance` | Suite de conformité HTTP/WS (53 tests RFC 9110/9112/9113/6455) |
 | `chappe-examples` | Exemples d'utilisation |
 | `chappe-static-index-maven-plugin` | Plugin Maven : index O(1) + sidecars `.gz` au build (`<compress>gzip</compress>`) |
 
 ### Extension SPI
 Chappe fournit les hooks pour les extensions Servlet/JAX-RS/WebSocket :
+- **`Router.webSocket(pattern, handler)`** — endpoint WebSocket RFC 6455 (handshake automatique, frames TEXT/BINARY/PING/PONG/CLOSE, fragmentation, validation UTF-8, sous-protocole optionnel)
 - **`Router.mount(prefix, handler)`** — enregistrement par path prefix avec stripping automatique
 - **`Request.contextPath()`/`pathInfo()`** — path relatif au mount point
 - **`Request.attribute(key, value)`** — attributs mutables per-request (Servlet compat)
