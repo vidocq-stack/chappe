@@ -10,6 +10,8 @@ import java.nio.channels.WritableByteChannel;
 import java.nio.charset.StandardCharsets;
 
 import io.vidocq.chappe.api.*;
+import io.vidocq.chappe.http.ws.WebSocketConnection;
+import io.vidocq.chappe.http.ws.WebSocketHandshake;
 
 /**
  * Gestion d'une connexion HTTP/1.1 — boucle keep-alive.
@@ -145,6 +147,23 @@ public final class HttpConnection {
                             .status(StatusCode.INTERNAL_SERVER_ERROR)
                             .body("Internal Server Error")
                             .build();
+                }
+
+                // 4a. WebSocket upgrade : bascule en mode frames et termine la boucle HTTP.
+                if (response instanceof WebSocketUpgrade upgrade) {
+                    if (bodyStream != null) HttpBodyReader.drain(bodyStream);
+                    var key = request.headers().firstOrNull("Sec-WebSocket-Key");
+                    WebSocketHandshake.writeResponse(writeChannel, key, upgrade.subprotocol());
+                    var wsConn = new WebSocketConnection(
+                            readChannel,
+                            writeChannel,
+                            closeable,
+                            readBuffer,
+                            upgrade.handler(),
+                            request,
+                            upgrade.subprotocol());
+                    wsConn.run();
+                    return; // closeable déjà fermé par WebSocketConnection
                 }
 
                 // 4. Écrire la réponse

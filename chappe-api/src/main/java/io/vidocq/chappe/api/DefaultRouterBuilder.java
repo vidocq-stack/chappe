@@ -103,6 +103,60 @@ final class DefaultRouterBuilder implements Router.Builder {
     }
 
     @Override
+    public Router.Builder webSocket(String pattern, WebSocketHandler handler) {
+        return route(HttpMethod.GET, pattern, request -> {
+            // RFC 6455 §4.2.1 : valide les headers de handshake côté serveur.
+            if (request.version() != HttpVersion.HTTP_1_1) {
+                return Response.builder()
+                        .status(StatusCode.BAD_REQUEST)
+                        .body("WebSocket requires HTTP/1.1")
+                        .build();
+            }
+            var headers = request.headers();
+            if (!hasTokenIgnoreCase(headers.firstOrNull("Connection"), "upgrade")
+                    || !"websocket".equalsIgnoreCase(headers.firstOrNull("Upgrade"))) {
+                return Response.builder()
+                        .status(StatusCode.BAD_REQUEST)
+                        .body("Missing Upgrade: websocket / Connection: Upgrade")
+                        .build();
+            }
+            if (!"13".equals(headers.firstOrNull("Sec-WebSocket-Version"))) {
+                return Response.builder()
+                        .status(StatusCode.of(426, "Upgrade Required"))
+                        .header("Sec-WebSocket-Version", "13")
+                        .build();
+            }
+            var key = headers.firstOrNull("Sec-WebSocket-Key");
+            if (key == null || key.isBlank()) {
+                return Response.builder()
+                        .status(StatusCode.BAD_REQUEST)
+                        .body("Missing Sec-WebSocket-Key")
+                        .build();
+            }
+            return new WebSocketUpgrade(handler);
+        });
+    }
+
+    private static boolean hasTokenIgnoreCase(String headerValue, String token) {
+        if (headerValue == null) return false;
+        int start = 0;
+        int len = headerValue.length();
+        while (start < len) {
+            int comma = headerValue.indexOf(',', start);
+            if (comma < 0) comma = len;
+            int s = start;
+            int e = comma;
+            while (s < e && Character.isWhitespace(headerValue.charAt(s))) s++;
+            while (e > s && Character.isWhitespace(headerValue.charAt(e - 1))) e--;
+            if (e - s == token.length() && headerValue.regionMatches(true, s, token, 0, token.length())) {
+                return true;
+            }
+            start = comma + 1;
+        }
+        return false;
+    }
+
+    @Override
     public Router.Builder notFound(Handler handler) {
         this.notFoundHandler = handler;
         return this;
