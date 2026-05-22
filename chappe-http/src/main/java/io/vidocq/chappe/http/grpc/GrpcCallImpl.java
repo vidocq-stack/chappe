@@ -1,10 +1,14 @@
 package io.vidocq.chappe.http.grpc;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.zip.GZIPInputStream;
+import java.util.zip.GZIPOutputStream;
 
 import io.vidocq.chappe.api.GrpcCall;
 import io.vidocq.chappe.api.GrpcStatus;
@@ -21,6 +25,9 @@ import io.vidocq.chappe.http.h2.Http2Stream;
  */
 public final class GrpcCallImpl implements GrpcCall {
 
+    /** Codecs annoncés par le serveur dans {@code grpc-accept-encoding}. */
+    private static final String SERVER_ACCEPT_ENCODING = "identity, gzip";
+
     private final Http2Stream stream;
     private final HttpRequestImpl request;
     private final Http2Connection connection;
@@ -28,19 +35,23 @@ public final class GrpcCallImpl implements GrpcCall {
     private final InputStream bodyStream;
     private final String contentType;
     private final long deadlineNanoTime;
+    /** Codec demandé par le client en réception, non null si valide ; null si "identity" ou absent. */
+    private final String requestEncoding;
+    /** {@code true} si le client a envoyé un codec inconnu — la run() doit complete(UNIMPLEMENTED). */
+    private final boolean requestEncodingUnsupported;
 
     private final Headers.Builder responseHeadersBuilder = Headers.builder();
     private final Headers.Builder responseTrailersBuilder = Headers.builder();
     private final Object writeLock = new Object();
     private final AtomicBoolean completed = new AtomicBoolean(false);
     private boolean initialHeadersSent;
+    /** Codec actif en émission ; null = identity (défaut). */
+    private String responseEncoding;
 
     public GrpcCallImpl(Http2Stream stream, HttpRequestImpl request, Http2Connection connection) {
         this.stream = stream;
         this.request = request;
         this.connection = connection;
-        this.frameReader = new GrpcFrameReader();
-        this.bodyStream = stream.createBody().asInputStream();
         var ct = request.headers().firstOrNull("content-type");
         this.contentType = (ct != null) ? ct : "application/grpc";
 
@@ -51,6 +62,26 @@ public final class GrpcCallImpl implements GrpcCall {
             if (nanos > 0) deadlineNs = System.nanoTime() + nanos;
         }
         this.deadlineNanoTime = deadlineNs;
+
+        // Négociation grpc-encoding entrant : si codec inconnu, on diffère le
+        // complete(UNIMPLEMENTED) à run() pour que la sortie d'erreur passe par
+        // le pipeline normal (trailers-only response).
+        var clientEncoding = request.headers().firstOrNull("grpc-encoding");
+        String reqEnc = null;
+        boolean unsupported = false;
+        if (clientEncoding != null && !clientEncoding.isEmpty() && !"identity".equalsIgnoreCase(clientEncoding)) {
+            if ("gzip".equalsIgnoreCase(clientEncoding)) {
+                reqEnc = "gzip";
+            } else {
+                unsupported = true;
+            }
+        }
+        this.requestEncoding = reqEnc;
+        this.requestEncodingUnsupported = unsupported;
+
+        GrpcFrameReader.Decompressor decompressor = ("gzip".equals(reqEnc)) ? GrpcCallImpl::gunzip : null;
+        this.frameReader = new GrpcFrameReader(GrpcFrameReader.DEFAULT_MAX_MESSAGE_SIZE, decompressor);
+        this.bodyStream = stream.createBody().asInputStream();
     }
 
     @Override
@@ -63,7 +94,13 @@ public final class GrpcCallImpl implements GrpcCall {
         synchronized (writeLock) {
             if (completed.get()) throw new IllegalStateException("call already completed");
             ensureInitialHeadersSent();
-            byte[] framed = GrpcFrameWriter.encode(message);
+            boolean compressed = false;
+            byte[] payload = message;
+            if ("gzip".equals(responseEncoding)) {
+                payload = gzip(message);
+                compressed = true;
+            }
+            byte[] framed = GrpcFrameWriter.encode(payload, compressed);
             connection.sendDataChunked(stream, framed, 0, framed.length, false);
         }
     }
@@ -143,13 +180,34 @@ public final class GrpcCallImpl implements GrpcCall {
         return Optional.of(remaining > 0 ? Duration.ofNanos(remaining) : Duration.ZERO);
     }
 
+    @Override
+    public void useResponseEncoding(String encoding) {
+        if (initialHeadersSent) {
+            throw new IllegalStateException("initial headers already sent");
+        }
+        if (encoding == null || "identity".equalsIgnoreCase(encoding)) {
+            this.responseEncoding = null;
+            return;
+        }
+        if ("gzip".equalsIgnoreCase(encoding)) {
+            this.responseEncoding = "gzip";
+            return;
+        }
+        throw new UnsupportedOperationException("unsupported gRPC encoding: " + encoding);
+    }
+
     /**
      * Garantit l'émission des headers initiaux serveur (avant la 1re DATA frame).
      * RFC gRPC : {@code :status 200} + {@code content-type: application/grpc} obligatoires.
      */
     private void ensureInitialHeadersSent() throws IOException {
         if (initialHeadersSent) return;
-        var builder = Headers.builder().add("content-type", "application/grpc").add("grpc-accept-encoding", "identity");
+        var builder = Headers.builder()
+                .add("content-type", "application/grpc")
+                .add("grpc-accept-encoding", SERVER_ACCEPT_ENCODING);
+        if (responseEncoding != null) {
+            builder.add("grpc-encoding", responseEncoding);
+        }
         for (var entry : responseHeadersBuilder.build()) {
             builder.add(entry.name(), entry.value());
         }
@@ -219,6 +277,22 @@ public final class GrpcCallImpl implements GrpcCall {
         }
     }
 
+    /** Gzip-compresse {@code payload}. */
+    static byte[] gzip(byte[] payload) throws IOException {
+        var baos = new ByteArrayOutputStream(payload.length);
+        try (var gz = new GZIPOutputStream(baos)) {
+            gz.write(payload);
+        }
+        return baos.toByteArray();
+    }
+
+    /** Gzip-décompresse {@code compressed}. */
+    static byte[] gunzip(byte[] compressed) throws IOException {
+        try (var gz = new GZIPInputStream(new ByteArrayInputStream(compressed))) {
+            return gz.readAllBytes();
+        }
+    }
+
     /**
      * Boucle d'exécution du handler avec gestion d'erreur : si le handler sort sans
      * avoir appelé complete, on envoie INTERNAL avec le message d'exception.
@@ -230,6 +304,20 @@ public final class GrpcCallImpl implements GrpcCall {
      * qu'au plus un statut final est émis.
      */
     public static void run(GrpcCallImpl call, io.vidocq.chappe.api.GrpcHandler handler) {
+        // Court-circuit : codec request inconnu -> UNIMPLEMENTED immédiat,
+        // sans même appeler le handler (RFC gRPC §"Compression").
+        if (call.requestEncodingUnsupported) {
+            String clientEnc = call.request.headers().firstOrNull("grpc-encoding");
+            try {
+                call.complete(
+                        GrpcStatus.UNIMPLEMENTED,
+                        "grpc-encoding '" + clientEnc + "' not supported (accepted: " + SERVER_ACCEPT_ENCODING + ")");
+            } catch (IOException _) {
+                // connexion perdue
+            }
+            return;
+        }
+
         Thread watchdog = null;
         if (call.deadlineNanoTime >= 0L) {
             final long deadline = call.deadlineNanoTime;

@@ -24,23 +24,46 @@ public final class GrpcFrameReader {
     /** Taille maximale d'un message reçu (4 MiB par défaut, alignée sur grpc-java). */
     public static final int DEFAULT_MAX_MESSAGE_SIZE = 4 * 1024 * 1024;
 
+    /**
+     * Decompresseur d'un payload déjà extrait. Reçoit les bytes compressés,
+     * doit retourner les bytes décompressés. Lance {@link IOException} si le
+     * format est corrompu.
+     */
+    @FunctionalInterface
+    public interface Decompressor {
+        byte[] decompress(byte[] compressed) throws IOException;
+    }
+
     private final int maxMessageSize;
+    private final Decompressor decompressor;
 
     public GrpcFrameReader() {
-        this(DEFAULT_MAX_MESSAGE_SIZE);
+        this(DEFAULT_MAX_MESSAGE_SIZE, null);
     }
 
     public GrpcFrameReader(int maxMessageSize) {
+        this(maxMessageSize, null);
+    }
+
+    /**
+     * @param decompressor décompresseur appliqué aux messages dont le préfixe a
+     *                     {@code compressed=1}. Si {@code null}, un message
+     *                     compressé entrant fait lever {@link GrpcFrameException}.
+     */
+    public GrpcFrameReader(int maxMessageSize, Decompressor decompressor) {
         this.maxMessageSize = maxMessageSize;
+        this.decompressor = decompressor;
     }
 
     /**
      * Lit le prochain message.
      *
-     * @return les bytes du payload, ou {@code null} si l'InputStream est fermé (EOF propre)
+     * @return les bytes du payload (décompressés si nécessaire), ou {@code null}
+     *         si l'InputStream est fermé (EOF propre)
      * @throws IOException                  si l'I/O échoue ou si le format est invalide
      * @throws GrpcFrameException           si la longueur dépasse {@code maxMessageSize}
-     *                                      ou si la compression est demandée (non supportée)
+     *                                      ou si un message compressé arrive sans
+     *                                      décompresseur configuré
      */
     public byte[] readMessage(InputStream in) throws IOException {
         int b0 = in.read();
@@ -49,9 +72,6 @@ public final class GrpcFrameReader {
         int compressed = b0 & 0xFF;
         if (compressed != 0 && compressed != 1) {
             throw new GrpcFrameException("Invalid gRPC compression flag: " + compressed);
-        }
-        if (compressed == 1) {
-            throw new GrpcFrameException("gRPC compression not supported (use grpc-encoding: identity)");
         }
 
         int b1 = in.read();
@@ -70,6 +90,14 @@ public final class GrpcFrameReader {
         byte[] payload = in.readNBytes((int) len);
         if (payload.length != len) {
             throw new EOFException("Truncated gRPC payload: got " + payload.length + " / " + len);
+        }
+
+        if (compressed == 1) {
+            if (decompressor == null) {
+                throw new GrpcFrameException("gRPC compressed message received but no decompressor configured "
+                        + "(client should send grpc-encoding header or use identity)");
+            }
+            return decompressor.decompress(payload);
         }
         return payload;
     }

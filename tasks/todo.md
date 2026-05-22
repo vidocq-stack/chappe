@@ -94,7 +94,7 @@
 - [x] Refus défensif HTTP/1.1 : `DefaultRouterBuilder.grpc()` retourne `505` si version ≠ HTTP/2, `415` si content-type ≠ `application/grpc*` ; `HttpConnection` blinde un cas résiduel
 - [x] Cancellation : `Http2Stream.cancel()` câblé dans `handleRstStream`, exposé via `GrpcCall.isCancelled()`
 - [x] Tests `Http2GrpcTransportTest` : 7 scénarios (unary, server-stream, client-stream, bidi 3/3, handler-error, trailers-only, reject HTTP/1.1)
-- [ ] Compression `grpc-encoding: gzip` (TODO, déféré — `identity` seul au v1)
+- [x] Compression `grpc-encoding: gzip` : décompression auto en réception (négociation via `grpc-encoding` request header), opt-in compression sortante via `GrpcCall.useResponseEncoding("gzip")`, annonce `grpc-accept-encoding: identity, gzip` dans tous les responses, UNIMPLEMENTED (12) trailers-only si codec request inconnu ; tests : 4 e2e (decode gzip in, encode gzip out, codec inconnu = UNIMPLEMENTED, accept-encoding annoncé par défaut)
 - [x] `grpc-timeout` deadline propagation : parser RFC (H/M/S/m/u/n, saturation overflow), watchdog virtual thread, cancel stream + trailers DEADLINE_EXCEEDED (4) si handler dépasse, exposé via `GrpcCall.deadline()` (Optional<Duration>) ; tests : `GrpcTimeoutParserTest` (13) + `deadlineExceededViaGrpcTimeout` + `deadlineRespectedReturnsOk`
 - [ ] gRPC-Web (framing base64 pour navigateurs, TODO)
 - [ ] Client gRPC (API symétrique, TODO — pour l'instant tests via H2 raw)

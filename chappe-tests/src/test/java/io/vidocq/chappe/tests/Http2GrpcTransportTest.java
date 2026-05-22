@@ -263,16 +263,15 @@ class Http2GrpcTransportTest {
 
             long t0 = System.nanoTime();
             sendGrpcRequestHeadersWithTimeout(out, 1, "/slow", false, "200m");
-            writeFrame(out, TYPE_DATA, FLAG_END_STREAM, 1, GrpcFrameWriter.encode("x".getBytes(StandardCharsets.UTF_8)));
+            writeFrame(
+                    out, TYPE_DATA, FLAG_END_STREAM, 1, GrpcFrameWriter.encode("x".getBytes(StandardCharsets.UTF_8)));
             out.flush();
             var seq = readUntilEndStream(in, 1);
             long elapsedMs = (System.nanoTime() - t0) / 1_000_000;
 
-            assertEquals("4", seq.trailers().get("grpc-status"),
-                    "grpc-status doit être DEADLINE_EXCEEDED (4)");
+            assertEquals("4", seq.trailers().get("grpc-status"), "grpc-status doit être DEADLINE_EXCEEDED (4)");
             assertEquals("deadline exceeded", seq.trailers().get("grpc-message"));
-            assertTrue(elapsedMs < 2_000,
-                    "trailers devraient arriver bien avant 2s (effectif=" + elapsedMs + "ms)");
+            assertTrue(elapsedMs < 2_000, "trailers devraient arriver bien avant 2s (effectif=" + elapsedMs + "ms)");
         }
     }
 
@@ -285,9 +284,7 @@ class Http2GrpcTransportTest {
     void deadlineRespectedReturnsOk() throws Exception {
         var observedDeadline = new AtomicReference<String>();
         startServer("/fast", call -> {
-            observedDeadline.set(call.deadline()
-                    .map(d -> d.toMillis() + "ms")
-                    .orElse("<none>"));
+            observedDeadline.set(call.deadline().map(d -> d.toMillis() + "ms").orElse("<none>"));
             byte[] req = call.receive();
             call.send(req);
             call.complete(GrpcStatus.OK, "");
@@ -299,7 +296,8 @@ class Http2GrpcTransportTest {
             var out = new DataOutputStream(socket.getOutputStream());
 
             sendGrpcRequestHeadersWithTimeout(out, 1, "/fast", false, "10S");
-            writeFrame(out, TYPE_DATA, FLAG_END_STREAM, 1, GrpcFrameWriter.encode("hi".getBytes(StandardCharsets.UTF_8)));
+            writeFrame(
+                    out, TYPE_DATA, FLAG_END_STREAM, 1, GrpcFrameWriter.encode("hi".getBytes(StandardCharsets.UTF_8)));
             out.flush();
             var seq = readUntilEndStream(in, 1);
 
@@ -307,8 +305,142 @@ class Http2GrpcTransportTest {
             assertArrayEquals("hi".getBytes(StandardCharsets.UTF_8), decodeOneGrpcMessage(seq.body.toByteArray()));
             // Le handler doit avoir vu une deadline non-vide.
             assertNotNull(observedDeadline.get());
-            assertNotEquals("<none>", observedDeadline.get(),
-                    "le handler doit observer la deadline propagée par le client");
+            assertNotEquals(
+                    "<none>", observedDeadline.get(), "le handler doit observer la deadline propagée par le client");
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 7c. grpc-encoding: gzip — décompression auto en réception
+    //     Le client envoie un message gzippé avec compressed=1 dans le préfixe
+    //     et le header grpc-encoding: gzip. Le handler doit recevoir les
+    //     bytes décompressés sans rien faire.
+    // ------------------------------------------------------------------
+    @Test
+    void gzipRequestDecodedAutomatically() throws Exception {
+        var observedPayload = new AtomicReference<byte[]>();
+        startServer("/gz-in", call -> {
+            observedPayload.set(call.receive());
+            call.send(new byte[] {0});
+            call.complete(GrpcStatus.OK, "");
+        });
+
+        try (var socket = new Socket()) {
+            connectAndHandshake(socket);
+            var in = new DataInputStream(socket.getInputStream());
+            var out = new DataOutputStream(socket.getOutputStream());
+
+            byte[] plaintext =
+                    "the-quick-brown-fox-jumps-over-the-lazy-dog".repeat(20).getBytes(StandardCharsets.UTF_8);
+            byte[] gz = gzipBytes(plaintext);
+            byte[] framed = GrpcFrameWriter.encode(gz, true);
+
+            sendGrpcRequestHeadersWithEncoding(out, 1, "/gz-in", false, "gzip");
+            writeFrame(out, TYPE_DATA, FLAG_END_STREAM, 1, framed);
+            out.flush();
+            readUntilEndStream(in, 1);
+
+            assertArrayEquals(plaintext, observedPayload.get(), "le handler doit recevoir le payload décompressé");
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 7d. useResponseEncoding("gzip") — compression auto en émission
+    //     Le handler opte-in pour gzip, le client doit recevoir le préfixe
+    //     compressed=1 + header grpc-encoding: gzip et pouvoir décompresser.
+    // ------------------------------------------------------------------
+    @Test
+    void serverCompressesResponseWhenConfigured() throws Exception {
+        byte[] body = "compress-me-many-times-".repeat(50).getBytes(StandardCharsets.UTF_8);
+        startServer("/gz-out", call -> {
+            call.useResponseEncoding("gzip");
+            call.receive();
+            call.send(body);
+            call.complete(GrpcStatus.OK, "");
+        });
+
+        try (var socket = new Socket()) {
+            connectAndHandshake(socket);
+            var in = new DataInputStream(socket.getInputStream());
+            var out = new DataOutputStream(socket.getOutputStream());
+
+            sendGrpcRequest(out, 1, "/gz-out", true, GrpcFrameWriter.encode(new byte[] {0}));
+            var seq = readUntilEndStream(in, 1);
+
+            // Headers initiaux annoncent grpc-encoding: gzip
+            assertEquals(
+                    "gzip",
+                    seq.initialHeaders().get("grpc-encoding"),
+                    "headers réponse doivent contenir grpc-encoding: gzip");
+            // Le préfixe doit avoir compressed=1, le payload est gzippé
+            byte[] raw = seq.body.toByteArray();
+            assertEquals(1, raw[0], "préfixe doit avoir compressed=1");
+            int len = ((raw[1] & 0xFF) << 24) | ((raw[2] & 0xFF) << 16) | ((raw[3] & 0xFF) << 8) | (raw[4] & 0xFF);
+            byte[] gzipped = java.util.Arrays.copyOfRange(raw, 5, 5 + len);
+            assertArrayEquals(
+                    body, gunzipBytes(gzipped), "le payload doit être décompressable et identique au body envoyé");
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 7e. Codec request inconnu → trailers-only grpc-status: 12 UNIMPLEMENTED
+    //     RFC gRPC §"Compression" : si le serveur ne peut pas décoder le
+    //     grpc-encoding annoncé par le client, il DOIT répondre UNIMPLEMENTED.
+    // ------------------------------------------------------------------
+    @Test
+    void unknownRequestEncodingReturnsUnimplemented() throws Exception {
+        startServer("/no-snappy", call -> {
+            // Ne devrait jamais être appelé — la transport coupe avant.
+            call.send(new byte[] {0});
+            call.complete(GrpcStatus.OK, "");
+        });
+
+        try (var socket = new Socket()) {
+            connectAndHandshake(socket);
+            var in = new DataInputStream(socket.getInputStream());
+            var out = new DataOutputStream(socket.getOutputStream());
+
+            sendGrpcRequestHeadersWithEncoding(out, 1, "/no-snappy", false, "snappy");
+            writeFrame(out, TYPE_DATA, FLAG_END_STREAM, 1, GrpcFrameWriter.encode(new byte[] {1, 2, 3}));
+            out.flush();
+            var seq = readUntilEndStream(in, 1);
+
+            // Trailers-only : un seul HEADERS frame avec grpc-status=12
+            assertEquals(
+                    1, seq.headers.size(), "UNIMPLEMENTED doit produire un trailers-only response (1 HEADERS frame)");
+            var h = seq.headers.get(0);
+            assertEquals("12", h.get("grpc-status"));
+            assertTrue(
+                    h.get("grpc-message").contains("snappy"),
+                    "grpc-message doit citer le codec rejeté, got " + h.get("grpc-message"));
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 7f. grpc-accept-encoding annoncé par défaut
+    //     Tout response normal (sans opt-in compression) doit annoncer que
+    //     le serveur sait décoder gzip en plus de identity.
+    // ------------------------------------------------------------------
+    @Test
+    void acceptEncodingAdvertisedByDefault() throws Exception {
+        startServer("/plain", call -> {
+            call.receive();
+            call.send(new byte[] {0x42});
+            call.complete(GrpcStatus.OK, "");
+        });
+
+        try (var socket = new Socket()) {
+            connectAndHandshake(socket);
+            var in = new DataInputStream(socket.getInputStream());
+            var out = new DataOutputStream(socket.getOutputStream());
+
+            sendGrpcRequest(out, 1, "/plain", true, GrpcFrameWriter.encode(new byte[] {0}));
+            var seq = readUntilEndStream(in, 1);
+
+            String accept = seq.initialHeaders().get("grpc-accept-encoding");
+            assertNotNull(accept, "grpc-accept-encoding doit être présent");
+            assertTrue(accept.contains("gzip"), "grpc-accept-encoding doit annoncer gzip, got " + accept);
+            assertTrue(accept.contains("identity"), "grpc-accept-encoding doit annoncer identity, got " + accept);
         }
     }
 
@@ -375,6 +507,34 @@ class Http2GrpcTransportTest {
         writeLiteral(hb, "grpc-timeout", timeout);
         int flags = FLAG_END_HEADERS | (endStream ? FLAG_END_STREAM : 0);
         writeFrame(out, TYPE_HEADERS, flags, streamId, hb.toByteArray());
+    }
+
+    private static void sendGrpcRequestHeadersWithEncoding(
+            DataOutputStream out, int streamId, String path, boolean endStream, String encoding) throws IOException {
+        var hb = new ByteArrayOutputStream();
+        writeLiteral(hb, ":method", "POST");
+        writeLiteral(hb, ":scheme", "http");
+        writeLiteral(hb, ":authority", "127.0.0.1");
+        writeLiteral(hb, ":path", path);
+        writeLiteral(hb, "content-type", "application/grpc");
+        writeLiteral(hb, "te", "trailers");
+        writeLiteral(hb, "grpc-encoding", encoding);
+        int flags = FLAG_END_HEADERS | (endStream ? FLAG_END_STREAM : 0);
+        writeFrame(out, TYPE_HEADERS, flags, streamId, hb.toByteArray());
+    }
+
+    private static byte[] gzipBytes(byte[] in) throws IOException {
+        var baos = new java.io.ByteArrayOutputStream();
+        try (var gz = new java.util.zip.GZIPOutputStream(baos)) {
+            gz.write(in);
+        }
+        return baos.toByteArray();
+    }
+
+    private static byte[] gunzipBytes(byte[] in) throws IOException {
+        try (var gz = new java.util.zip.GZIPInputStream(new java.io.ByteArrayInputStream(in))) {
+            return gz.readAllBytes();
+        }
     }
 
     private static void sendGrpcRequestHeaders(DataOutputStream out, int streamId, String path, boolean endStream)

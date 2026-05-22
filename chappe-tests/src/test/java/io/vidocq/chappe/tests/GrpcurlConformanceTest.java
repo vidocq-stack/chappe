@@ -9,7 +9,6 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import io.vidocq.chappe.api.GrpcStatus;
@@ -48,11 +47,13 @@ class GrpcurlConformanceTest {
     void grpcurlUnaryEcho() throws Exception {
         assumeTrue(grpcurlAvailable(), "grpcurl absent du PATH (skip — brew install grpcurl)");
 
-        var router = Router.builder().grpc("/echo.EchoService/Echo", call -> {
-            byte[] req = call.receive();
-            call.send(req);
-            call.complete(GrpcStatus.OK, "");
-        }).build();
+        var router = Router.builder()
+                .grpc("/echo.EchoService/Echo", call -> {
+                    byte[] req = call.receive();
+                    call.send(req);
+                    call.complete(GrpcStatus.OK, "");
+                })
+                .build();
         server = Server.builder().port(0).handler(router).build();
         server.start();
         int port = server.port();
@@ -62,38 +63,39 @@ class GrpcurlConformanceTest {
         var pb = new ProcessBuilder(
                 "grpcurl",
                 "-plaintext",
-                "-d", "{\"message\":\"hello-from-grpcurl\"}",
-                "-import-path", protoDir.toString(),
-                "-proto", "echo.proto",
+                "-d",
+                "{\"message\":\"hello-from-grpcurl\"}",
+                "-import-path",
+                protoDir.toString(),
+                "-proto",
+                "echo.proto",
                 "127.0.0.1:" + port,
-                "echo.EchoService/Echo"
-        );
+                "echo.EchoService/Echo");
         pb.redirectErrorStream(true);
         Process p = pb.start();
         boolean exited = p.waitFor(15, TimeUnit.SECONDS);
         String output = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
 
         assertTrue(exited, "grpcurl n'a pas terminé en 15s, output=" + output);
-        assertEquals(0, p.exitValue(),
-                "grpcurl exit code non-zéro, output=\n" + output);
+        assertEquals(0, p.exitValue(), "grpcurl exit code non-zéro, output=\n" + output);
         // grpcurl format de sortie par défaut : JSON pretty-printed sur stdout.
         // On vérifie juste que le payload est intact (le serveur a echo).
-        assertTrue(output.contains("\"message\""),
-                "réponse sans champ message, output=\n" + output);
-        assertTrue(output.contains("hello-from-grpcurl"),
-                "réponse sans payload echo intact, output=\n" + output);
+        assertTrue(output.contains("\"message\""), "réponse sans champ message, output=\n" + output);
+        assertTrue(output.contains("hello-from-grpcurl"), "réponse sans payload echo intact, output=\n" + output);
     }
 
     @Test
     void grpcurlStatusOnFailingHandler() throws Exception {
         assumeTrue(grpcurlAvailable(), "grpcurl absent du PATH (skip)");
 
-        var router = Router.builder().grpc("/echo.EchoService/Echo", call -> {
-            call.receive();
-            // handler qui throw sans complete -> couche transport doit émettre
-            // grpc-status: 13 (INTERNAL) dans les trailers
-            throw new RuntimeException("boom");
-        }).build();
+        var router = Router.builder()
+                .grpc("/echo.EchoService/Echo", call -> {
+                    call.receive();
+                    // handler qui throw sans complete -> couche transport doit émettre
+                    // grpc-status: 13 (INTERNAL) dans les trailers
+                    throw new RuntimeException("boom");
+                })
+                .build();
         server = Server.builder().port(0).handler(router).build();
         server.start();
         int port = server.port();
@@ -103,12 +105,14 @@ class GrpcurlConformanceTest {
         var pb = new ProcessBuilder(
                 "grpcurl",
                 "-plaintext",
-                "-d", "{\"message\":\"x\"}",
-                "-import-path", protoDir.toString(),
-                "-proto", "echo.proto",
+                "-d",
+                "{\"message\":\"x\"}",
+                "-import-path",
+                protoDir.toString(),
+                "-proto",
+                "echo.proto",
                 "127.0.0.1:" + port,
-                "echo.EchoService/Echo"
-        );
+                "echo.EchoService/Echo");
         pb.redirectErrorStream(true);
         Process p = pb.start();
         boolean exited = p.waitFor(15, TimeUnit.SECONDS);
@@ -117,10 +121,9 @@ class GrpcurlConformanceTest {
         assertTrue(exited, "grpcurl n'a pas terminé en 15s, output=" + output);
         // grpcurl exit non-zéro quand grpc-status != 0 ; il affiche le statut
         // canonique ("Internal" pour code 13).
-        assertTrue(p.exitValue() != 0,
-                "grpcurl devrait sortir en erreur sur grpc-status=13, exit=" + p.exitValue());
-        assertTrue(output.contains("Internal") || output.contains("INTERNAL")
-                        || output.contains("Code: Internal"),
+        assertTrue(p.exitValue() != 0, "grpcurl devrait sortir en erreur sur grpc-status=13, exit=" + p.exitValue());
+        assertTrue(
+                output.contains("Internal") || output.contains("INTERNAL") || output.contains("Code: Internal"),
                 "trailers grpc-status devraient indiquer INTERNAL, output=\n" + output);
     }
 

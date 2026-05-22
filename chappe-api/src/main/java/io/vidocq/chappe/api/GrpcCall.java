@@ -85,6 +85,25 @@ public interface GrpcCall {
     String contentType();
 
     /**
+     * Active la compression des messages sortants (RFC gRPC §"Compression").
+     * <p>
+     * Doit être appelé <b>avant</b> le premier {@link #send(byte[])} sinon les headers
+     * initiaux auront déjà été émis. La couche transport ajoute alors :
+     * <ul>
+     *   <li>{@code grpc-encoding: <encoding>} aux headers initiaux serveur</li>
+     *   <li>flag {@code compressed=1} dans le préfixe 5 octets de chaque message envoyé</li>
+     * </ul>
+     * En réception, le serveur déclare toujours {@code grpc-accept-encoding: identity,gzip}
+     * et décompresse automatiquement les messages entrants compressés selon le
+     * {@code grpc-encoding} du client.
+     *
+     * @param encoding codec — actuellement {@code "identity"} (no-op) ou {@code "gzip"}
+     * @throws IllegalStateException         si les headers initiaux ont déjà été émis
+     * @throws UnsupportedOperationException si {@code encoding} n'est pas supporté
+     */
+    void useResponseEncoding(String encoding);
+
+    /**
      * Deadline propagée par le client via le header {@code grpc-timeout} (RFC gRPC §"Requests").
      * <p>
      * Si présent, la couche transport Chappe arme automatiquement un watchdog : à
