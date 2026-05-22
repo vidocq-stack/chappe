@@ -29,6 +29,7 @@ public final class HttpRequestImpl implements Request, Headers {
     String[] headerValues;
     int headerCount;
     Body body;
+    Headers trailers = Headers.empty();
 
     // --- Setters publics pour accès depuis io.vidocq.chappe.http.h2 ---
     public void setMethod(HttpMethod method) {
@@ -45,6 +46,10 @@ public final class HttpRequestImpl implements Request, Headers {
 
     public void setBody(Body body) {
         this.body = body;
+    }
+
+    public void setTrailers(Headers trailers) {
+        this.trailers = trailers != null ? trailers : Headers.empty();
     }
 
     public int headerCount() {
@@ -151,6 +156,7 @@ public final class HttpRequestImpl implements Request, Headers {
         version = null;
         headerCount = 0;
         body = Body.empty();
+        trailers = Headers.empty();
         uri = null;
         path = null;
         query = null;
@@ -288,6 +294,11 @@ public final class HttpRequestImpl implements Request, Headers {
     @Override
     public Body body() {
         return body;
+    }
+
+    @Override
+    public Headers trailers() {
+        return trailers;
     }
 
     @Override

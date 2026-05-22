@@ -52,6 +52,20 @@ public final class HpackEncoder {
     }
 
     /**
+     * Encode des trailers HTTP/2 (HEADERS frame envoyée après le corps).
+     * <p>
+     * Contrairement à {@link #encode(int, Headers)}, n'émet pas de pseudo-header :
+     * RFC 9113 §8.1 interdit les pseudo-headers dans les trailers.
+     */
+    public byte[] encodeTrailers(Headers trailers) {
+        var out = new ByteArrayOutputStream(64);
+        for (var entry : trailers) {
+            encodeHeader(out, entry.name().toLowerCase(Locale.ROOT), entry.value());
+        }
+        return out.toByteArray();
+    }
+
+    /**
      * Encode a single name/value pair using the optimal representation:
      * indexed > literal with incremental indexing (indexed name) > literal with incremental
      * indexing (new name).

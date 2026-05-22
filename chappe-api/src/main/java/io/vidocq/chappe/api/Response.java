@@ -16,6 +16,20 @@ public interface Response {
     /** Corps de la réponse. */
     Body body();
 
+    /**
+     * Trailers HTTP envoyés après le corps (HTTP/2 §8.1, RFC 9113 §8.1, chunked HTTP/1.1 §7.1.2).
+     * <p>
+     * Vide par défaut. Appelé par la couche transport <b>après</b> que {@link #body()}
+     * ait été entièrement consommé : une implémentation custom peut donc calculer les
+     * trailers à la volée (ex. {@code grpc-status} en gRPC streaming).
+     * <p>
+     * En HTTP/1.1, l'application doit explicitement annoncer les noms via le header
+     * {@code Trailer:} et utiliser l'encodage chunked.
+     */
+    default Headers trailers() {
+        return Headers.empty();
+    }
+
     // --- Factories ---
 
     /** Réponse 200 OK "ok" pré-allouée (hot path benchmark). */
@@ -63,6 +77,12 @@ public interface Response {
         Builder header(String name, String value);
 
         Builder headers(Headers headers);
+
+        /** Ajoute un trailer (HTTP/2 ou chunked HTTP/1.1). */
+        Builder trailer(String name, String value);
+
+        /** Remplace l'ensemble des trailers. */
+        Builder trailers(Headers trailers);
 
         Builder body(Body body);
 

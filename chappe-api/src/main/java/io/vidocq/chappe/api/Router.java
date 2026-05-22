@@ -77,6 +77,22 @@ public interface Router extends Handler {
          */
         Builder webSocket(String pattern, WebSocketHandler handler);
 
+        /**
+         * Enregistre un endpoint gRPC (transport HTTP/2 + framing core gRPC).
+         * <p>
+         * À une requête {@code POST} sur {@code pattern} en HTTP/2 avec
+         * {@code content-type: application/grpc[+xxx]}, la connexion bascule en mode
+         * streaming bidirectionnel et {@code handler} reçoit un {@link GrpcCall}.
+         * <p>
+         * Conditions de refus :
+         * <ul>
+         *   <li>version HTTP &lt; 2 → {@code 505 HTTP Version Not Supported}</li>
+         *   <li>{@code content-type} absent ou ≠ {@code application/grpc...} → {@code 415}</li>
+         * </ul>
+         * La sérialisation des messages (protobuf, json, …) est à la charge du handler.
+         */
+        Builder grpc(String pattern, GrpcHandler handler);
+
         /** Handler pour les routes non trouvées (404 par défaut). */
         Builder notFound(Handler handler);
 

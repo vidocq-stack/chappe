@@ -33,6 +33,17 @@ public interface Request {
     /** Corps de la requête. */
     Body body();
 
+    /**
+     * Trailers HTTP envoyés par le client après le corps (HTTP/2 §8.1, chunked HTTP/1.1 §7.1.2).
+     * <p>
+     * Vide par défaut. En HTTP/2, les trailers arrivent dans une seconde HEADERS frame
+     * après les DATA frames. À appeler uniquement <b>après</b> avoir lu complètement
+     * {@link #body()}, sinon retourne potentiellement {@link Headers#empty()}.
+     */
+    default Headers trailers() {
+        return Headers.empty();
+    }
+
     /** Raccourci : première valeur de l'en-tête {@code name}. */
     default Optional<String> header(String name) {
         return headers().first(name);
