@@ -434,6 +434,13 @@ public final class Http2Connection {
                 return; // GrpcCallImpl gère initial headers, DATA, trailers, half-close
             }
 
+            // Bascule gRPC-Web : trailers sérialisés inline comme frame DATA 0x80.
+            if (response instanceof io.vidocq.chappe.api.GrpcWebDispatch gwd) {
+                var call = new io.vidocq.chappe.http.grpc.GrpcWebCallImpl(stream, request, this, gwd.mode());
+                io.vidocq.chappe.http.grpc.GrpcWebCallImpl.run(call, gwd.handler());
+                return;
+            }
+
             sendResponse(stream, response);
         } catch (IOException _) {
             // Connexion perdue pendant l'écriture de la réponse

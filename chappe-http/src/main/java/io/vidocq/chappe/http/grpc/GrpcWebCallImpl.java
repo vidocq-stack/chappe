@@ -1,29 +1,37 @@
 package io.vidocq.chappe.http.grpc;
 
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.zip.GZIPInputStream;
-import java.util.zip.GZIPOutputStream;
 
 import io.vidocq.chappe.api.GrpcCall;
 import io.vidocq.chappe.api.GrpcStatus;
+import io.vidocq.chappe.api.GrpcWebDispatch;
 import io.vidocq.chappe.api.Headers;
 import io.vidocq.chappe.http.HttpRequestImpl;
 import io.vidocq.chappe.http.h2.Http2Connection;
 import io.vidocq.chappe.http.h2.Http2Stream;
 
 /**
- * Implémentation de {@link GrpcCall} adossée à un stream HTTP/2.
+ * Variante {@link GrpcCall} pour gRPC-Web (PROTOCOL-WEB.md) adossée à un stream HTTP/2.
  * <p>
- * Synchrone bloquante : {@code receive()} bloque sur la prochaine DATA frame,
- * {@code send()} bloque sur le flow control H2.
+ * Différences par rapport à {@link GrpcCallImpl} :
+ * <ul>
+ *   <li>content-type négocié : {@code application/grpc-web} ou {@code application/grpc-web-text}</li>
+ *   <li>les "trailers" sont émis comme une frame DATA spéciale (préfixe {@code 0x80} via
+ *       {@link GrpcWebFraming#encodeTrailerFrame(Headers)}), pas comme un HEADERS frame
+ *       séparé — les navigateurs ne lisent pas les trailers HTTP/2</li>
+ *   <li>mode {@link GrpcWebDispatch.Mode#TEXT} : tout le corps request/response est
+ *       Base64-encodé (chunk par chunk)</li>
+ * </ul>
+ * <p>
+ * Le parser de {@code grpc-timeout} et la négociation {@code grpc-encoding} sont
+ * réutilisés depuis {@link GrpcCallImpl} (méthodes statiques publiques).
  */
-public final class GrpcCallImpl implements GrpcCall {
+public final class GrpcWebCallImpl implements GrpcCall {
 
     /** Codecs annoncés par le serveur dans {@code grpc-accept-encoding}. */
     private static final String SERVER_ACCEPT_ENCODING = "identity, gzip";
@@ -31,41 +39,41 @@ public final class GrpcCallImpl implements GrpcCall {
     private final Http2Stream stream;
     private final HttpRequestImpl request;
     private final Http2Connection connection;
+    private final GrpcWebDispatch.Mode mode;
     private final GrpcFrameReader frameReader;
     private final InputStream bodyStream;
     private final String contentType;
     private final long deadlineNanoTime;
-    /** Codec demandé par le client en réception, non null si valide ; null si "identity" ou absent. */
-    private final String requestEncoding;
-    /** {@code true} si le client a envoyé un codec inconnu — la run() doit complete(UNIMPLEMENTED). */
     private final boolean requestEncodingUnsupported;
 
     private final Headers.Builder responseHeadersBuilder = Headers.builder();
     private final Headers.Builder responseTrailersBuilder = Headers.builder();
     private final Object writeLock = new Object();
-    private final AtomicBoolean completed = new AtomicBoolean(false);
+    final AtomicBoolean completed = new AtomicBoolean(false);
     private boolean initialHeadersSent;
-    /** Codec actif en émission ; null = identity (défaut). */
     private String responseEncoding;
 
-    public GrpcCallImpl(Http2Stream stream, HttpRequestImpl request, Http2Connection connection) {
+    public GrpcWebCallImpl(
+            Http2Stream stream, HttpRequestImpl request, Http2Connection connection, GrpcWebDispatch.Mode mode)
+            throws IOException {
         this.stream = stream;
         this.request = request;
         this.connection = connection;
+        this.mode = mode;
         var ct = request.headers().firstOrNull("content-type");
-        this.contentType = (ct != null) ? ct : "application/grpc";
+        this.contentType = (ct != null)
+                ? ct
+                : (mode == GrpcWebDispatch.Mode.TEXT ? "application/grpc-web-text" : "application/grpc-web");
 
         long deadlineNs = -1L;
         var timeoutHeader = request.headers().firstOrNull("grpc-timeout");
         if (timeoutHeader != null) {
-            long nanos = parseTimeoutNanos(timeoutHeader);
+            long nanos = GrpcCallImpl.parseTimeoutNanos(timeoutHeader);
             if (nanos > 0) deadlineNs = System.nanoTime() + nanos;
         }
         this.deadlineNanoTime = deadlineNs;
 
-        // Négociation grpc-encoding entrant : si codec inconnu, on diffère le
-        // complete(UNIMPLEMENTED) à run() pour que la sortie d'erreur passe par
-        // le pipeline normal (trailers-only response).
+        // Négociation grpc-encoding entrant (même logique que GrpcCallImpl).
         var clientEncoding = request.headers().firstOrNull("grpc-encoding");
         String reqEnc = null;
         boolean unsupported = false;
@@ -76,12 +84,21 @@ public final class GrpcCallImpl implements GrpcCall {
                 unsupported = true;
             }
         }
-        this.requestEncoding = reqEnc;
         this.requestEncodingUnsupported = unsupported;
-
         GrpcFrameReader.Decompressor decompressor = ("gzip".equals(reqEnc)) ? GrpcCallImpl::gunzip : null;
         this.frameReader = new GrpcFrameReader(GrpcFrameReader.DEFAULT_MAX_MESSAGE_SIZE, decompressor);
-        this.bodyStream = stream.createBody().asInputStream();
+
+        // Body en mode TEXT : on lit tout puis Base64-decode. V1 suppose une seule
+        // unary call (ou client-streaming court) — le streaming chunk-par-chunk est
+        // possible pour BINARY, en TEXT le client navigateur n'envoie qu'un seul
+        // chunk en pratique (XHR POST complet).
+        if (mode == GrpcWebDispatch.Mode.TEXT) {
+            byte[] raw = stream.createBody().asInputStream().readAllBytes();
+            byte[] decoded = raw.length == 0 ? raw : GrpcWebFraming.base64Decode(raw);
+            this.bodyStream = new ByteArrayInputStream(decoded);
+        } else {
+            this.bodyStream = stream.createBody().asInputStream();
+        }
     }
 
     @Override
@@ -97,11 +114,12 @@ public final class GrpcCallImpl implements GrpcCall {
             boolean compressed = false;
             byte[] payload = message;
             if ("gzip".equals(responseEncoding)) {
-                payload = gzip(message);
+                payload = GrpcCallImpl.gzip(message);
                 compressed = true;
             }
             byte[] framed = GrpcFrameWriter.encode(payload, compressed);
-            connection.sendDataChunked(stream, framed, 0, framed.length, false);
+            byte[] toWire = (mode == GrpcWebDispatch.Mode.TEXT) ? GrpcWebFraming.base64Encode(framed) : framed;
+            connection.sendDataChunked(stream, toWire, 0, toWire.length, false);
         }
     }
 
@@ -115,29 +133,14 @@ public final class GrpcCallImpl implements GrpcCall {
                 responseTrailersBuilder.add("grpc-message", encodePercent(message));
             }
 
-            if (!initialHeadersSent) {
-                // Trailers-only response (RFC gRPC §"Responses") :
-                // un seul HEADERS frame contenant :status, content-type et grpc-status, END_STREAM=1.
-                var combined = Headers.builder()
-                        .add("content-type", "application/grpc")
-                        .add("grpc-status", Integer.toString(grpcStatus));
-                if (message != null && !message.isEmpty()) {
-                    combined.add("grpc-message", encodePercent(message));
-                }
-                // Headers applicatifs déclarés via addHeader avant complete
-                for (var entry : responseHeadersBuilder.build()) {
-                    combined.add(entry.name(), entry.value());
-                }
-                byte[] encoded = connection.hpackEncoder().encode(200, combined.build());
-                connection.frameWriter().writeHeaders(stream.streamId(), encoded, true);
-                initialHeadersSent = true;
-                stream.halfCloseLocal();
-                return;
-            }
-
-            // Streaming terminé : émettre les trailers HEADERS séparés avec END_STREAM=1.
-            byte[] encodedTrailers = connection.hpackEncoder().encodeTrailers(responseTrailersBuilder.build());
-            connection.frameWriter().writeHeaders(stream.streamId(), encodedTrailers, true);
+            // gRPC-Web : pas de trailers-only HEADERS frame. Même en cas d'erreur
+            // immédiate, on émet :status 200 + content-type, puis une frame DATA
+            // qui contient SEULEMENT le trailer frame (préfixe 0x80).
+            ensureInitialHeadersSent();
+            byte[] trailerFrame = GrpcWebFraming.encodeTrailerFrame(responseTrailersBuilder.build());
+            byte[] toWire =
+                    (mode == GrpcWebDispatch.Mode.TEXT) ? GrpcWebFraming.base64Encode(trailerFrame) : trailerFrame;
+            connection.sendDataChunked(stream, toWire, 0, toWire.length, true);
             stream.halfCloseLocal();
         }
     }
@@ -196,14 +199,13 @@ public final class GrpcCallImpl implements GrpcCall {
         throw new UnsupportedOperationException("unsupported gRPC encoding: " + encoding);
     }
 
-    /**
-     * Garantit l'émission des headers initiaux serveur (avant la 1re DATA frame).
-     * RFC gRPC : {@code :status 200} + {@code content-type: application/grpc} obligatoires.
-     */
+    /** Headers initiaux : :status 200 + content-type gRPC-Web + grpc-accept-encoding (+ grpc-encoding si configuré). */
     private void ensureInitialHeadersSent() throws IOException {
         if (initialHeadersSent) return;
+        String responseContentType =
+                (mode == GrpcWebDispatch.Mode.TEXT) ? "application/grpc-web-text" : "application/grpc-web";
         var builder = Headers.builder()
-                .add("content-type", "application/grpc")
+                .add("content-type", responseContentType)
                 .add("grpc-accept-encoding", SERVER_ACCEPT_ENCODING);
         if (responseEncoding != null) {
             builder.add("grpc-encoding", responseEncoding);
@@ -216,10 +218,7 @@ public final class GrpcCallImpl implements GrpcCall {
         initialHeadersSent = true;
     }
 
-    /**
-     * Percent-encoding RFC 3986 minimal pour {@code grpc-message} (RFC gRPC §"Status codes").
-     * Préserve les caractères imprimables, encode les autres en UTF-8.
-     */
+    /** Identique à {@code GrpcCallImpl.encodePercent} — duplication mineure plutôt qu'un coupling cross-class. */
     private static String encodePercent(String s) {
         var bytes = s.getBytes(java.nio.charset.StandardCharsets.UTF_8);
         var sb = new StringBuilder(bytes.length);
@@ -237,75 +236,11 @@ public final class GrpcCallImpl implements GrpcCall {
     }
 
     /**
-     * Parser du header {@code grpc-timeout} (RFC gRPC §"Requests" — Timeout grammar) :
-     * <pre>{@code Timeout -> TimeoutValue TimeoutUnit
-     * TimeoutValue -> { positive decimal up to 8 digits }
-     * TimeoutUnit -> Hour | Minute | Second | Millisecond | Microsecond | Nanosecond
-     *             -> "H" | "M" | "S" | "m" | "u" | "n"}</pre>
-     *
-     * @return nombre de nanosecondes du timeout, ou {@code -1} si la valeur est absente,
-     *         malformée, négative ou nulle.
+     * Boucle d'exécution du handler avec gestion d'erreur (parallèle à
+     * {@link GrpcCallImpl#run}). Gère codec request inconnu (→ UNIMPLEMENTED
+     * immédiat) et la deadline ({@code grpc-timeout}) via un watchdog virtual thread.
      */
-    public static long parseTimeoutNanos(String value) {
-        if (value == null || value.length() < 2 || value.length() > 9) return -1L;
-        char unit = value.charAt(value.length() - 1);
-        String digits = value.substring(0, value.length() - 1);
-        long n;
-        try {
-            n = Long.parseLong(digits);
-        } catch (NumberFormatException _) {
-            return -1L;
-        }
-        if (n <= 0) return -1L;
-        return switch (unit) {
-            case 'n' -> n;
-            case 'u' -> safeMul(n, 1_000L);
-            case 'm' -> safeMul(n, 1_000_000L);
-            case 'S' -> safeMul(n, 1_000_000_000L);
-            case 'M' -> safeMul(n, 60L * 1_000_000_000L);
-            case 'H' -> safeMul(n, 3_600L * 1_000_000_000L);
-            default -> -1L;
-        };
-    }
-
-    /** Multiplication avec saturation à {@link Long#MAX_VALUE} en cas d'overflow. */
-    private static long safeMul(long a, long b) {
-        try {
-            return Math.multiplyExact(a, b);
-        } catch (ArithmeticException _) {
-            return Long.MAX_VALUE;
-        }
-    }
-
-    /** Gzip-compresse {@code payload}. */
-    static byte[] gzip(byte[] payload) throws IOException {
-        var baos = new ByteArrayOutputStream(payload.length);
-        try (var gz = new GZIPOutputStream(baos)) {
-            gz.write(payload);
-        }
-        return baos.toByteArray();
-    }
-
-    /** Gzip-décompresse {@code compressed}. */
-    static byte[] gunzip(byte[] compressed) throws IOException {
-        try (var gz = new GZIPInputStream(new ByteArrayInputStream(compressed))) {
-            return gz.readAllBytes();
-        }
-    }
-
-    /**
-     * Boucle d'exécution du handler avec gestion d'erreur : si le handler sort sans
-     * avoir appelé complete, on envoie INTERNAL avec le message d'exception.
-     * <p>
-     * Si la requête portait un {@code grpc-timeout}, un watchdog virtual thread est
-     * démarré en parallèle : à expiration il annule le stream (déblocage de
-     * {@link GrpcCall#receive()}) puis tente {@link GrpcCall#complete} avec
-     * {@link GrpcStatus#DEADLINE_EXCEEDED}. Le CAS sur {@code completed} garantit
-     * qu'au plus un statut final est émis.
-     */
-    public static void run(GrpcCallImpl call, io.vidocq.chappe.api.GrpcHandler handler) {
-        // Court-circuit : codec request inconnu -> UNIMPLEMENTED immédiat,
-        // sans même appeler le handler (RFC gRPC §"Compression").
+    public static void run(GrpcWebCallImpl call, io.vidocq.chappe.api.GrpcHandler handler) {
         if (call.requestEncodingUnsupported) {
             String clientEnc = call.request.headers().firstOrNull("grpc-encoding");
             try {
@@ -322,22 +257,20 @@ public final class GrpcCallImpl implements GrpcCall {
         if (call.deadlineNanoTime >= 0L) {
             final long deadline = call.deadlineNanoTime;
             watchdog = Thread.ofVirtual()
-                    .name("chappe-grpc-deadline-" + call.stream.streamId())
+                    .name("chappe-grpcweb-deadline-" + call.stream.streamId())
                     .start(() -> {
                         try {
                             long sleepNanos = deadline - System.nanoTime();
                             if (sleepNanos > 0L) Thread.sleep(Duration.ofNanos(sleepNanos));
                             if (call.completed.get()) return;
-                            // Annule d'abord le stream : débloque un handler bloqué dans receive()
-                            // et signale isCancelled() pour les boucles qui poll.
                             call.stream.cancel();
                             try {
                                 call.complete(GrpcStatus.DEADLINE_EXCEEDED, "deadline exceeded");
                             } catch (IOException _) {
-                                // connexion perdue ; rien à faire
+                                // connexion perdue
                             }
                         } catch (InterruptedException _) {
-                            // watchdog arrêté car le handler a fini avant la deadline
+                            // watchdog arrêté car handler a fini avant deadline
                         }
                     });
         }

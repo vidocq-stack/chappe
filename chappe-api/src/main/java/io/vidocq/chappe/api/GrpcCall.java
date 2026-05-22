@@ -1,6 +1,8 @@
 package io.vidocq.chappe.api;
 
 import java.io.IOException;
+import java.time.Duration;
+import java.util.Optional;
 
 /**
  * Représente un appel gRPC en cours côté serveur.
@@ -81,4 +83,40 @@ public interface GrpcCall {
 
     /** Content-type négocié, ex. {@code application/grpc}, {@code application/grpc+proto}. */
     String contentType();
+
+    /**
+     * Active la compression des messages sortants (RFC gRPC §"Compression").
+     * <p>
+     * Doit être appelé <b>avant</b> le premier {@link #send(byte[])} sinon les headers
+     * initiaux auront déjà été émis. La couche transport ajoute alors :
+     * <ul>
+     *   <li>{@code grpc-encoding: <encoding>} aux headers initiaux serveur</li>
+     *   <li>flag {@code compressed=1} dans le préfixe 5 octets de chaque message envoyé</li>
+     * </ul>
+     * En réception, le serveur déclare toujours {@code grpc-accept-encoding: identity,gzip}
+     * et décompresse automatiquement les messages entrants compressés selon le
+     * {@code grpc-encoding} du client.
+     *
+     * @param encoding codec — actuellement {@code "identity"} (no-op) ou {@code "gzip"}
+     * @throws IllegalStateException         si les headers initiaux ont déjà été émis
+     * @throws UnsupportedOperationException si {@code encoding} n'est pas supporté
+     */
+    void useResponseEncoding(String encoding);
+
+    /**
+     * Deadline propagée par le client via le header {@code grpc-timeout} (RFC gRPC §"Requests").
+     * <p>
+     * Si présent, la couche transport Chappe arme automatiquement un watchdog : à
+     * l'expiration, le stream est annulé (débloque les {@link #receive()} en cours) et un
+     * trailer {@code grpc-status: 4 (DEADLINE_EXCEEDED)} est émis vers le client si le
+     * handler n'avait pas encore appelé {@link #complete(int, String)}.
+     * <p>
+     * Le handler peut consulter cette valeur pour adapter son comportement — par exemple
+     * raccourcir la deadline d'un appel downstream.
+     *
+     * @return durée restante depuis {@link System#nanoTime()}, ou {@link Optional#empty()} si
+     *         le client n'a pas envoyé de {@code grpc-timeout}. Peut être {@link Duration#ZERO}
+     *         si la deadline est déjà expirée au moment de l'appel.
+     */
+    Optional<Duration> deadline();
 }

@@ -164,11 +164,81 @@ final class DefaultRouterBuilder implements Router.Builder {
                 return Response.of(StatusCode.HTTP_VERSION_NOT_SUPPORTED);
             }
             var ct = request.headers().firstOrNull("content-type");
-            if (ct == null || !ct.regionMatches(true, 0, "application/grpc", 0, "application/grpc".length())) {
+            if (ct == null || !isGrpcContentType(ct) || isGrpcWebContentType(ct)) {
                 return Response.of(StatusCode.UNSUPPORTED_MEDIA_TYPE);
             }
             return new GrpcDispatch(handler);
         });
+    }
+
+    @Override
+    public Router.Builder grpcWeb(String pattern, GrpcHandler handler) {
+        return route(HttpMethod.POST, pattern, request -> {
+            var ct = request.headers().firstOrNull("content-type");
+            if (ct == null) {
+                return Response.of(StatusCode.UNSUPPORTED_MEDIA_TYPE);
+            }
+            String lower = ct.toLowerCase();
+            GrpcWebDispatch.Mode mode;
+            if (lower.startsWith("application/grpc-web-text")) {
+                mode = GrpcWebDispatch.Mode.TEXT;
+            } else if (lower.startsWith("application/grpc-web")) {
+                mode = GrpcWebDispatch.Mode.BINARY;
+            } else {
+                return Response.of(StatusCode.UNSUPPORTED_MEDIA_TYPE);
+            }
+
+            // En HTTP/2 : marker GrpcWebDispatch -> dispatch streaming via Http2Connection
+            // (frames émises au fil de l'eau côté DATA frames H2).
+            if (request.version() == HttpVersion.HTTP_2) {
+                return new GrpcWebDispatch(handler, mode);
+            }
+
+            // En HTTP/1.1 : Response standard avec Body.ofOutputStream callback.
+            // Le handler tourne dans le callback, les frames sont écrites en chunked
+            // transfer encoding au fur et à mesure. gRPC-Web sur H1 est l'usage navigateur
+            // typique (XHR/fetch POST, response chunked).
+            String responseContentType =
+                    (mode == GrpcWebDispatch.Mode.TEXT) ? "application/grpc-web-text" : "application/grpc-web";
+            return Response.builder()
+                    .status(StatusCode.OK)
+                    .header("content-type", responseContentType)
+                    .header("grpc-accept-encoding", GrpcWebBufferedCall.acceptEncodingHeader())
+                    .body(Body.ofOutputStream(out -> runGrpcWebBuffered(request, out, mode, handler)))
+                    .build();
+        });
+    }
+
+    private static void runGrpcWebBuffered(
+            Request request, java.io.OutputStream out, GrpcWebDispatch.Mode mode, GrpcHandler handler) {
+        GrpcWebBufferedCall call;
+        try {
+            call = new GrpcWebBufferedCall(request, out, mode);
+        } catch (java.io.IOException e) {
+            throw new RuntimeException(e);
+        }
+        try {
+            handler.handle(call);
+            if (!call.isCompleted()) {
+                call.complete(GrpcStatus.OK, "");
+            }
+        } catch (Exception e) {
+            if (!call.isCompleted()) {
+                try {
+                    call.complete(GrpcStatus.INTERNAL, String.valueOf(e.getMessage()));
+                } catch (java.io.IOException _) {
+                    // connexion perdue
+                }
+            }
+        }
+    }
+
+    private static boolean isGrpcContentType(String ct) {
+        return ct.regionMatches(true, 0, "application/grpc", 0, "application/grpc".length());
+    }
+
+    private static boolean isGrpcWebContentType(String ct) {
+        return ct.regionMatches(true, 0, "application/grpc-web", 0, "application/grpc-web".length());
     }
 
     @Override
