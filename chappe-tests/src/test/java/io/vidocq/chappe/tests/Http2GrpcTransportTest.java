@@ -241,7 +241,79 @@ class Http2GrpcTransportTest {
     }
 
     // ------------------------------------------------------------------
-    // 7. Refus HTTP/1.1 → 505 HTTP Version Not Supported
+    // 7a. grpc-timeout : handler dépasse la deadline → trailers DEADLINE_EXCEEDED (4)
+    //     Le watchdog doit interrompre receive() et émettre les trailers
+    //     bien avant que le handler ne finisse son sleep.
+    // ------------------------------------------------------------------
+    @Test
+    void deadlineExceededViaGrpcTimeout() throws Exception {
+        startServer("/slow", call -> {
+            try {
+                Thread.sleep(5_000); // bien plus long que la deadline de 200ms
+            } catch (InterruptedException _) {
+                // cancel via watchdog → InterruptedException ignored, handler sort
+            }
+            // Volontairement pas de complete : le watchdog l'a déjà fait.
+        });
+
+        try (var socket = new Socket()) {
+            connectAndHandshake(socket);
+            var in = new DataInputStream(socket.getInputStream());
+            var out = new DataOutputStream(socket.getOutputStream());
+
+            long t0 = System.nanoTime();
+            sendGrpcRequestHeadersWithTimeout(out, 1, "/slow", false, "200m");
+            writeFrame(out, TYPE_DATA, FLAG_END_STREAM, 1, GrpcFrameWriter.encode("x".getBytes(StandardCharsets.UTF_8)));
+            out.flush();
+            var seq = readUntilEndStream(in, 1);
+            long elapsedMs = (System.nanoTime() - t0) / 1_000_000;
+
+            assertEquals("4", seq.trailers().get("grpc-status"),
+                    "grpc-status doit être DEADLINE_EXCEEDED (4)");
+            assertEquals("deadline exceeded", seq.trailers().get("grpc-message"));
+            assertTrue(elapsedMs < 2_000,
+                    "trailers devraient arriver bien avant 2s (effectif=" + elapsedMs + "ms)");
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 7b. grpc-timeout respectée : handler termine avant deadline → OK (0)
+    //     Vérifie que le watchdog est interrompu proprement et n'écrase
+    //     pas le statut OK du handler.
+    // ------------------------------------------------------------------
+    @Test
+    void deadlineRespectedReturnsOk() throws Exception {
+        var observedDeadline = new AtomicReference<String>();
+        startServer("/fast", call -> {
+            observedDeadline.set(call.deadline()
+                    .map(d -> d.toMillis() + "ms")
+                    .orElse("<none>"));
+            byte[] req = call.receive();
+            call.send(req);
+            call.complete(GrpcStatus.OK, "");
+        });
+
+        try (var socket = new Socket()) {
+            connectAndHandshake(socket);
+            var in = new DataInputStream(socket.getInputStream());
+            var out = new DataOutputStream(socket.getOutputStream());
+
+            sendGrpcRequestHeadersWithTimeout(out, 1, "/fast", false, "10S");
+            writeFrame(out, TYPE_DATA, FLAG_END_STREAM, 1, GrpcFrameWriter.encode("hi".getBytes(StandardCharsets.UTF_8)));
+            out.flush();
+            var seq = readUntilEndStream(in, 1);
+
+            assertEquals("0", seq.trailers().get("grpc-status"));
+            assertArrayEquals("hi".getBytes(StandardCharsets.UTF_8), decodeOneGrpcMessage(seq.body.toByteArray()));
+            // Le handler doit avoir vu une deadline non-vide.
+            assertNotNull(observedDeadline.get());
+            assertNotEquals("<none>", observedDeadline.get(),
+                    "le handler doit observer la deadline propagée par le client");
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 8. Refus HTTP/1.1 → 505 HTTP Version Not Supported
     // ------------------------------------------------------------------
     @Test
     void rejectHttp11With505() throws Exception {
@@ -289,6 +361,20 @@ class Http2GrpcTransportTest {
         sendGrpcRequestHeaders(out, streamId, path, false);
         writeFrame(out, TYPE_DATA, endStream ? FLAG_END_STREAM : 0, streamId, body);
         out.flush();
+    }
+
+    private static void sendGrpcRequestHeadersWithTimeout(
+            DataOutputStream out, int streamId, String path, boolean endStream, String timeout) throws IOException {
+        var hb = new ByteArrayOutputStream();
+        writeLiteral(hb, ":method", "POST");
+        writeLiteral(hb, ":scheme", "http");
+        writeLiteral(hb, ":authority", "127.0.0.1");
+        writeLiteral(hb, ":path", path);
+        writeLiteral(hb, "content-type", "application/grpc");
+        writeLiteral(hb, "te", "trailers");
+        writeLiteral(hb, "grpc-timeout", timeout);
+        int flags = FLAG_END_HEADERS | (endStream ? FLAG_END_STREAM : 0);
+        writeFrame(out, TYPE_HEADERS, flags, streamId, hb.toByteArray());
     }
 
     private static void sendGrpcRequestHeaders(DataOutputStream out, int streamId, String path, boolean endStream)

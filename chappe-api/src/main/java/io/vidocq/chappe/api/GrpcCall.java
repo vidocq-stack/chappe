@@ -1,6 +1,8 @@
 package io.vidocq.chappe.api;
 
 import java.io.IOException;
+import java.time.Duration;
+import java.util.Optional;
 
 /**
  * Représente un appel gRPC en cours côté serveur.
@@ -81,4 +83,21 @@ public interface GrpcCall {
 
     /** Content-type négocié, ex. {@code application/grpc}, {@code application/grpc+proto}. */
     String contentType();
+
+    /**
+     * Deadline propagée par le client via le header {@code grpc-timeout} (RFC gRPC §"Requests").
+     * <p>
+     * Si présent, la couche transport Chappe arme automatiquement un watchdog : à
+     * l'expiration, le stream est annulé (débloque les {@link #receive()} en cours) et un
+     * trailer {@code grpc-status: 4 (DEADLINE_EXCEEDED)} est émis vers le client si le
+     * handler n'avait pas encore appelé {@link #complete(int, String)}.
+     * <p>
+     * Le handler peut consulter cette valeur pour adapter son comportement — par exemple
+     * raccourcir la deadline d'un appel downstream.
+     *
+     * @return durée restante depuis {@link System#nanoTime()}, ou {@link Optional#empty()} si
+     *         le client n'a pas envoyé de {@code grpc-timeout}. Peut être {@link Duration#ZERO}
+     *         si la deadline est déjà expirée au moment de l'appel.
+     */
+    Optional<Duration> deadline();
 }

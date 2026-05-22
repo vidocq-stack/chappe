@@ -95,7 +95,7 @@
 - [x] Cancellation : `Http2Stream.cancel()` câblé dans `handleRstStream`, exposé via `GrpcCall.isCancelled()`
 - [x] Tests `Http2GrpcTransportTest` : 7 scénarios (unary, server-stream, client-stream, bidi 3/3, handler-error, trailers-only, reject HTTP/1.1)
 - [ ] Compression `grpc-encoding: gzip` (TODO, déféré — `identity` seul au v1)
-- [ ] `grpc-timeout` deadline propagation (TODO, déféré)
+- [x] `grpc-timeout` deadline propagation : parser RFC (H/M/S/m/u/n, saturation overflow), watchdog virtual thread, cancel stream + trailers DEADLINE_EXCEEDED (4) si handler dépasse, exposé via `GrpcCall.deadline()` (Optional<Duration>) ; tests : `GrpcTimeoutParserTest` (13) + `deadlineExceededViaGrpcTimeout` + `deadlineRespectedReturnsOk`
 - [ ] gRPC-Web (framing base64 pour navigateurs, TODO)
 - [ ] Client gRPC (API symétrique, TODO — pour l'instant tests via H2 raw)
 - [x] Conformité protocole : `grpcurl` cross-impl — `GrpcurlConformanceTest` (2 scénarios : unary echo + erreur handler → INTERNAL ; skip propre si binaire absent)

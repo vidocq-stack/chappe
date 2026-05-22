@@ -2,6 +2,9 @@ package io.vidocq.chappe.http.grpc;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.time.Duration;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import io.vidocq.chappe.api.GrpcCall;
 import io.vidocq.chappe.api.GrpcStatus;
@@ -24,11 +27,13 @@ public final class GrpcCallImpl implements GrpcCall {
     private final GrpcFrameReader frameReader;
     private final InputStream bodyStream;
     private final String contentType;
+    private final long deadlineNanoTime;
 
     private final Headers.Builder responseHeadersBuilder = Headers.builder();
     private final Headers.Builder responseTrailersBuilder = Headers.builder();
+    private final Object writeLock = new Object();
+    private final AtomicBoolean completed = new AtomicBoolean(false);
     private boolean initialHeadersSent;
-    private boolean completed;
 
     public GrpcCallImpl(Http2Stream stream, HttpRequestImpl request, Http2Connection connection) {
         this.stream = stream;
@@ -38,6 +43,14 @@ public final class GrpcCallImpl implements GrpcCall {
         this.bodyStream = stream.createBody().asInputStream();
         var ct = request.headers().firstOrNull("content-type");
         this.contentType = (ct != null) ? ct : "application/grpc";
+
+        long deadlineNs = -1L;
+        var timeoutHeader = request.headers().firstOrNull("grpc-timeout");
+        if (timeoutHeader != null) {
+            long nanos = parseTimeoutNanos(timeoutHeader);
+            if (nanos > 0) deadlineNs = System.nanoTime() + nanos;
+        }
+        this.deadlineNanoTime = deadlineNs;
     }
 
     @Override
@@ -47,46 +60,49 @@ public final class GrpcCallImpl implements GrpcCall {
 
     @Override
     public void send(byte[] message) throws IOException {
-        if (completed) throw new IllegalStateException("call already completed");
-        ensureInitialHeadersSent();
-        byte[] framed = GrpcFrameWriter.encode(message);
-        connection.sendDataChunked(stream, framed, 0, framed.length, false);
+        synchronized (writeLock) {
+            if (completed.get()) throw new IllegalStateException("call already completed");
+            ensureInitialHeadersSent();
+            byte[] framed = GrpcFrameWriter.encode(message);
+            connection.sendDataChunked(stream, framed, 0, framed.length, false);
+        }
     }
 
     @Override
     public void complete(int grpcStatus, String message) throws IOException {
-        if (completed) return;
-        completed = true;
+        synchronized (writeLock) {
+            if (!completed.compareAndSet(false, true)) return;
 
-        responseTrailersBuilder.add("grpc-status", Integer.toString(grpcStatus));
-        if (message != null && !message.isEmpty()) {
-            responseTrailersBuilder.add("grpc-message", encodePercent(message));
-        }
-
-        if (!initialHeadersSent) {
-            // Trailers-only response (RFC gRPC §"Responses") :
-            // un seul HEADERS frame contenant :status, content-type et grpc-status, END_STREAM=1.
-            var combined = Headers.builder()
-                    .add("content-type", "application/grpc")
-                    .add("grpc-status", Integer.toString(grpcStatus));
+            responseTrailersBuilder.add("grpc-status", Integer.toString(grpcStatus));
             if (message != null && !message.isEmpty()) {
-                combined.add("grpc-message", encodePercent(message));
+                responseTrailersBuilder.add("grpc-message", encodePercent(message));
             }
-            // Headers applicatifs déclarés via addHeader avant complete
-            for (var entry : responseHeadersBuilder.build()) {
-                combined.add(entry.name(), entry.value());
-            }
-            byte[] encoded = connection.hpackEncoder().encode(200, combined.build());
-            connection.frameWriter().writeHeaders(stream.streamId(), encoded, true);
-            initialHeadersSent = true;
-            stream.halfCloseLocal();
-            return;
-        }
 
-        // Streaming terminé : émettre les trailers HEADERS séparés avec END_STREAM=1.
-        byte[] encodedTrailers = connection.hpackEncoder().encodeTrailers(responseTrailersBuilder.build());
-        connection.frameWriter().writeHeaders(stream.streamId(), encodedTrailers, true);
-        stream.halfCloseLocal();
+            if (!initialHeadersSent) {
+                // Trailers-only response (RFC gRPC §"Responses") :
+                // un seul HEADERS frame contenant :status, content-type et grpc-status, END_STREAM=1.
+                var combined = Headers.builder()
+                        .add("content-type", "application/grpc")
+                        .add("grpc-status", Integer.toString(grpcStatus));
+                if (message != null && !message.isEmpty()) {
+                    combined.add("grpc-message", encodePercent(message));
+                }
+                // Headers applicatifs déclarés via addHeader avant complete
+                for (var entry : responseHeadersBuilder.build()) {
+                    combined.add(entry.name(), entry.value());
+                }
+                byte[] encoded = connection.hpackEncoder().encode(200, combined.build());
+                connection.frameWriter().writeHeaders(stream.streamId(), encoded, true);
+                initialHeadersSent = true;
+                stream.halfCloseLocal();
+                return;
+            }
+
+            // Streaming terminé : émettre les trailers HEADERS séparés avec END_STREAM=1.
+            byte[] encodedTrailers = connection.hpackEncoder().encodeTrailers(responseTrailersBuilder.build());
+            connection.frameWriter().writeHeaders(stream.streamId(), encodedTrailers, true);
+            stream.halfCloseLocal();
+        }
     }
 
     @Override
@@ -104,7 +120,7 @@ public final class GrpcCallImpl implements GrpcCall {
 
     @Override
     public void addTrailer(String name, String value) {
-        if (completed) {
+        if (completed.get()) {
             throw new IllegalStateException("call already completed");
         }
         responseTrailersBuilder.add(name, value);
@@ -118,6 +134,13 @@ public final class GrpcCallImpl implements GrpcCall {
     @Override
     public String contentType() {
         return contentType;
+    }
+
+    @Override
+    public Optional<Duration> deadline() {
+        if (deadlineNanoTime < 0) return Optional.empty();
+        long remaining = deadlineNanoTime - System.nanoTime();
+        return Optional.of(remaining > 0 ? Duration.ofNanos(remaining) : Duration.ZERO);
     }
 
     /**
@@ -156,23 +179,95 @@ public final class GrpcCallImpl implements GrpcCall {
     }
 
     /**
+     * Parser du header {@code grpc-timeout} (RFC gRPC §"Requests" — Timeout grammar) :
+     * <pre>{@code Timeout -> TimeoutValue TimeoutUnit
+     * TimeoutValue -> { positive decimal up to 8 digits }
+     * TimeoutUnit -> Hour | Minute | Second | Millisecond | Microsecond | Nanosecond
+     *             -> "H" | "M" | "S" | "m" | "u" | "n"}</pre>
+     *
+     * @return nombre de nanosecondes du timeout, ou {@code -1} si la valeur est absente,
+     *         malformée, négative ou nulle.
+     */
+    public static long parseTimeoutNanos(String value) {
+        if (value == null || value.length() < 2 || value.length() > 9) return -1L;
+        char unit = value.charAt(value.length() - 1);
+        String digits = value.substring(0, value.length() - 1);
+        long n;
+        try {
+            n = Long.parseLong(digits);
+        } catch (NumberFormatException _) {
+            return -1L;
+        }
+        if (n <= 0) return -1L;
+        return switch (unit) {
+            case 'n' -> n;
+            case 'u' -> safeMul(n, 1_000L);
+            case 'm' -> safeMul(n, 1_000_000L);
+            case 'S' -> safeMul(n, 1_000_000_000L);
+            case 'M' -> safeMul(n, 60L * 1_000_000_000L);
+            case 'H' -> safeMul(n, 3_600L * 1_000_000_000L);
+            default -> -1L;
+        };
+    }
+
+    /** Multiplication avec saturation à {@link Long#MAX_VALUE} en cas d'overflow. */
+    private static long safeMul(long a, long b) {
+        try {
+            return Math.multiplyExact(a, b);
+        } catch (ArithmeticException _) {
+            return Long.MAX_VALUE;
+        }
+    }
+
+    /**
      * Boucle d'exécution du handler avec gestion d'erreur : si le handler sort sans
      * avoir appelé complete, on envoie INTERNAL avec le message d'exception.
+     * <p>
+     * Si la requête portait un {@code grpc-timeout}, un watchdog virtual thread est
+     * démarré en parallèle : à expiration il annule le stream (déblocage de
+     * {@link GrpcCall#receive()}) puis tente {@link GrpcCall#complete} avec
+     * {@link GrpcStatus#DEADLINE_EXCEEDED}. Le CAS sur {@code completed} garantit
+     * qu'au plus un statut final est émis.
      */
     public static void run(GrpcCallImpl call, io.vidocq.chappe.api.GrpcHandler handler) {
+        Thread watchdog = null;
+        if (call.deadlineNanoTime >= 0L) {
+            final long deadline = call.deadlineNanoTime;
+            watchdog = Thread.ofVirtual()
+                    .name("chappe-grpc-deadline-" + call.stream.streamId())
+                    .start(() -> {
+                        try {
+                            long sleepNanos = deadline - System.nanoTime();
+                            if (sleepNanos > 0L) Thread.sleep(Duration.ofNanos(sleepNanos));
+                            if (call.completed.get()) return;
+                            // Annule d'abord le stream : débloque un handler bloqué dans receive()
+                            // et signale isCancelled() pour les boucles qui poll.
+                            call.stream.cancel();
+                            try {
+                                call.complete(GrpcStatus.DEADLINE_EXCEEDED, "deadline exceeded");
+                            } catch (IOException _) {
+                                // connexion perdue ; rien à faire
+                            }
+                        } catch (InterruptedException _) {
+                            // watchdog arrêté car le handler a fini avant la deadline
+                        }
+                    });
+        }
         try {
             handler.handle(call);
-            if (!call.completed) {
+            if (!call.completed.get()) {
                 call.complete(GrpcStatus.OK, "");
             }
         } catch (Exception e) {
-            if (!call.completed) {
+            if (!call.completed.get()) {
                 try {
                     call.complete(GrpcStatus.INTERNAL, String.valueOf(e.getMessage()));
                 } catch (IOException _) {
                     // connexion perdue
                 }
             }
+        } finally {
+            if (watchdog != null) watchdog.interrupt();
         }
     }
 }
