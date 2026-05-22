@@ -14,6 +14,7 @@ de fondation aux futurs projets JAX-RS et Servlet de l'écosystème Vidocq.
 - **HTTP/2** — RFC 9113 (multiplexage, HPACK Huffman, flow control, CONTINUATION)
 - **HTTPS** — TLS via SSLContext/SSLEngine, ALPN h2 + http/1.1
 - **WebSocket** — RFC 6455 sur HTTP/1.1 (handshake `Sec-WebSocket-Accept`, framing TEXT/BINARY/PING/PONG/CLOSE, fragmentation, validation UTF-8, masking client obligatoire, close handshake bilatéral, auto-PONG)
+- **gRPC (transport)** — framing core (préfixe 5 octets) sur HTTP/2 + trailers (RFC 9113 §8.1) ; 4 modes (unary, server-stream, client-stream, bidi) ; SPI `GrpcCall` byte-level ; sérialisation (protobuf, JSON…) déléguée aux extensions (`champollion` pour protobuf)
 - **HTTP/3** — RFC 9114 (objectif futur, QUIC via JDK 26+)
 
 ### Architecture
@@ -33,19 +34,20 @@ le lifecycle des composants. Chappe lui-même utilise `ServiceLoader` (pas CDI).
 ### Modules
 | Module | Description |
 |---|---|
-| `chappe-api` | API publique : `Server`, `Router`, `Handler`, `Request`, `Response`, `Filter`, `StaticFileHandler`, `MimeTypes`, `AcceptEncoding`, `RequestContext`, `WebSocket`, `WebSocketHandler`, `CloseCodes` |
-| `chappe-http` | Protocoles HTTP/1.1, HTTP/2 et WebSocket (RFC 6455), SslHandler TLS, ByteBufferPool |
+| `chappe-api` | API publique : `Server`, `Router`, `Handler`, `Request`, `Response`, `Filter`, `StaticFileHandler`, `MimeTypes`, `AcceptEncoding`, `RequestContext`, `WebSocket`, `WebSocketHandler`, `CloseCodes`, `GrpcHandler`, `GrpcCall`, `GrpcStatus` |
+| `chappe-http` | Protocoles HTTP/1.1, HTTP/2 (avec trailers), WebSocket (RFC 6455) et gRPC core (transport, sous-package `grpc`), SslHandler TLS, ByteBufferPool |
 | `chappe-core` | Moteur serveur, virtual threads, protocol detection, lifecycle |
 | `chappe-cli` | Launcher CLI standalone `chappe serve` (mini-YAML, fat jar, jlink) — voir `chappe-cli/README.md` |
 | `chappe-tests` | Tests d'intégration |
 | `chappe-bench` | Benchmarks : comparatif Jetty/Helidon/JDK, throughput/latence |
-| `chappe-conformance` | Suite de conformité HTTP/WS (53 tests RFC 9110/9112/9113/6455) |
+| `chappe-conformance` | Suite de conformité HTTP/WS (53 tests RFC 9110/9112/9113/6455) ; tests gRPC dans `chappe-tests/Http2GrpcTransportTest` |
 | `chappe-examples` | Exemples d'utilisation |
 | `chappe-static-index-maven-plugin` | Plugin Maven : index O(1) + sidecars `.gz` au build (`<compress>gzip</compress>`) |
 
 ### Extension SPI
-Chappe fournit les hooks pour les extensions Servlet/JAX-RS/WebSocket :
+Chappe fournit les hooks pour les extensions Servlet/JAX-RS/WebSocket/gRPC :
 - **`Router.webSocket(pattern, handler)`** — endpoint WebSocket RFC 6455 (handshake automatique, frames TEXT/BINARY/PING/PONG/CLOSE, fragmentation, validation UTF-8, sous-protocole optionnel)
+- **`Router.grpc(pattern, GrpcHandler)`** — endpoint gRPC transport-only ; expose `GrpcCall.receive()/send()/complete(status, msg)` byte-level (la sérialisation protobuf/JSON est à la charge de l'extension, p.ex. `champollion`) ; refuse HTTP/1.1 avec 505 et content-type non-grpc avec 415
 - **`Router.mount(prefix, handler)`** — enregistrement par path prefix avec stripping automatique
 - **`Request.contextPath()`/`pathInfo()`** — path relatif au mount point
 - **`Request.attribute(key, value)`** — attributs mutables per-request (Servlet compat)

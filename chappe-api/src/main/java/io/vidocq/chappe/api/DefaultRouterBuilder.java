@@ -157,6 +157,21 @@ final class DefaultRouterBuilder implements Router.Builder {
     }
 
     @Override
+    public Router.Builder grpc(String pattern, GrpcHandler handler) {
+        return route(HttpMethod.POST, pattern, request -> {
+            // gRPC exige HTTP/2.
+            if (request.version() != HttpVersion.HTTP_2) {
+                return Response.of(StatusCode.HTTP_VERSION_NOT_SUPPORTED);
+            }
+            var ct = request.headers().firstOrNull("content-type");
+            if (ct == null || !ct.regionMatches(true, 0, "application/grpc", 0, "application/grpc".length())) {
+                return Response.of(StatusCode.UNSUPPORTED_MEDIA_TYPE);
+            }
+            return new GrpcDispatch(handler);
+        });
+    }
+
+    @Override
     public Router.Builder notFound(Handler handler) {
         this.notFoundHandler = handler;
         return this;

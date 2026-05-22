@@ -72,6 +72,7 @@ void main() {
 - **HTTP/2** — RFC 9113 (multiplexage, HPACK, flow control, CONTINUATION)
 - **HTTPS** — TLS via SSLContext/SSLEngine, ALPN (h2 + http/1.1)
 - **WebSocket** — RFC 6455 sur HTTP/1.1 (handshake `Sec-WebSocket-Accept`, framing TEXT/BINARY, fragmentation, validation UTF-8, masking client obligatoire, close handshake, auto-PONG)
+- **gRPC (transport)** — framing core (préfixe 5 octets) sur HTTP/2 + trailers ; 4 modes (unary, server-stream, client-stream, bidi) ; SPI `GrpcCall` byte-level — sérialisation (protobuf, JSON…) déléguée à l'application ou à une extension dédiée (`champollion`)
 
 ### Routage
 ```java
@@ -315,6 +316,48 @@ Garanties du runtime :
 Constantes utiles dans `CloseCodes` : `NORMAL_CLOSURE` (1000), `GOING_AWAY` (1001),
 `PROTOCOL_ERROR` (1002), `INVALID_PAYLOAD_DATA` (1007), `POLICY_VIOLATION` (1008),
 `MESSAGE_TOO_BIG` (1009), `INTERNAL_ERROR` (1011).
+
+### gRPC (transport core)
+
+Chappe implémente la **couche transport** gRPC : framing core (préfixe 5 octets) sur
+HTTP/2 + trailers (RFC 9113 §8.1), sans dépendance protobuf. La sérialisation est à la
+charge du handler (ou d'une extension comme `champollion` pour protobuf).
+
+```java
+var router = Router.builder()
+    .grpc("/myservice.MyService/Echo", call -> {
+        byte[] req = call.receive();        // 1 message in (unary / client-stream loop)
+        byte[] resp = handleEcho(req);      // logique applicative
+        call.send(resp);                    // 1 ou N messages out
+        call.complete(GrpcStatus.OK, "");   // émet les trailers grpc-status
+    })
+    .build();
+```
+
+Modes supportés (la même SPI couvre les 4) :
+- **Unary** : `receive()` une fois, `send()` une fois, `complete()`
+- **Server-streaming** : `receive()` une fois, `send()` N fois, `complete()`
+- **Client-streaming** : `while ((m = receive()) != null) accumulate(m)`, `send()`, `complete()`
+- **Bidi** : `receive()` / `send()` entrelacés ; lancer un second virtual thread si besoin de full-duplex
+
+Garanties du runtime :
+- **Refus défensif HTTP/1.1** — une requête sur un endpoint gRPC en HTTP/1.1 retourne
+  `505 HTTP Version Not Supported`. `content-type` différent de `application/grpc...`
+  retourne `415 Unsupported Media Type`.
+- **Trailers-Only response** — si le handler appelle `complete()` sans aucun `send()`,
+  un seul HEADERS frame est émis avec `:status 200`, `content-type: application/grpc`,
+  `grpc-status: <code>` et `END_STREAM=1` (pattern d'erreur précoce).
+- **Flow control** — `send()` bloque naturellement sur le flow control HTTP/2 ; aucun
+  buffer non-borné côté serveur.
+- **Cancellation** — un `RST_STREAM` client positionne `call.isCancelled()` à `true`.
+- **Erreur handler** — si le handler lève une exception sans avoir appelé `complete`,
+  la couche transport émet automatiquement `grpc-status: 13 (INTERNAL)`.
+
+Hors scope v1 (à implémenter dans les extensions ou plus tard) :
+- compression `grpc-encoding: gzip|deflate` (seul `identity` supporté)
+- `grpc-timeout` (deadline propagation)
+- gRPC-Web (framing base64 pour navigateurs)
+- WebSocket sur HTTP/2 (RFC 8441) — non lié à gRPC mais souvent associé
 
 ## Performance
 

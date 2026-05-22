@@ -78,15 +78,24 @@
 - [ ] permessage-deflate (RFC 7692) — déféré, à brancher comme extension négociée
 - [ ] WebSocket sur HTTP/2 (RFC 8441) — déféré
 
-## Phase 7 : `chappe-grpc` (transport gRPC natif, zéro-dep)
-> Demandé par humboldt (MicroProfile Telemetry 2.1) — voir `humboldt/PLAN.md` §3.5 pour la motivation détaillée. gRPC sur le fil = HTTP/2 (déjà ✅) + trailers (déjà ✅) + framing length-prefixed 5 octets + status codes via trailers. **Aucune dépendance** grpc-java / Netty / perfmark / protobuf-java — la sérialisation reste à la charge de l'appelant.
-- [ ] `chappe-grpc` nouveau module Maven dans le reactor (JPMS `io.vidocq.chappe.grpc`)
-- [ ] Framing length-prefixed : 1 octet `compressed?` + 4 octets big-endian length + payload
-- [ ] Trailers HTTP/2 sortants : `grpc-status` / `grpc-message` (codes RPC standards)
-- [ ] `GrpcRouter` + `GrpcRequest`/`GrpcResponse`/`GrpcContext` (API serveur, calque `Router.mount()`)
-- [ ] `GrpcClient` (API client, calque `HttpClient` JDK, virtual-thread per call)
-- [ ] Unary RPC d'abord ; server-streaming / client-streaming / bidi dans une seconde itération
-- [ ] Compression `gzip` (réutilise `AcceptEncoding` chappe)
-- [ ] Tests d'intégration cross-impl : appel d'un endpoint `grpc.health.v1.Health/Check` exposé par chappe-grpc, validé via `grpcurl` (ou client Go)
-- [ ] Conformité protocole gRPC : spec wire format (https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md)
-- [ ] Doc dans `docs/` (référence et exemple OTLP-Collector)
+## Phase 6.6 : HTTP/2 Trailers (RFC 9113 §8.1) ✅
+- [x] API publique : `Response.trailers()` + `Builder.trailer(name, value)` / `trailers(headers)` ; `Request.trailers()`
+- [x] Envoi serveur : HEADERS frame additionnelle après les DATA frames avec END_STREAM=1, encodage HPACK `encodeTrailers` (pas de pseudo-header)
+- [x] Réception serveur : détection second HEADERS frame sur stream existant via `Http2Stream.markTrailers()`, rejet de pseudo-headers en trailers, exposition via `request.trailers()`
+- [x] Refactor `HpackDecoder.decode(ByteBuffer, HeaderSink)` pour découpler la cible d'écriture
+- [x] Tests `Http2TrailersTest` : 2 scénarios round-trip via client H2 raw (envoi + réception)
+
+## Phase 6.7 : gRPC transport (RFC HTTP/2 + framing core) ✅
+> gRPC sur le fil = HTTP/2 + trailers + framing length-prefixed 5 octets. **Aucune dépendance** grpc-java / Netty / perfmark / protobuf-java. La sérialisation (protobuf, JSON, …) reste à la charge de l'application ou d'une extension dédiée (`champollion` pour protobuf, en parallèle).
+- [x] API publique `chappe-api` : `GrpcHandler`, `GrpcCall` (SPI synchrone bloquante byte-level), `GrpcStatus` (17 codes RFC), `GrpcDispatch` (marker Response), `Router.Builder.grpc(pattern, handler)`
+- [x] Framing core `chappe-http/grpc/` : `GrpcFrameReader` (préfixe 5 octets, rejet `compressed=1`, garde `maxMessageSize=4 MiB`), `GrpcFrameWriter` (encode préfixe + payload), `GrpcFrameException`
+- [x] `GrpcCallImpl` : émission auto-headers (`:status 200`, `content-type: application/grpc`, `grpc-accept-encoding: identity`), trailers avec percent-encoding RFC 3986 sur `grpc-message`, trailers-only fusionné en un seul HEADERS frame, gestion erreur handler → `INTERNAL`
+- [x] Dispatch HTTP/2 : `Http2Connection.dispatchStream` détecte `instanceof GrpcDispatch` et bascule sans `sendResponse`, helpers publics `frameWriter()`/`hpackEncoder()`/`sendDataChunked()` exposés
+- [x] Refus défensif HTTP/1.1 : `DefaultRouterBuilder.grpc()` retourne `505` si version ≠ HTTP/2, `415` si content-type ≠ `application/grpc*` ; `HttpConnection` blinde un cas résiduel
+- [x] Cancellation : `Http2Stream.cancel()` câblé dans `handleRstStream`, exposé via `GrpcCall.isCancelled()`
+- [x] Tests `Http2GrpcTransportTest` : 7 scénarios (unary, server-stream, client-stream, bidi 3/3, handler-error, trailers-only, reject HTTP/1.1)
+- [ ] Compression `grpc-encoding: gzip` (TODO, déféré — `identity` seul au v1)
+- [ ] `grpc-timeout` deadline propagation (TODO, déféré)
+- [ ] gRPC-Web (framing base64 pour navigateurs, TODO)
+- [ ] Client gRPC (API symétrique, TODO — pour l'instant tests via H2 raw)
+- [x] Conformité protocole : `grpcurl` cross-impl — `GrpcurlConformanceTest` (2 scénarios : unary echo + erreur handler → INTERNAL ; skip propre si binaire absent)

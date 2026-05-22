@@ -149,6 +149,13 @@ public final class HttpConnection {
                             .build();
                 }
 
+                // 4a-bis. gRPC nécessite HTTP/2 — refus défensif sur la couche HTTP/1.1.
+                // En pratique le routeur retourne déjà 505 (cf. DefaultRouterBuilder.grpc()),
+                // ce check ne sert que de garde-fou si une extension construit GrpcDispatch ailleurs.
+                if (response instanceof io.vidocq.chappe.api.GrpcDispatch) {
+                    response = Response.of(StatusCode.HTTP_VERSION_NOT_SUPPORTED);
+                }
+
                 // 4a. WebSocket upgrade : bascule en mode frames et termine la boucle HTTP.
                 if (response instanceof WebSocketUpgrade upgrade) {
                     if (bodyStream != null) HttpBodyReader.drain(bodyStream);

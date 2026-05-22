@@ -14,6 +14,7 @@ import java.util.concurrent.locks.ReentrantLock;
 
 import io.vidocq.chappe.api.Body;
 import io.vidocq.chappe.api.Handler;
+import io.vidocq.chappe.api.Headers;
 import io.vidocq.chappe.api.HttpMethod;
 import io.vidocq.chappe.api.RequestContext;
 import io.vidocq.chappe.api.Response;
@@ -217,6 +218,24 @@ public final class Http2Connection {
     private void handleHeaders(Http2Frame.HeadersFrame frame) throws IOException {
         int streamId = frame.streamId();
 
+        // Existing stream → trailers (RFC 9113 §8.1) ; END_STREAM doit être positionné.
+        var existing = streams.get(streamId);
+        if (existing != null) {
+            if (!frame.endStream()) {
+                throw new Http2ConnectionException(
+                        Http2ErrorCode.PROTOCOL_ERROR,
+                        "Trailers HEADERS frame without END_STREAM on stream " + streamId);
+            }
+            existing.markTrailers();
+            existing.beginHeaders(frame.headerBlock(), true);
+            if (frame.endHeaders()) {
+                completeHeaders(existing);
+            } else {
+                expectingContinuationForStream = streamId;
+            }
+            return;
+        }
+
         // Stream ID must be odd (client-initiated) and greater than lastStreamId
         if (streamId % 2 == 0 || streamId <= lastStreamId) {
             throw new Http2ConnectionException(
@@ -262,12 +281,32 @@ public final class Http2Connection {
     }
 
     private void completeHeaders(Http2Stream stream) throws Http2ConnectionException {
-        // Decode HPACK into the request
         ByteBuffer headerBlock = stream.completeHeaderBlock();
-        hpackDecoder.decode(headerBlock, stream.request());
+
+        if (stream.inTrailers()) {
+            // Trailers : décoder dans un Headers.Builder à part, l'attacher à la requête.
+            // RFC 9113 §8.1 : pas de pseudo-header autorisé dans les trailers.
+            var trailersBuilder = Headers.builder();
+            hpackDecoder.decode(headerBlock, (name, value) -> {
+                if (!name.isEmpty() && name.charAt(0) == ':') {
+                    throw new Http2ConnectionException(
+                            Http2ErrorCode.PROTOCOL_ERROR, "Pseudo-header '" + name + "' not allowed in trailers");
+                }
+                trailersBuilder.add(name, value);
+            });
+            stream.request().setTrailers(trailersBuilder.build());
+            // Trailers portent toujours END_STREAM.
+            stream.signalEndStream();
+            stream.halfCloseRemote();
+            return;
+        }
+
+        // Initial HEADERS : décodage direct dans la requête.
+        var req = stream.request();
+        hpackDecoder.decode(headerBlock, req::addHeader);
 
         // Extract pseudo-headers
-        extractPseudoHeaders(stream.request());
+        extractPseudoHeaders(req);
 
         // Half-close remote if END_STREAM was set on HEADERS
         if (stream.headersEndStream()) {
@@ -358,8 +397,7 @@ public final class Http2Connection {
         int streamId = frame.streamId();
         var stream = streams.remove(streamId);
         if (stream != null) {
-            stream.signalEndStream();
-            stream.close();
+            stream.cancel();
         }
     }
 
@@ -389,6 +427,13 @@ public final class Http2Connection {
                 response = Response.of(StatusCode.INTERNAL_SERVER_ERROR);
             }
 
+            // Bascule gRPC : le routeur a retourné un marker GrpcDispatch.
+            if (response instanceof io.vidocq.chappe.api.GrpcDispatch gd) {
+                var call = new io.vidocq.chappe.http.grpc.GrpcCallImpl(stream, request, this);
+                io.vidocq.chappe.http.grpc.GrpcCallImpl.run(call, gd.handler());
+                return; // GrpcCallImpl gère initial headers, DATA, trailers, half-close
+            }
+
             sendResponse(stream, response);
         } catch (IOException _) {
             // Connexion perdue pendant l'écriture de la réponse
@@ -407,10 +452,10 @@ public final class Http2Connection {
         Body body = response.body();
         boolean hasBody = body != null && body.contentLength() != 0;
 
-        // Write HEADERS frame
-        frameWriter.writeHeaders(streamId, encodedHeaders, !hasBody);
-
         if (hasBody) {
+            // HEADERS (sans END_STREAM, le body suit)
+            frameWriter.writeHeaders(streamId, encodedHeaders, false);
+
             try (InputStream is = body.asInputStream()) {
                 byte[] buf = new byte[DATA_CHUNK_SIZE];
                 int read;
@@ -432,9 +477,6 @@ public final class Http2Connection {
                         remaining -= chunkSize;
                     }
                 }
-
-                // Send final empty DATA frame with END_STREAM
-                frameWriter.writeData(streamId, new byte[0], 0, 0, true);
             } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
                 throw new IOException("Interrupted while waiting for flow control window");
@@ -442,7 +484,81 @@ public final class Http2Connection {
                 throw e; // propagée au dispatchStream
             }
 
+            // Trailers calculés APRÈS consommation du body (permet aux impl. streaming de
+            // déterminer les trailers à la fin — ex. grpc-status).
+            Headers trailers = response.trailers();
+            boolean hasTrailers = trailers != null && !trailers.isEmpty();
+
+            if (hasTrailers) {
+                byte[] encodedTrailers = hpackEncoder.encodeTrailers(trailers);
+                // RFC 9113 §8.1 : trailers HEADERS frame avec END_STREAM=1
+                frameWriter.writeHeaders(streamId, encodedTrailers, true);
+            } else {
+                // Final empty DATA frame avec END_STREAM
+                frameWriter.writeData(streamId, new byte[0], 0, 0, true);
+            }
+
             stream.halfCloseLocal();
+        } else {
+            // Pas de body : trailers connus immédiatement (impl. par défaut ne dépend pas du body)
+            Headers trailers = response.trailers();
+            boolean hasTrailers = trailers != null && !trailers.isEmpty();
+
+            if (hasTrailers) {
+                // HEADERS initial sans END_STREAM, puis HEADERS trailers avec END_STREAM
+                frameWriter.writeHeaders(streamId, encodedHeaders, false);
+                byte[] encodedTrailers = hpackEncoder.encodeTrailers(trailers);
+                frameWriter.writeHeaders(streamId, encodedTrailers, true);
+                stream.halfCloseLocal();
+            } else {
+                // Cas usuel : un seul HEADERS avec END_STREAM
+                frameWriter.writeHeaders(streamId, encodedHeaders, true);
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // SPI publique pour transports embarqués (ex. gRPC dans le sous-package grpc)
+    // -------------------------------------------------------------------------
+
+    /** Frame writer partagé — accès direct pour les transports built-in. */
+    public Http2FrameWriter frameWriter() {
+        return frameWriter;
+    }
+
+    /** Encodeur HPACK partagé — accès direct pour les transports built-in. */
+    public HpackEncoder hpackEncoder() {
+        return hpackEncoder;
+    }
+
+    /**
+     * Émet un payload via une ou plusieurs DATA frames, en respectant le flow control H2.
+     * <p>
+     * Utilisé par {@code sendResponse} et par {@code io.vidocq.chappe.http.grpc.GrpcCallImpl}
+     * pour streamer des messages individuels.
+     */
+    public void sendDataChunked(Http2Stream stream, byte[] data, int offset, int len, boolean endStream)
+            throws IOException {
+        if (len == 0) {
+            frameWriter.writeData(stream.streamId(), new byte[0], 0, 0, endStream);
+            return;
+        }
+        int off = offset;
+        int remaining = len;
+        try {
+            while (remaining > 0) {
+                int allowed = waitForSendWindow(stream);
+                int chunk = Math.min(remaining, allowed);
+                boolean last = (remaining - chunk) == 0;
+                frameWriter.writeData(stream.streamId(), data, off, chunk, last && endStream);
+                connectionSendWindow.addAndGet(-chunk);
+                stream.consumeSendWindow(chunk);
+                off += chunk;
+                remaining -= chunk;
+            }
+        } catch (InterruptedException _) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while waiting for flow control window");
         }
     }
 

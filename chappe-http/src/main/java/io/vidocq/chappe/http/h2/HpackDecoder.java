@@ -3,13 +3,17 @@ package io.vidocq.chappe.http.h2;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 
-import io.vidocq.chappe.http.HttpRequestImpl;
-
 /**
  * Décodeur HPACK (RFC 7541) — décode un header block compressé
- * en paires nom/valeur dans un {@link HttpRequestImpl}.
+ * et émet les paires nom/valeur dans un {@link HeaderSink}.
  */
 public final class HpackDecoder {
+
+    /** Sink des paires nom/valeur décodées — peut rejeter via une exception protocole. */
+    @FunctionalInterface
+    public interface HeaderSink {
+        void accept(String name, String value) throws Http2ConnectionException;
+    }
 
     private final HpackDynamicTable dynamicTable;
     private final int maxHeaderListSize;
@@ -20,9 +24,9 @@ public final class HpackDecoder {
     }
 
     /**
-     * Décode un header block complet dans la requête cible.
+     * Décode un header block complet et émet les paires dans le sink.
      */
-    public void decode(ByteBuffer headerBlock, HttpRequestImpl target) throws Http2ConnectionException {
+    public void decode(ByteBuffer headerBlock, HeaderSink sink) throws Http2ConnectionException {
         int totalSize = 0;
 
         while (headerBlock.hasRemaining()) {
@@ -68,7 +72,7 @@ public final class HpackDecoder {
                         Http2ErrorCode.ENHANCE_YOUR_CALM, "Header list exceeds max size " + maxHeaderListSize);
             }
 
-            target.addHeader(name, value);
+            sink.accept(name, value);
         }
     }
 

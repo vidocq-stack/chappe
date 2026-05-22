@@ -47,6 +47,7 @@ public sealed interface StatusCode permits StatusCode.Standard, StatusCode.Custo
     StatusCode BAD_GATEWAY = new Standard(502, "Bad Gateway");
     StatusCode SERVICE_UNAVAILABLE = new Standard(503, "Service Unavailable");
     StatusCode GATEWAY_TIMEOUT = new Standard(504, "Gateway Timeout");
+    StatusCode HTTP_VERSION_NOT_SUPPORTED = new Standard(505, "HTTP Version Not Supported");
 
     /**
      * Retourne un {@code StatusCode} pour le code et la raison donnés.

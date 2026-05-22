@@ -40,9 +40,15 @@ public final class Http2Stream {
     // END_STREAM flag du HEADERS frame (stocké pour completeHeaders après CONTINUATION)
     private volatile boolean headersEndStream;
 
+    // Phase courante d'accumulation de headers : initial vs trailers.
+    // RFC 9113 §8.1 — un stream peut recevoir un second HEADERS frame après les DATA :
+    // ce sont les trailers et ils ne contiennent pas de pseudo-headers.
+    private volatile boolean inTrailers;
+
     // Queue de données pour le body
     private final LinkedBlockingQueue<ByteBuffer> dataQueue = new LinkedBlockingQueue<>();
     private volatile boolean endStreamReceived;
+    private volatile boolean cancelled;
 
     public Http2Stream(int streamId, int initialRecvWindow, int initialSendWindow) {
         this.streamId = streamId;
@@ -81,6 +87,17 @@ public final class Http2Stream {
 
     public void close() {
         state = State.CLOSED;
+    }
+
+    /** Marque le stream comme annulé par le peer (RST_STREAM). */
+    public void cancel() {
+        cancelled = true;
+        signalEndStream();
+        close();
+    }
+
+    public boolean isCancelled() {
+        return cancelled;
     }
 
     // --- Flow control ---
@@ -129,6 +146,15 @@ public final class Http2Stream {
         this.headersEndStream = endStream;
         headerBlockAccumulator = new ByteArrayOutputStream(fragment.remaining() * 2);
         appendHeaderFragment(fragment);
+    }
+
+    /** Marque le prochain block comme étant des trailers (RFC 9113 §8.1). */
+    public void markTrailers() {
+        this.inTrailers = true;
+    }
+
+    public boolean inTrailers() {
+        return inTrailers;
     }
 
     public void appendHeaderFragment(ByteBuffer fragment) {

@@ -8,6 +8,8 @@ final class DefaultResponseBuilder implements Response.Builder {
     private StatusCode status = StatusCode.OK;
     private final Headers.Builder headersBuilder = Headers.builder();
     private Headers headers;
+    private Headers.Builder trailersBuilder;
+    private Headers trailers;
     private Body body = Body.empty();
 
     @Override
@@ -25,6 +27,19 @@ final class DefaultResponseBuilder implements Response.Builder {
     @Override
     public Response.Builder headers(Headers headers) {
         this.headers = headers;
+        return this;
+    }
+
+    @Override
+    public Response.Builder trailer(String name, String value) {
+        if (trailersBuilder == null) trailersBuilder = Headers.builder();
+        trailersBuilder.add(name, value);
+        return this;
+    }
+
+    @Override
+    public Response.Builder trailers(Headers trailers) {
+        this.trailers = trailers;
         return this;
     }
 
@@ -49,6 +64,10 @@ final class DefaultResponseBuilder implements Response.Builder {
     @Override
     public Response build() {
         var h = headers != null ? headers : headersBuilder.build();
-        return new DefaultResponse(status, h, body);
+        Headers t;
+        if (trailers != null) t = trailers;
+        else if (trailersBuilder != null) t = trailersBuilder.build();
+        else t = Headers.empty();
+        return new DefaultResponse(status, h, body, t);
     }
 }
