@@ -42,7 +42,7 @@ flowchart TB
     subgraph apps["Application layers"]
         cassini["Cassini<br/>Jakarta REST 4.0"]
         foy["Foy<br/>Jakarta Servlet 6.1"]
-        vidocq["Vidocq-MPS<br/>orchestrator"]
+        vidocq["Vidocq Runtime<br/>orchestrator"]
     end
     subgraph transport["Transport layer"]
         chappe["**Chappe**<br/>HTTP/1.1 · HTTP/2 · HTTP/3<br/>TLS 1.3 · Virtual Threads"]
