@@ -93,6 +93,22 @@ public interface Router extends Handler {
          */
         Builder grpc(String pattern, GrpcHandler handler);
 
+        /**
+         * Enregistre un endpoint <b>gRPC-Web</b> (PROTOCOL-WEB.md, navigateurs).
+         * <p>
+         * Variante de gRPC où les trailers sont sérialisés inline dans le corps comme une
+         * frame DATA spéciale (préfixe {@code 0x80}), car les navigateurs n'exposent pas
+         * les trailers HTTP/2 à JavaScript. Le content-type du client choisit le mode :
+         * <ul>
+         *   <li>{@code application/grpc-web} → binaire</li>
+         *   <li>{@code application/grpc-web-text} → Base64 (chaque chunk indépendamment)</li>
+         * </ul>
+         * Toute autre valeur → {@code 415}. V1 chappe = HTTP/2 uniquement ({@code 505}
+         * sinon). Le même {@link GrpcHandler} que pour {@link #grpc} est utilisé —
+         * le handler reçoit les bytes décodés, ne se soucie pas de la variante.
+         */
+        Builder grpcWeb(String pattern, GrpcHandler handler);
+
         /** Handler pour les routes non trouvées (404 par défaut). */
         Builder notFound(Handler handler);
 

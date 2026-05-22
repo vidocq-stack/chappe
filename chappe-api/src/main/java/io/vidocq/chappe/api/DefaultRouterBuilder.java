@@ -164,11 +164,43 @@ final class DefaultRouterBuilder implements Router.Builder {
                 return Response.of(StatusCode.HTTP_VERSION_NOT_SUPPORTED);
             }
             var ct = request.headers().firstOrNull("content-type");
-            if (ct == null || !ct.regionMatches(true, 0, "application/grpc", 0, "application/grpc".length())) {
+            if (ct == null || !isGrpcContentType(ct) || isGrpcWebContentType(ct)) {
                 return Response.of(StatusCode.UNSUPPORTED_MEDIA_TYPE);
             }
             return new GrpcDispatch(handler);
         });
+    }
+
+    @Override
+    public Router.Builder grpcWeb(String pattern, GrpcHandler handler) {
+        return route(HttpMethod.POST, pattern, request -> {
+            // V1 chappe : gRPC-Web sur HTTP/2 uniquement (HTTP/1.1 différé à une PR ultérieure).
+            if (request.version() != HttpVersion.HTTP_2) {
+                return Response.of(StatusCode.HTTP_VERSION_NOT_SUPPORTED);
+            }
+            var ct = request.headers().firstOrNull("content-type");
+            if (ct == null) {
+                return Response.of(StatusCode.UNSUPPORTED_MEDIA_TYPE);
+            }
+            String lower = ct.toLowerCase();
+            GrpcWebDispatch.Mode mode;
+            if (lower.startsWith("application/grpc-web-text")) {
+                mode = GrpcWebDispatch.Mode.TEXT;
+            } else if (lower.startsWith("application/grpc-web")) {
+                mode = GrpcWebDispatch.Mode.BINARY;
+            } else {
+                return Response.of(StatusCode.UNSUPPORTED_MEDIA_TYPE);
+            }
+            return new GrpcWebDispatch(handler, mode);
+        });
+    }
+
+    private static boolean isGrpcContentType(String ct) {
+        return ct.regionMatches(true, 0, "application/grpc", 0, "application/grpc".length());
+    }
+
+    private static boolean isGrpcWebContentType(String ct) {
+        return ct.regionMatches(true, 0, "application/grpc-web", 0, "application/grpc-web".length());
     }
 
     @Override
