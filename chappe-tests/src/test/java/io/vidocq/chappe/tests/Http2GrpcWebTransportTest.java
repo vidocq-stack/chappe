@@ -204,21 +204,36 @@ class Http2GrpcWebTransportTest {
     }
 
     // ------------------------------------------------------------------
-    // 6. HTTP/1.1 -> 505 (V1 = HTTP/2 only)
+    // 6. HTTP/1.1 supporté : gRPC-Web tourne sur H1 via Body.ofOutputStream
+    //    + chunked transfer encoding (les trailers étant déjà inline 0x80,
+    //    pas besoin de trailers HTTP/2). Couvre le cas navigateur fetch/XHR
+    //    sans HTTP/2 et HttpClient JDK en cleartext.
     // ------------------------------------------------------------------
     @Test
-    void rejectHttp11With505() throws Exception {
-        startServer("/svc", call -> call.complete(GrpcStatus.OK, ""));
+    void http11BinaryUnaryEchoWorks() throws Exception {
+        startServer("/h1-echo", call -> {
+            byte[] req = call.receive();
+            call.send(req);
+            call.complete(GrpcStatus.OK, "");
+        });
 
         var client =
                 HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build();
+        byte[] framed = GrpcFrameWriter.encode("ahoi".getBytes(StandardCharsets.UTF_8));
         var req = HttpRequest.newBuilder()
-                .uri(URI.create("http://127.0.0.1:" + port + "/svc"))
+                .uri(URI.create("http://127.0.0.1:" + port + "/h1-echo"))
                 .header("content-type", "application/grpc-web")
-                .POST(HttpRequest.BodyPublishers.ofByteArray(GrpcFrameWriter.encode(new byte[0])))
+                .POST(HttpRequest.BodyPublishers.ofByteArray(framed))
                 .build();
-        var resp = client.send(req, HttpResponse.BodyHandlers.discarding());
-        assertEquals(505, resp.statusCode());
+        var resp = client.send(req, HttpResponse.BodyHandlers.ofByteArray());
+        assertEquals(200, resp.statusCode());
+        assertEquals(
+                "application/grpc-web",
+                resp.headers().firstValue("content-type").orElse(null));
+        var parsed = parseGrpcWebFrames(resp.body());
+        assertEquals(1, parsed.messages.size());
+        assertArrayEquals("ahoi".getBytes(StandardCharsets.UTF_8), parsed.messages.get(0));
+        assertEquals("0", parsed.trailers.get("grpc-status"));
     }
 
     // ==================================================================
