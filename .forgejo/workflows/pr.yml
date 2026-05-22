@@ -1,5 +1,5 @@
 # Template à fusionner dans le `ci.yml` existant de chaque repo *producteur*
-# (vauban, cassini, champollion, foy, chappe, vidocq-mps, mansart, ravel).
+# (vauban, cassini, champollion, foy, chappe, vidocq, mansart, ravel).
 #
 # CE FICHIER NE SE COPIE PAS TEL QUEL. Il sert de référence : ses 4 jobs
 # (`build-pr`, `discover-impact`, `trigger-downstream`, `verify-downstream`)
