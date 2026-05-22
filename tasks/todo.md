@@ -98,4 +98,4 @@
 - [ ] `grpc-timeout` deadline propagation (TODO, déféré)
 - [ ] gRPC-Web (framing base64 pour navigateurs, TODO)
 - [ ] Client gRPC (API symétrique, TODO — pour l'instant tests via H2 raw)
-- [ ] Conformité protocole : suite cross-impl avec `grpcurl` (TODO, manuel/optionnel)
+- [x] Conformité protocole : `grpcurl` cross-impl — `GrpcurlConformanceTest` (2 scénarios : unary echo + erreur handler → INTERNAL ; skip propre si binaire absent)
