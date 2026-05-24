@@ -186,10 +186,10 @@ Configuration via YAML, headers conditionnels par variable d'environnement, side
 | Non supporté côté Chappe. Convertir en PKCS12 avec `openssl` ou `keytool`, puis charger via `KeyStore`.
 |===
 
-== Capacités prêtes pour la migration
+== Capacits prtes pour la migration
 
-* xref:usage.adoc#_cli_standalone[CLI standalone] (`chappe serve --config …`) — packaging Docker direct, image jlink ~50 Mo.
-* `Filter.gzip()` + `StaticFileHandler.preferPrecompressed(true)` — compression négociée + sidecars `.br` / `.gz`.
+* link:usage.html#cli-standalone[CLI standalone] (`chappe serve --config …`) — packaging Docker direct, image jlink ~50 Mo.
+* `Filter.gzip()` + `StaticFileHandler.preferPrecompressed(true)` — compression ngocie + sidecars `.br` / `.gz`.
 * `StaticFileHandler.spaFallback("/index.html")` / `.notFoundFile("/404.html")` — routing SPA et 404 personnalisée.
 * `Filter.addHeaderIfEnv("STAGING", "true", "X-Robots-Tag", "noindex, nofollow")` — headers conditionnels par environnement.
 * `Router.mount(prefix, handler)` — composition d'extensions Servlet/REST sans couplage.

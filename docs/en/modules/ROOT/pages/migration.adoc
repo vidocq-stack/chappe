@@ -188,7 +188,7 @@ Configuration via YAML, environment-conditional headers, build-time `.gz` sideca
 
 == Migration-ready capabilities
 
-* xref:usage.adoc#_standalone_cli[Standalone CLI] (`chappe serve --config …`) — direct Docker packaging, ~50 MB jlink image.
+* link:usage.html#standalone-cli[Standalone CLI] (`chappe serve --config …`) — direct Docker packaging, ~50 MB jlink image.
 * `Filter.gzip()` + `StaticFileHandler.preferPrecompressed(true)` — negotiated compression + `.br` / `.gz` sidecars.
 * `StaticFileHandler.spaFallback("/index.html")` / `.notFoundFile("/404.html")` — SPA routing and custom 404.
 * `Filter.addHeaderIfEnv("STAGING", "true", "X-Robots-Tag", "noindex, nofollow")` — environment-conditional headers.
