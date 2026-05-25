@@ -6,62 +6,35 @@ on:
 
 jobs:
   notify-pr-open:
-    # PR ouverte / réouverte / passée en "ready for review"
+    # PR opened / reopened / marked ready for review
     if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
-      - name: Send Slack message on PR open
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          REPO: ${{ github.repository }}
-          PR_NUM: ${{ github.event.number }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
-        run: |
-          set -euo pipefail
-          if [ -z "${SLACK_WEBHOOK_URL:-}" ]; then
-            echo "❌ Secret Forgejo manquant : SLACK_WEBHOOK_URL" >&2
-            exit 1
-          fi
-          payload=$(node <<'JS'
-          process.stdout.write(JSON.stringify({
-            text: `[ViBot]: 📬 *PR ouverte* sur \`${process.env.REPO}\`#${process.env.PR_NUM} par *${process.env.PR_AUTHOR}*\n> ${process.env.PR_TITLE}\n<${process.env.PR_URL}|Voir la PR>`
-          }))
-          JS
-          )
-          curl -fsS -X POST "$SLACK_WEBHOOK_URL" \
-            -H 'Content-Type: application/json' \
-            -d "$payload"
+      - name: Notify Slack (PR opened)
+        uses: https://codeberg.org/Vidocq/ci/notify-slack@v1
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          status: pr-open
+          repo: ${{ github.repository }}
+          pr-number: ${{ github.event.number }}
+          pr-title: ${{ github.event.pull_request.title }}
+          pr-author: ${{ github.event.pull_request.user.login }}
+          pr-url: ${{ github.event.pull_request.html_url }}
 
   notify-pr-merged:
-    # PR fermée AVEC merge (les PR juste fermées sans merge sont ignorées)
+    # PR closed WITH merge (PRs merely closed without merge are ignored)
     if: github.event.action == 'closed' && github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
-      - name: Send Slack message on PR merged
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          REPO: ${{ github.repository }}
-          PR_NUM: ${{ github.event.number }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-          PR_MERGED_BY: ${{ github.event.pull_request.merged_by.login }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-        run: |
-          set -euo pipefail
-          if [ -z "${SLACK_WEBHOOK_URL:-}" ]; then
-            echo "❌ Secret Forgejo manquant : SLACK_WEBHOOK_URL" >&2
-            exit 1
-          fi
-          payload=$(node <<'JS'
-          const mergedBy = process.env.PR_MERGED_BY || process.env.PR_AUTHOR;
-          process.stdout.write(JSON.stringify({
-            text: `[ViBot]: 🎉 *PR mergée* dans \`${process.env.REPO}\`@${process.env.BASE_REF} (#${process.env.PR_NUM}, auteur *${process.env.PR_AUTHOR}*, mergée par *${mergedBy}*)\n> ${process.env.PR_TITLE}\n<${process.env.PR_URL}|Voir la PR>`
-          }))
-          JS
-          )
-          curl -fsS -X POST "$SLACK_WEBHOOK_URL" \
-            -H 'Content-Type: application/json' \
-            -d "$payload"
+      - name: Notify Slack (PR merged)
+        uses: https://codeberg.org/Vidocq/ci/notify-slack@v1
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          status: pr-merged
+          repo: ${{ github.repository }}
+          pr-number: ${{ github.event.number }}
+          pr-title: ${{ github.event.pull_request.title }}
+          pr-author: ${{ github.event.pull_request.user.login }}
+          pr-url: ${{ github.event.pull_request.html_url }}
+          merged-by: ${{ github.event.pull_request.merged_by.login }}
+          base-ref: ${{ github.event.pull_request.base.ref }}
