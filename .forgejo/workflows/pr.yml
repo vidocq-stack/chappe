@@ -1,266 +1,116 @@
+# Pull-request validation in a SINGLE job. There is NO staging registry anymore
+# (the old Reposilite repo.vidocq.dev is gone, and Maven Central cannot host
+# ephemeral PR artifacts): the producer AND every impacted downstream consumer is
+# built and resolved straight from the runner's local ~/.m2.
+#
+#   1. build the producer at a release-style PR version  -> installed in ~/.m2
+#   2. ci/build-impacted resolves the transitive consumers from the Vidocq graph
+#      and rebuilds each one, in topological order, against those local PR
+#      artifacts (release versions are immutable for Maven, so they are never
+#      re-fetched from the network — no -SNAPSHOT, no offline, no central pollution).
+#
+# The success of this single `pr-validate` job is the only required check to set
+# in branch protection.
+#
+# Kept in sync with GestionProjet/workflow-templates/pr-producer.yml — edit there
+# and re-propagate to every producer repo.
+#
+# Prerequisite: org secret VIDOCQ_BOT_TOKEN (read graph, clone consumers, query API).
+#               org secret SLACK_WEBHOOK_URL (success notification).
 name: pr-validate
-
-# Pull-request validation. Four jobs:
-#   build-pr          — build & test the PR
-#   discover-impact   — resolve downstream consumers from the Vidocq dependency graph
-#   trigger-downstream— dispatch impacted consumers (dormant while none exist)
-#   verify-downstream — aggregate downstream statuses (the single required check)
-#   notify-success    — Slack notification once the whole PR chain is validated
-#
-# NOTE: per-PR staging publication (old Reposilite repo.vidocq.dev) is retired — that infra
-# is gone. build-pr therefore only builds & tests. The downstream chain stays in place but is
-# dormant: it short-circuits (verify OK) until consumer repos exist on Codeberg AND a staging
-# registry is available again.
-#
-# Prerequisite: org secret VIDOCQ_BOT_TOKEN (read graph, dispatch repos, read statuses).
 on:
   pull_request:
     branches: [main]
 
 jobs:
-
-  build-pr:
+  pr-validate:
     runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: https://codeberg.org/Vidocq/ci/setup-maven@v1
 
-      - name: Compute PR version
+      - name: Compute PR version (release-style, no -SNAPSHOT)
         id: version
         run: |
           # Parse pom.xml directly with Python — `mvn help:evaluate -q` does not strip all
-          # [INFO] lines on Maven 4, which yields corrupted versions like "[INFO]-PR1.1-SNAPSHOT".
-          # Namespace detected dynamically (Model 4.0.0 vs 4.1.0).
+          # [INFO] lines on Maven 4, which yields corrupted versions. Namespace detected
+          # dynamically (Model 4.0.0 vs 4.1.0).
           BASE=$(python3 - <<'PY'
           import re, sys, xml.etree.ElementTree as ET
           root = ET.parse("pom.xml").getroot()
-          ns_uri = root.tag[1:].split("}", 1)[0] if root.tag.startswith("{") else ""
-          v = root.find(f"{{{ns_uri}}}version") if ns_uri else root.find("version")
+          ns = root.tag[1:].split("}", 1)[0] if root.tag.startswith("{") else ""
+          v = root.find(f"{{{ns}}}version") if ns else root.find("version")
           if v is None or not v.text:
-              sys.stderr.write(f"root <version> not found (ns={ns_uri!r})\n")
-              sys.exit(1)
+              sys.stderr.write(f"root <version> not found (ns={ns!r})\n"); sys.exit(1)
           print(re.sub(r"-SNAPSHOT$", "", v.text.strip()))
           PY
           )
           if [ -z "$BASE" ]; then
-            echo "Could not read project.version from pom.xml" >&2
-            exit 1
+            echo "Could not read project.version from pom.xml" >&2; exit 1
           fi
-          PR_VERSION="${BASE}-PR${{ github.event.number }}.${{ github.run_number }}-SNAPSHOT"
-          echo "version=$PR_VERSION" >> "$GITHUB_OUTPUT"
-          echo "PR version: $PR_VERSION"
+          SHA8="${{ github.event.pull_request.head.sha }}"; SHA8="${SHA8:0:8}"
+          SUFFIX="PR${{ github.event.number }}.${SHA8}"
+          echo "suffix=$SUFFIX" >> "$GITHUB_OUTPUT"
+          echo "version=${BASE}-${SUFFIX}" >> "$GITHUB_OUTPUT"
+          echo "PR version: ${BASE}-${SUFFIX}"
 
-      - name: Build & test
-        run: mvn -B -ntp verify
-
-  discover-impact:
-    needs: build-pr
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.filter.outputs.matrix }}
-      has_consumers: ${{ steps.filter.outputs.has_consumers }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Ensure python3, curl and jq are available
+      - name: Set PR version across the reactor
         run: |
-          if ! command -v python3 >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1; then
-            apt-get update && apt-get install -y --no-install-recommends python3 jq curl ca-certificates
-          fi
+          mvn -B -ntp versions:set \
+            -DnewVersion=${{ steps.version.outputs.version }} \
+            -DprocessAllModules=true -DgenerateBackupPoms=false
 
-      - name: Fetch graph, resolver and this repo's data file
+      - name: Sync plugin.xml descriptors with the PR version
+        # versions:set does not touch resources; maven-plugin modules embed a plugin.xml
+        # with a hardcoded <version> — without this sync the plugin JAR ships a stale
+        # descriptor and every consumer fails with "Plugin's descriptor contains the wrong
+        # version".
         run: |
-          # Forge slug -> data file name: Vidocq/vauban -> Vidocq_vauban.json
-          SLUG="${{ github.repository }}"
-          DATA_FILE="${SLUG/\//_}.json"
-          echo "Slug=$SLUG / data file=$DATA_FILE"
-
-          RAW="https://codeberg.org/Vidocq/GestionProjet/raw/branch/main"
-          curl -fsSL -H "Authorization: token ${{ secrets.VIDOCQ_BOT_TOKEN }}" \
-            -o /tmp/inverted.json "$RAW/graph/inverted.json"
-          curl -fsSL -H "Authorization: token ${{ secrets.VIDOCQ_BOT_TOKEN }}" \
-            -o /tmp/resolve_impact.py "$RAW/scripts/resolve_impact.py"
-          curl -fsSL -H "Authorization: token ${{ secrets.VIDOCQ_BOT_TOKEN }}" \
-            -o /tmp/data.json "$RAW/data/${DATA_FILE}"
-
-          echo "Inverted graph $(wc -l < /tmp/inverted.json) lines / data file $(wc -l < /tmp/data.json) lines"
-
-      - name: List artifacts produced by this repo (from the graph)
-        id: produced
-        run: |
-          ARTIFACTS=$(python3 - <<'PY'
-          import json
-          with open("/tmp/data.json") as f:
-              d = json.load(f)
-          out = []
-          for p in d.get("produces", []):
-              out.append(f"{p['groupId']}:{p['artifactId']}")
-          print(" ".join(sorted(set(out))))
+          python3 - <<'PY'
+          import re, xml.etree.ElementTree as ET
+          from pathlib import Path
+          rp = ET.parse("pom.xml").getroot()
+          ns = rp.tag[1:].split("}", 1)[0] if rp.tag.startswith("{") else ""
+          v = rp.find(f"{{{ns}}}version") if ns else rp.find("version")
+          version = v.text.strip()
+          n = 0
+          for pom in Path(".").rglob("pom.xml"):
+              if "target" in pom.parts:
+                  continue
+              try:
+                  r = ET.parse(pom).getroot()
+              except ET.ParseError:
+                  continue
+              pns = r.tag[1:].split("}", 1)[0] if r.tag.startswith("{") else ""
+              pkg = r.find(f"{{{pns}}}packaging") if pns else r.find("packaging")
+              if pkg is None or (pkg.text or "").strip() != "maven-plugin":
+                  continue
+              px = pom.parent / "src/main/resources/META-INF/maven/plugin.xml"
+              if not px.is_file():
+                  continue
+              content = px.read_text(encoding="utf-8")
+              new = re.sub(r"(<artifactId>[^<]+</artifactId>\s*\n\s*<version>)[^<]+(</version>)",
+                           rf"\g<1>{version}\g<2>", content, count=1)
+              if new != content:
+                  px.write_text(new, encoding="utf-8"); n += 1
+          print(f"plugin.xml synced: {n}")
           PY
-          )
-          if [ -z "$ARTIFACTS" ]; then
-            echo "No io.vidocq.* artifact in data/${{ github.repository }}.json — graph out of sync?" >&2
-            exit 1
-          fi
-          echo "Produces: $ARTIFACTS"
-          echo "artifacts=$ARTIFACTS" >> "$GITHUB_OUTPUT"
 
-      - name: Resolve impacted consumers (transitive closure)
-        id: resolve
-        run: |
-          MATRIX=$(python3 /tmp/resolve_impact.py \
-            --graph /tmp/inverted.json \
-            --changed ${{ steps.produced.outputs.artifacts }} \
-            --format matrix)
-          echo "Matrix (raw): $MATRIX"
-          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+      - name: Build, test & install the producer locally
+        # install (not deploy): the PR artifact lands in ~/.m2 only — nothing is published.
+        # install runs the full lifecycle incl. integration-test/verify.
+        run: mvn -B -ntp install
 
-      - name: Keep only consumers that exist on Codeberg
-        id: filter
-        # Self-adjusting: the migrated graph still lists historical consumers (cassini,
-        # champollion, ...). Until a consumer repo exists on Codeberg it cannot run
-        # upstream-pr.yml nor post a status, so verify-downstream would hang. We drop the
-        # repos that are not on Codeberg yet; each one rejoins the validation automatically
-        # once it is migrated — no manual flag to flip.
-        env:
-          TOKEN: ${{ secrets.VIDOCQ_BOT_TOKEN }}
-        run: |
-          set -euo pipefail
-          RAW='${{ steps.resolve.outputs.matrix }}'
-          EXISTING=()
-          for r in $(echo "$RAW" | jq -r '.include[].repo'); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' -m 15 -H "Authorization: token $TOKEN" \
-              "https://codeberg.org/api/v1/repos/$r")
-            if [ "$code" = "200" ]; then
-              echo "  keep $r"
-              EXISTING+=("$r")
-            else
-              echo "  drop $r (not on Codeberg yet, HTTP $code)"
-            fi
-          done
-          if [ ${#EXISTING[@]} -eq 0 ]; then
-            EXJSON='[]'
-          else
-            EXJSON=$(printf '%s\n' "${EXISTING[@]}" | jq -R . | jq -s -c .)
-          fi
-          MATRIX=$(echo "$RAW" | jq -c --argjson ex "$EXJSON" \
-            '{include: [.include[] | select([.repo] | inside($ex))]}')
-          echo "Matrix (filtered): $MATRIX"
-          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
-          COUNT=$(echo "$MATRIX" | jq '.include | length')
-          if [ "$COUNT" -gt 0 ]; then
-            echo "has_consumers=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_consumers=false" >> "$GITHUB_OUTPUT"
-          fi
+      - name: Rebuild impacted downstream consumers against the local PR artifacts
+        uses: https://codeberg.org/Vidocq/ci/build-impacted@v1
+        with:
+          producer-slug: ${{ github.repository }}
+          producer-version: ${{ steps.version.outputs.version }}
+          version-suffix: ${{ steps.version.outputs.suffix }}
+          bot-token: ${{ secrets.VIDOCQ_BOT_TOKEN }}
 
-  trigger-downstream:
-    needs: [build-pr, discover-impact]
-    if: needs.discover-impact.outputs.has_consumers == 'true'
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.discover-impact.outputs.matrix) }}
-    steps:
-      - name: Dispatch ${{ github.repository }} -> ${{ matrix.repo }}
-        # Forgejo Actions has no repository_dispatch endpoint; we use workflow_dispatch on the
-        # upstream-pr.yml file in the consumer repo. Branch `main` picks the consumer's current
-        # HEAD (tested against the upstream PR version).
-        run: |
-          curl -fsSL -X POST \
-            -H "Authorization: token ${{ secrets.VIDOCQ_BOT_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            "https://codeberg.org/api/v1/repos/${{ matrix.repo }}/actions/workflows/upstream-pr.yml/dispatches" \
-            -d "$(cat <<JSON
-          {
-            "ref": "main",
-            "inputs": {
-              "upstream_repo": "${{ github.repository }}",
-              "upstream_version": "${{ needs.build-pr.outputs.version }}",
-              "pr_number": "${{ github.event.number }}",
-              "pr_sha": "${{ github.event.pull_request.head.sha }}"
-            }
-          }
-          JSON
-          )"
-
-  verify-downstream:
-    # The single "required check" for branch protection. Aggregates the dynamic downstream
-    # results into one stable status.
-    # Note: no dependency on trigger-downstream — Forgejo Actions evaluates `if: always()`
-    # poorly when a `needs:` job is skipped (trivial no-consumer case). We depend only on
-    # discover-impact; polling the downstream/* statuses naturally picks up what
-    # trigger-downstream dispatched (fire-and-forget).
-    needs: [discover-impact]
-    if: always() && needs.discover-impact.result == 'success'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Trivial case — no impacted consumer
-        if: needs.discover-impact.outputs.has_consumers != 'true'
-        run: |
-          echo "No consumer impacted by this PR — verify OK."
-          exit 0
-
-      - name: Ensure jq and curl are available
-        if: needs.discover-impact.outputs.has_consumers == 'true'
-        run: |
-          if ! command -v jq >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1; then
-            apt-get update && apt-get install -y --no-install-recommends jq curl ca-certificates
-          fi
-
-      - name: Wait for downstream statuses
-        if: needs.discover-impact.outputs.has_consumers == 'true'
-        run: |
-          SHA="${{ github.event.pull_request.head.sha }}"
-          EXPECTED=$(echo '${{ needs.discover-impact.outputs.matrix }}' \
-            | jq -r '.include[].repo' | sed 's|.*|downstream/&|')
-          echo "Expected contexts:"
-          echo "$EXPECTED"
-          DEADLINE=$(( $(date +%s) + 3600 ))  # 60 min max (mansart/vidocq are heavy)
-          ITERATION=0
-          while [ $(date +%s) -lt $DEADLINE ]; do
-            ITERATION=$((ITERATION + 1))
-            STATUSES=$(curl -fsSL \
-              -H "Authorization: token ${{ secrets.VIDOCQ_BOT_TOKEN }}" \
-              "https://codeberg.org/api/v1/repos/${{ github.repository }}/commits/$SHA/statuses")
-            POSTED=$(echo "$STATUSES" | jq -r '.[].context' | sort -u)
-            echo "--- Iteration $ITERATION: $(echo "$POSTED" | wc -w | tr -d ' ') status(es) posted"
-            ALL_OK=1
-            for ctx in $EXPECTED; do
-              STATE=$(echo "$STATUSES" | jq -r ".[] | select(.context==\"$ctx\") | .state" | head -n1)
-              if [ -z "$STATE" ]; then
-                echo "  [$ctx] NO STATUS POSTED — upstream-pr workflow has not run yet, or crashed before 'Post status'"
-                ALL_OK=0
-                continue
-              fi
-              if [ "$STATE" = "pending" ]; then
-                echo "  [$ctx] pending..."
-                ALL_OK=0
-                continue
-              fi
-              if [ "$STATE" = "failure" ] || [ "$STATE" = "error" ]; then
-                echo "  [$ctx] $STATE — verify-downstream fails."
-                exit 1
-              fi
-              echo "  [$ctx] $STATE"
-            done
-            if [ "$ALL_OK" = "1" ]; then
-              echo "All downstreams reported OK."
-              exit 0
-            fi
-            sleep 30
-          done
-          echo "Timeout: some downstreams did not report in time." >&2
-          exit 1
-
-  notify-success:
-    # Single Slack notification once the whole PR chain is validated (build + downstream verify).
-    needs: [verify-downstream]
-    runs-on: ubuntu-latest
-    steps:
       - name: Notify Slack on PR success
+        if: success()
         uses: https://codeberg.org/Vidocq/ci/notify-slack@v1
         with:
           webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
