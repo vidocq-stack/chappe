@@ -14,7 +14,7 @@ jobs:
   notify-docs:
     runs-on: ubuntu-latest
     steps:
-      - uses: https://codeberg.org/Vidocq/ci/trigger-docs-rebuild@v1
+      - uses: https://github.com/vidocq-stack/ci/trigger-docs-rebuild@v1
         with:
           bot-token: ${{ secrets.VIDOCQ_BOT_TOKEN }}
           source-repo: ${{ github.repository }}
