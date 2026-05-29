@@ -10,13 +10,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: https://codeberg.org/Vidocq/ci/setup-maven@v1
+
+      - name: Fetch Vidocq/ci action (Forgejo mirror, basic-auth)
+        shell: bash
+        env:
+          MIRROR_URL:  ${{ secrets.MIRROR_ASD_URL }}
+          MIRROR_USER: ${{ secrets.MIRROR_ASD_USER }}
+          MIRROR_PASS: ${{ secrets.MIRROR_ASD_PASSWORD }}
+        run: |
+          set -euo pipefail
+          enc_pass=$(python3 -c "import os,urllib.parse;print(urllib.parse.quote(os.environ['MIRROR_PASS'], safe=''))")
+          host="${MIRROR_URL#https://}"; host="${host#http://}"; host="${host%/}"
+          git clone --depth=1 --branch v1 \
+            "https://${MIRROR_USER}:${enc_pass}@${host}/Vidocq/ci.git" \
+            .ci-action
+
+      - uses: ./.ci-action/setup-maven
 
       - name: Build & test
         run: mvn -B -ntp -U verify
 
       - name: Deploy to Maven Central
-        uses: https://codeberg.org/Vidocq/ci/deploy-maven@v1
+        uses: ./.ci-action/deploy-maven
         with:
           central-username: ${{ secrets.CENTRAL_USERNAME }}
           central-password: ${{ secrets.CENTRAL_PASSWORD }}
@@ -25,7 +40,7 @@ jobs:
 
       - name: Notify Slack on failure
         if: failure()
-        uses: https://codeberg.org/Vidocq/ci/notify-slack@v1
+        uses: ./.ci-action/notify-slack
         with:
           webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
           status: failure
@@ -35,7 +50,7 @@ jobs:
 
       - name: Notify Slack on success
         if: success()
-        uses: https://codeberg.org/Vidocq/ci/notify-slack@v1
+        uses: ./.ci-action/notify-slack
         with:
           webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
           status: success
