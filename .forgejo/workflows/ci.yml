@@ -21,7 +21,7 @@ jobs:
           set -euo pipefail
           enc_pass=$(python3 -c "import os,urllib.parse;print(urllib.parse.quote(os.environ['MIRROR_PASS'], safe=''))")
           host="${MIRROR_URL#https://}"; host="${host#http://}"; host="${host%/}"
-          git clone --depth=1 --branch v1 \
+          git clone --depth=1 --branch main \
             "https://${MIRROR_USER}:${enc_pass}@${host}/Vidocq/ci.git" \
             .ci-action
 
