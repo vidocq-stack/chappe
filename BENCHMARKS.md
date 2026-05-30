@@ -190,7 +190,7 @@ Client `java.net.http.HttpClient` — inclut l'overhead du framework async.
 Validation des 4 optimisations livrées dans la branche `working/compiletime`. Exécuté sur
 Docker distant (**`docker --context macuntutailscale`** — Linux amd64, engine 29.1.4) pour
 s'isoler du bruit de la machine dev. Image multi-stage construite via
-`chappe-bench/docker/Dockerfile` (JDK 25, Maven 4.0.0-rc-5).
+`chappe-bench/docker/Dockerfile` (JDK 25, Maven 3.9.16).
 
 ### Comparatif end-to-end — Chappe vs Jetty/Helidon/JDK
 

@@ -11,7 +11,7 @@ sans launcher Java applicatif. Configuration via mini-YAML in-house ou flags CLI
 Depuis la racine du sous-projet `chappe/` :
 
 ```bash
-sdk env                                # Java 25 + Maven 4.0.0-rc-5
+sdk env                                # Java 25 + Maven 3.9.16
 mvn -ntp -pl chappe-cli -am package    # produit le fat jar
 ```
 

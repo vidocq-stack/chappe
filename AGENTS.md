@@ -19,7 +19,7 @@ Java code is under `src/main/java`; tests are under `src/test/java`; fixtures an
 
 Use SDKMAN to match the repository toolchain:
 
-- `sdk env`: selects Java 25 and Maven `4.0.0-rc-5` from `.sdkmanrc`.
+- `sdk env`: selects Java 25 and Maven `3.9.16` from `.sdkmanrc`.
 - `mvn -ntp test`: runs unit, integration, and conformance tests in the reactor.
 - `mvn -ntp -pl chappe-cli -am package`: builds the CLI and required modules.
 - `mvn -ntp -Pquality verify`: runs verification with JaCoCo reporting.

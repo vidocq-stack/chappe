@@ -121,8 +121,8 @@ Le serveur doit être validé sur trois axes :
 
 - Utiliser **sdkman** pour gérer les versions Java et Maven
 - Requis : **Java 25** (`sdk use java 25-open` ou équivalent)
-- Requis : **Maven 4** (`sdk use maven 4.0.0-rc-5`)
-- Si `mvn` échoue avec "modelVersion 4.1.0 not supported", Maven `current` a été reset à 3.x — switcher à 4.x
+- Requis : **Maven 3.9.16** (`sdk use maven 3.9.16`)
+- Tous les POMs sont en `modelVersion 4.0.0` (le workspace est sorti de la RC Maven 4 pour la GA 3.9)
 
 ## Context Mode
 

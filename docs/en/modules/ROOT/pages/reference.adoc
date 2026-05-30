@@ -345,7 +345,7 @@ Served zero-copy by `StaticFileHandler.preferPrecompressed(true)`.
 == Compatibility
 
 * **Java**: 25 (LTS), no preview flag required (`ScopedValue` is final since JEP 506).
-* **Maven**: 4.0.0-rc-5 (POM `modelVersion 4.1.0`).
+* **Maven**: 3.9.16 (POM `modelVersion 4.0.0`).
 * **JPMS** strict: no classpath, no `--add-opens`.
 
 == Bugs and benchmarks

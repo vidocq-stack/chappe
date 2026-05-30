@@ -345,7 +345,7 @@ Servis zero-copy par `StaticFileHandler.preferPrecompressed(true)`.
 == Compatibilité
 
 * **Java** : 25 (LTS), aucun flag preview requis (`ScopedValue` est final depuis JEP 506).
-* **Maven** : 4.0.0-rc-5 (POM `modelVersion 4.1.0`).
+* **Maven** : 3.9.16 (POM `modelVersion 4.0.0`).
 * **JPMS** strict : aucun classpath, aucun `--add-opens`.
 
 == Bugs et benchmarks

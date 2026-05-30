@@ -411,11 +411,11 @@ Benchmarks sur macOS, Java 25, NIO client ultra-léger ([détails](BENCHMARKS.md
 ## Prérequis
 
 - **Java 25** avec `--enable-preview` (ScopedValue, Structured Concurrency)
-- **Maven 4** (4.0.0-rc-5+, POM modelVersion 4.1.0)
+- **Maven 3.9.16** (POM modelVersion 4.0.0)
 
 ```bash
 sdk use java 25-tem
-sdk use maven 4.0.0-rc-5
+sdk use maven 3.9.16
 ```
 
 ## Build & Test

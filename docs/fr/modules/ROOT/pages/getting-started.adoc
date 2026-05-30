@@ -7,8 +7,8 @@ Cette page démarre un serveur HTTP Chappe en moins de 30 lignes de Java, puis e
 == Pré-requis
 
 * **Java 25** — Temurin recommandé.
-* **Maven 4.0.0-rc-5** — épinglé via `.sdkmanrc` à la racine du repo `chappe`.
-* `sdk env` au niveau du repo charge la bonne version JDK et Maven. Si `mvn` échoue avec `modelVersion 4.1.0 not supported`, repasser à Maven 4 : `sdk use maven 4.0.0-rc-5`.
+* **Maven 3.9.16** — épinglé via `.sdkmanrc` à la racine du repo `chappe`.
+* `sdk env` au niveau du repo charge la bonne version JDK et Maven. Si `mvn` échoue avec `modelVersion 4.1.0 not supported`, repasser à Maven 4 : `sdk use maven 3.9.16`.
 * Optionnel : `wrk` pour le test de charge final (`brew install wrk` ou équivalent).
 
 == Coordonnées Maven
@@ -110,7 +110,7 @@ Server.builder().port(8080).handler(staticHandler).build().start();
 
 [source,bash]
 ----
-sdk env                        # charge JDK 25 + Maven 4.0.0-rc-5
+sdk env                        # charge JDK 25 + Maven 3.9.16
 ./mvnw -ntp install -DskipTests
 java \
      --module-path target/lib:target/myapp.jar \
