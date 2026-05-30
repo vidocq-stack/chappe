@@ -11,15 +11,15 @@ import java.util.Base64;
 import io.vidocq.chappe.api.BuildInfo;
 
 /**
- * Handshake WebSocket — RFC 6455 §4.2.2.
+ * WebSocket handshake — RFC 6455 §4.2.2.
  * <p>
- * Calcule {@code Sec-WebSocket-Accept} et écrit la réponse {@code 101 Switching Protocols}.
- * La validation des headers entrants (Upgrade, Connection, Version, Key) est faite en amont
- * dans {@code DefaultRouterBuilder#webSocket}.
+ * Computes {@code Sec-WebSocket-Accept} and writes the {@code 101 Switching Protocols} response.
+ * Validation of incoming headers (Upgrade, Connection, Version, Key) is performed upstream
+ * in {@code DefaultRouterBuilder#webSocket}.
  */
 public final class WebSocketHandshake {
 
-    /** "Magic GUID" RFC 6455 §1.3 — concaténé au {@code Sec-WebSocket-Key} avant SHA-1. */
+    /** RFC 6455 §1.3 "Magic GUID" — concatenated to {@code Sec-WebSocket-Key} before SHA-1. */
     public static final String GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
     private static final byte[] PROLOGUE = ("HTTP/1.1 101 Switching Protocols\r\n"
@@ -40,7 +40,7 @@ public final class WebSocketHandshake {
         }
     }
 
-    /** Écrit la réponse 101 avec l'accept calculé et un sous-protocole optionnel. */
+    /** Writes the 101 response with the computed accept value and an optional subprotocol. */
     public static void writeResponse(WritableByteChannel channel, String secWebSocketKey, String subprotocol)
             throws IOException {
         var accept = computeAccept(secWebSocketKey);

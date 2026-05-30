@@ -17,7 +17,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * Tests des SPI d'extension : mount(), StaticFileHandler, RequestContext,
+ * Tests for the extension SPIs: mount(), StaticFileHandler, RequestContext,
  * Body.ofFile(), Body.ofOutputStream(), MimeTypes.
  */
 class ExtensionSpiTest {
@@ -47,7 +47,7 @@ class ExtensionSpiTest {
                 HttpResponse.BodyHandlers.ofString());
     }
 
-    // ── mount() ──
+    // -- mount() --
 
     @Test
     void mountPathStripping() throws Exception {
@@ -101,7 +101,7 @@ class ExtensionSpiTest {
         assertEquals("mount", get("/api/other").body());
     }
 
-    // ── StaticFileHandler ──
+    // -- StaticFileHandler --
 
     @Test
     void staticFileServing() throws Exception {
@@ -154,7 +154,7 @@ class ExtensionSpiTest {
         assertTrue(resp.headers().firstValue("Content-Type").orElse("").contains("text/html"));
     }
 
-    // ── RequestContext ScopedValue ──
+    // -- RequestContext ScopedValue --
 
     @Test
     void requestContextAccessible() throws Exception {
@@ -167,7 +167,7 @@ class ExtensionSpiTest {
         assertEquals("method=GET", get("/").body());
     }
 
-    // ── Request metadata ──
+    // -- Request metadata --
 
     @Test
     void requestRemoteAddress() throws Exception {
@@ -203,7 +203,7 @@ class ExtensionSpiTest {
         assertEquals("user=admin", get("/").body());
     }
 
-    // ── Body.ofOutputStream ──
+    // -- Body.ofOutputStream --
 
     @Test
     void bodyOfOutputStream() throws Exception {
@@ -221,7 +221,7 @@ class ExtensionSpiTest {
         assertEquals("streaming body", get("/").body());
     }
 
-    // ── Body.ofFile ──
+    // -- Body.ofFile --
 
     @Test
     void bodyOfFile() throws Exception {
@@ -239,7 +239,7 @@ class ExtensionSpiTest {
         assertEquals("15", resp.headers().firstValue("Content-Length").orElse(""));
     }
 
-    // ── MimeTypes ──
+    // -- MimeTypes --
 
     @Test
     void mimeTypeDetection() {
@@ -252,7 +252,7 @@ class ExtensionSpiTest {
         assertEquals("application/octet-stream", MimeTypes.detect("unknown.xyz"));
     }
 
-    // ── StaticFileHandler Builder + Classpath ──
+    // -- StaticFileHandler Builder + Classpath --
 
     @Test
     void classpathResourceServing() throws Exception {
@@ -292,18 +292,18 @@ class ExtensionSpiTest {
 
     @Test
     void fallbackChainFilesystemThenClasspath() throws Exception {
-        // Filesystem a un fichier, classpath a un autre
+        // Filesystem has one file, classpath has another
         Files.writeString(tempDir.resolve("local.txt"), "from filesystem");
 
         var handler = StaticFileHandler.builder()
-                .addPath(tempDir) // filesystem d'abord
-                .addClasspath("static") // puis classpath
+                .addPath(tempDir) // filesystem first
+                .addClasspath("static") // then classpath
                 .build();
         startServer(Router.builder().mount("/assets", handler).build());
 
-        // Fichier filesystem
+        // Filesystem file
         assertEquals("from filesystem", get("/assets/local.txt").body());
-        // Fichier classpath (pas sur filesystem)
+        // Classpath file (not present on filesystem)
         assertTrue(get("/assets/page.html").body().contains("classpath"));
     }
 
@@ -315,13 +315,13 @@ class ExtensionSpiTest {
                 .build();
         startServer(Router.builder().mount("/cached", handler).build());
 
-        // Premier appel — cache miss, response avec ETag
+        // First call — cache miss, response with ETag
         var resp1 = get("/cached/data.json");
         assertEquals(200, resp1.statusCode());
         var etag = resp1.headers().firstValue("ETag").orElse(null);
         assertNotNull(etag, "ETag should be present for cached resources");
 
-        // Deuxième appel avec If-None-Match → 304
+        // Second call with If-None-Match -> 304
         var req = java.net.http.HttpRequest.newBuilder()
                 .uri(java.net.URI.create(baseUrl + "/cached/data.json"))
                 .header("If-None-Match", etag)
@@ -351,9 +351,9 @@ class ExtensionSpiTest {
                 IllegalStateException.class, () -> StaticFileHandler.builder().build());
     }
 
-    // ── Bugs upstream signalés par vidocq-rest-cassini-extension ──
+    // -- Upstream bugs reported by vidocq-rest-cassini-extension --
 
-    /** Bug #5 : query() doit rester accessible après mount() avec path stripping. */
+    /** Bug #5: query() must remain accessible after mount() with path stripping. */
     @Test
     void mountPreservesQueryString() throws Exception {
         var router = Router.builder()
@@ -370,11 +370,11 @@ class ExtensionSpiTest {
         assertEquals("path=/resource/queryfield query=bpeQuery=FIRST&innerQuery=SECOND bpe=FIRST", resp.body());
     }
 
-    /** Bug #5 bis : query() via wrapper externe qui ne réécrit que path(). */
+    /** Bug #5 bis: query() via an external wrapper that only rewrites path(). */
     @Test
     void externalWrapperPreservesQueryString() throws Exception {
         Handler inner = req -> Response.ok("path=" + req.path() + " query=" + req.query());
-        // Wrapper qui réécrit path() mais délègue query() à delegate
+        // Wrapper that rewrites path() but delegates query() to delegate
         Handler wrapper = req -> {
             String stripped = req.path().substring("/ctx".length());
             final String newPath = stripped.isEmpty() ? "/" : stripped;
@@ -442,7 +442,7 @@ class ExtensionSpiTest {
         assertEquals("path=/resource/queryfield query=bpeQuery=FIRST&innerQuery=SECOND", resp.body());
     }
 
-    /** Bug #4 : uri() doit renvoyer une URI absolue (authority = Host header). */
+    /** Bug #4: uri() must return an absolute URI (authority = Host header). */
     @Test
     void requestUriHasAuthorityFromHostHeader() throws Exception {
         startServer(req -> {
@@ -456,9 +456,9 @@ class ExtensionSpiTest {
         var resp = get("/foo?a=1&b=2");
         assertEquals(200, resp.statusCode());
         String body = resp.body();
-        assertTrue(body.startsWith("authority=127.0.0.1:"), "authority manquant: " + body);
-        assertTrue(body.contains("scheme=http"), "scheme manquant: " + body);
-        assertTrue(body.contains("path=/foo"), "path manquant: " + body);
-        assertTrue(body.contains("query=a=1&b=2"), "query manquant: " + body);
+        assertTrue(body.startsWith("authority=127.0.0.1:"), "missing authority: " + body);
+        assertTrue(body.contains("scheme=http"), "missing scheme: " + body);
+        assertTrue(body.contains("path=/foo"), "missing path: " + body);
+        assertTrue(body.contains("query=a=1&b=2"), "missing query: " + body);
     }
 }

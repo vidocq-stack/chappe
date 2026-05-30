@@ -23,11 +23,11 @@ import io.vidocq.chappe.api.StatusCode;
 import io.vidocq.chappe.http.HttpRequestImpl;
 
 /**
- * Gestionnaire de connexion HTTP/2 — une instance par connexion,
- * exécutée dans un virtual thread dédié.
+ * HTTP/2 connection handler — one instance per connection,
+ * executed in a dedicated virtual thread.
  *
- * <p>Implémente la boucle de lecture des frames HTTP/2 (RFC 9113),
- * dispatche chaque stream vers un virtual thread séparé pour le traitement.
+ * <p>Implements the HTTP/2 frame reading loop (RFC 9113),
+ * dispatching each stream to a separate virtual thread for processing.
  */
 public final class Http2Connection {
 
@@ -37,12 +37,12 @@ public final class Http2Connection {
     private static final int DATA_CHUNK_SIZE = 8_192;
     private static final int WINDOW_UPDATE_THRESHOLD = 32_768;
 
-    // --- Connexion ---
+    // --- Connection ---
     private final ReadableByteChannel readChannel;
     private final WritableByteChannel writeChannel;
     private final Handler handler;
 
-    @SuppressWarnings("UnusedVariable") // Réservé pour limits H2 (maxStreams, timeouts) — à câbler
+    @SuppressWarnings("UnusedVariable") // Reserved for H2 limits (maxStreams, timeouts) — to be wired later
     private final ServerConfig config;
 
     // --- Buffers ---
@@ -64,7 +64,7 @@ public final class Http2Connection {
     private volatile int lastStreamId = 0;
     private volatile boolean goawaySent = false;
 
-    // --- Flow control (connexion) ---
+    // --- Flow control (connection) ---
     private final AtomicInteger connectionRecvWindow = new AtomicInteger(65_535);
     private final AtomicInteger connectionSendWindow = new AtomicInteger(65_535);
     private final ReentrantLock connectionSendLock = new ReentrantLock();
@@ -74,19 +74,19 @@ public final class Http2Connection {
     private int expectingContinuationForStream = -1;
 
     /**
-     * Crée une nouvelle connexion HTTP/2.
+     * Creates a new HTTP/2 connection.
      *
-     * @param channel    le canal socket de la connexion
-     * @param handler    le handler applicatif
-     * @param config     la configuration serveur
-     * @param readBuffer le buffer de lecture pré-rempli (depuis le protocol sniffing)
+     * @param channel    the socket channel for the connection
+     * @param handler    the application handler
+     * @param config     the server configuration
+     * @param readBuffer the pre-filled read buffer (from protocol sniffing)
      */
     public Http2Connection(SocketChannel channel, Handler handler, ServerConfig config, ByteBuffer readBuffer) {
         this((ReadableByteChannel) channel, (WritableByteChannel) channel, handler, config, readBuffer);
     }
 
     /**
-     * Constructeur acceptant des channels séparés (pour TLS via SslHandler).
+     * Constructor accepting separate channels (for TLS via SslHandler).
      */
     public Http2Connection(
             ReadableByteChannel readChannel,
@@ -107,11 +107,11 @@ public final class Http2Connection {
     }
 
     /**
-     * Point d'entrée principal — exécuté dans un virtual thread.
+     * Main entry point — executed in a virtual thread.
      * <ol>
-     *   <li>Valide le client preface</li>
-     *   <li>Envoie nos SETTINGS</li>
-     *   <li>Entre dans la boucle de frames</li>
+     *   <li>Validates the client preface</li>
+     *   <li>Sends our SETTINGS</li>
+     *   <li>Enters the frame loop</li>
      * </ol>
      */
     public void run() {
@@ -122,14 +122,14 @@ public final class Http2Connection {
         } catch (Http2ConnectionException e) {
             sendGoaway(e.errorCode());
         } catch (IOException _) {
-            // Connexion perdue
+            // Lost connection
         } finally {
             close();
         }
     }
 
     // -------------------------------------------------------------------------
-    // Boucle principale
+    // Main loop
     // -------------------------------------------------------------------------
 
     private void frameLoop() throws IOException {
@@ -167,7 +167,7 @@ public final class Http2Connection {
     }
 
     // -------------------------------------------------------------------------
-    // Handlers par type de frame
+    // Frame-type handlers
     // -------------------------------------------------------------------------
 
     private void handleSettings(Http2Frame.SettingsFrame frame) throws IOException {
@@ -218,7 +218,7 @@ public final class Http2Connection {
     private void handleHeaders(Http2Frame.HeadersFrame frame) throws IOException {
         int streamId = frame.streamId();
 
-        // Existing stream → trailers (RFC 9113 §8.1) ; END_STREAM doit être positionné.
+        // Existing stream -> trailers (RFC 9113 §8.1); END_STREAM must be set.
         var existing = streams.get(streamId);
         if (existing != null) {
             if (!frame.endStream()) {
@@ -243,7 +243,7 @@ public final class Http2Connection {
         }
         lastStreamId = streamId;
 
-        // Check max concurrent streams (notre limite, pas celle du client)
+        // Check max concurrent streams (our limit, not the client's)
         if (streams.size() >= localSettings.maxConcurrentStreams()) {
             frameWriter.writeRstStream(streamId, Http2ErrorCode.REFUSED_STREAM);
             return;
@@ -284,8 +284,8 @@ public final class Http2Connection {
         ByteBuffer headerBlock = stream.completeHeaderBlock();
 
         if (stream.inTrailers()) {
-            // Trailers : décoder dans un Headers.Builder à part, l'attacher à la requête.
-            // RFC 9113 §8.1 : pas de pseudo-header autorisé dans les trailers.
+            // Trailers: decode into a separate Headers.Builder and attach to request.
+            // RFC 9113 §8.1: no pseudo-header allowed in trailers.
             var trailersBuilder = Headers.builder();
             hpackDecoder.decode(headerBlock, (name, value) -> {
                 if (!name.isEmpty() && name.charAt(0) == ':') {
@@ -295,13 +295,13 @@ public final class Http2Connection {
                 trailersBuilder.add(name, value);
             });
             stream.request().setTrailers(trailersBuilder.build());
-            // Trailers portent toujours END_STREAM.
+            // Trailers always carry END_STREAM.
             stream.signalEndStream();
             stream.halfCloseRemote();
             return;
         }
 
-        // Initial HEADERS : décodage direct dans la requête.
+        // Initial HEADERS: decode directly into request.
         var req = stream.request();
         hpackDecoder.decode(headerBlock, req::addHeader);
 
@@ -407,7 +407,7 @@ public final class Http2Connection {
     }
 
     // -------------------------------------------------------------------------
-    // Dispatch et réponse
+    // Dispatch and response
     // -------------------------------------------------------------------------
 
     private void dispatchStream(Http2Stream stream) {
@@ -427,14 +427,14 @@ public final class Http2Connection {
                 response = Response.of(StatusCode.INTERNAL_SERVER_ERROR);
             }
 
-            // Bascule gRPC : le routeur a retourné un marker GrpcDispatch.
+            // gRPC switch: router returned a GrpcDispatch marker.
             if (response instanceof io.vidocq.chappe.api.GrpcDispatch gd) {
                 var call = new io.vidocq.chappe.http.grpc.GrpcCallImpl(stream, request, this);
                 io.vidocq.chappe.http.grpc.GrpcCallImpl.run(call, gd.handler());
-                return; // GrpcCallImpl gère initial headers, DATA, trailers, half-close
+                return; // GrpcCallImpl handles initial headers, DATA, trailers, half-close
             }
 
-            // Bascule gRPC-Web : trailers sérialisés inline comme frame DATA 0x80.
+            // gRPC-Web switch: trailers serialized inline as a 0x80 DATA frame.
             if (response instanceof io.vidocq.chappe.api.GrpcWebDispatch gwd) {
                 var call = new io.vidocq.chappe.http.grpc.GrpcWebCallImpl(stream, request, this, gwd.mode());
                 io.vidocq.chappe.http.grpc.GrpcWebCallImpl.run(call, gwd.handler());
@@ -443,7 +443,7 @@ public final class Http2Connection {
 
             sendResponse(stream, response);
         } catch (IOException _) {
-            // Connexion perdue pendant l'écriture de la réponse
+            // Connection lost while writing response
         } finally {
             stream.close();
             streams.remove(stream.streamId());
@@ -460,7 +460,7 @@ public final class Http2Connection {
         boolean hasBody = body != null && body.contentLength() != 0;
 
         if (hasBody) {
-            // HEADERS (sans END_STREAM, le body suit)
+            // HEADERS (without END_STREAM, body follows)
             frameWriter.writeHeaders(streamId, encodedHeaders, false);
 
             try (InputStream is = body.asInputStream()) {
@@ -488,61 +488,61 @@ public final class Http2Connection {
                 Thread.currentThread().interrupt();
                 throw new IOException("Interrupted while waiting for flow control window");
             } catch (IOException e) {
-                throw e; // propagée au dispatchStream
+                throw e; // propagated to dispatchStream
             }
 
-            // Trailers calculés APRÈS consommation du body (permet aux impl. streaming de
-            // déterminer les trailers à la fin — ex. grpc-status).
+            // Trailers computed AFTER body consumption (lets streaming impls
+            // determine trailers at the end — e.g. grpc-status).
             Headers trailers = response.trailers();
             boolean hasTrailers = trailers != null && !trailers.isEmpty();
 
             if (hasTrailers) {
                 byte[] encodedTrailers = hpackEncoder.encodeTrailers(trailers);
-                // RFC 9113 §8.1 : trailers HEADERS frame avec END_STREAM=1
+                // RFC 9113 §8.1: trailer HEADERS frame with END_STREAM=1
                 frameWriter.writeHeaders(streamId, encodedTrailers, true);
             } else {
-                // Final empty DATA frame avec END_STREAM
+                // Final empty DATA frame with END_STREAM
                 frameWriter.writeData(streamId, new byte[0], 0, 0, true);
             }
 
             stream.halfCloseLocal();
         } else {
-            // Pas de body : trailers connus immédiatement (impl. par défaut ne dépend pas du body)
+            // No body: trailers known immediately (default impl does not depend on body)
             Headers trailers = response.trailers();
             boolean hasTrailers = trailers != null && !trailers.isEmpty();
 
             if (hasTrailers) {
-                // HEADERS initial sans END_STREAM, puis HEADERS trailers avec END_STREAM
+                // Initial HEADERS without END_STREAM, then trailer HEADERS with END_STREAM
                 frameWriter.writeHeaders(streamId, encodedHeaders, false);
                 byte[] encodedTrailers = hpackEncoder.encodeTrailers(trailers);
                 frameWriter.writeHeaders(streamId, encodedTrailers, true);
                 stream.halfCloseLocal();
             } else {
-                // Cas usuel : un seul HEADERS avec END_STREAM
+                // Usual case: a single HEADERS with END_STREAM
                 frameWriter.writeHeaders(streamId, encodedHeaders, true);
             }
         }
     }
 
     // -------------------------------------------------------------------------
-    // SPI publique pour transports embarqués (ex. gRPC dans le sous-package grpc)
+    // Public SPI for embedded transports (e.g. gRPC in grpc sub-package)
     // -------------------------------------------------------------------------
 
-    /** Frame writer partagé — accès direct pour les transports built-in. */
+    /** Shared frame writer — direct access for built-in transports. */
     public Http2FrameWriter frameWriter() {
         return frameWriter;
     }
 
-    /** Encodeur HPACK partagé — accès direct pour les transports built-in. */
+    /** Shared HPACK encoder — direct access for built-in transports. */
     public HpackEncoder hpackEncoder() {
         return hpackEncoder;
     }
 
     /**
-     * Émet un payload via une ou plusieurs DATA frames, en respectant le flow control H2.
+     * Sends a payload via one or more DATA frames, respecting H2 flow control.
      * <p>
-     * Utilisé par {@code sendResponse} et par {@code io.vidocq.chappe.http.grpc.GrpcCallImpl}
-     * pour streamer des messages individuels.
+     * Used by {@code sendResponse} and by {@code io.vidocq.chappe.http.grpc.GrpcCallImpl}
+     * to stream individual messages.
      */
     public void sendDataChunked(Http2Stream stream, byte[] data, int offset, int len, boolean endStream)
             throws IOException {
@@ -620,8 +620,8 @@ public final class Http2Connection {
     // -------------------------------------------------------------------------
 
     /**
-     * Extrait les pseudo-headers HTTP/2 (:method, :path, :scheme, :authority)
-     * et les convertit en propriétés de la requête, puis les supprime du tableau.
+     * Extracts HTTP/2 pseudo-headers (:method, :path, :scheme, :authority)
+     * and converts them to request properties, then removes them from the array.
      */
     private static final java.util.Set<String> FORBIDDEN_HEADERS =
             java.util.Set.of("connection", "keep-alive", "proxy-connection", "transfer-encoding", "upgrade");
@@ -773,7 +773,7 @@ public final class Http2Connection {
     }
 
     // -------------------------------------------------------------------------
-    // Fermeture
+    // Close
     // -------------------------------------------------------------------------
 
     private void close() {
@@ -784,7 +784,7 @@ public final class Http2Connection {
         }
         streams.clear();
 
-        // Close channels — best-effort, on ignore les erreurs de fermeture
+        // Close channels — best-effort, ignore close errors
         try {
             readChannel.close();
         } catch (IOException _) {

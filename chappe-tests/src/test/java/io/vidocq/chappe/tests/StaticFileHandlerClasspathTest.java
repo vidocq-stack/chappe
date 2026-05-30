@@ -20,10 +20,10 @@ import io.vidocq.chappe.api.StatusCode;
 import org.junit.jupiter.api.Test;
 
 /**
- * Couvre la résolution {@code GET /} et {@code GET /sub/} en mode classpath :
- * {@code loader.getResource("static-test")} retourne l'URL d'un répertoire de
- * jar — sans le pré-fix vers {@code indexFile}, {@code URLConnection} renvoie
- * un listing au lieu de servir l'index.
+ * Covers resolution of {@code GET /} and {@code GET /sub/} in classpath mode:
+ * {@code loader.getResource("static-test")} returns the URL of a jar
+ * directory — without prefixing with {@code indexFile}, {@code URLConnection} returns
+ * a listing instead of serving the index.
  */
 class StaticFileHandlerClasspathTest {
 

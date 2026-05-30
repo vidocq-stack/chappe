@@ -5,15 +5,15 @@ import io.vidocq.chappe.api.Server;
 import io.vidocq.chappe.api.StaticFileHandler;
 
 /**
- * Démonstration de {@link StaticFileHandler} servi depuis le classpath avec l'index
- * généré au build par {@code chappe-static-index-maven-plugin}.
+ * Demonstration of {@link StaticFileHandler} served from the classpath with the index
+ * generated at build time by {@code chappe-static-index-maven-plugin}.
  *
- * <p>Le plugin scanne {@code src/main/resources/static/**} et écrit
- * {@code META-INF/chappe-static-index.properties}. Au premier lookup, {@code StaticFileHandler}
- * charge cet index et résout chaque requête en O(1) — sans {@code URLConnection.openConnection()}.
+ * <p>The plugin scans {@code src/main/resources/static/**} and writes
+ * {@code META-INF/chappe-static-index.properties}. On the first lookup, {@code StaticFileHandler}
+ * loads that index and resolves each request in O(1) — without {@code URLConnection.openConnection()}.
  *
- * <p>Si le plugin n'est pas activé, le handler retombe sur le chemin classique
- * {@code loader.getResource()} — zéro régression fonctionnelle.
+ * <p>If the plugin is not enabled, the handler falls back to the classic
+ * {@code loader.getResource()} path — zero functional regression.
  */
 public final class StaticIndexedExample {
 

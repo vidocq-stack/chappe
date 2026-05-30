@@ -17,12 +17,12 @@ import javax.net.ssl.SSLEngineResult.Status;
  * Wraps a {@link SocketChannel} and {@link SSLEngine} to provide transparent TLS
  * read/write as {@link ReadableByteChannel} and {@link WritableByteChannel}.
  * <p>
- * Thread-safe pour read/write concurrents (HTTP/2 : frame loop lit sur un thread,
- * stream threads écrivent des réponses).
+ * Thread-safe for concurrent reads/writes (HTTP/2: the frame loop reads on one thread,
+ * stream threads write responses).
  * <ul>
- *   <li>Les opérations de lecture (unwrap) sont protégées par {@code readLock}</li>
- *   <li>Les opérations d'écriture (wrap) sont protégées par {@code writeLock}</li>
- *   <li>SSLEngine supporte unwrap/wrap concurrents si les buffers sont séparés</li>
+ *   <li>Read operations (unwrap) are protected by {@code readLock}</li>
+ *   <li>Write operations (wrap) are protected by {@code writeLock}</li>
+ *   <li>SSLEngine supports concurrent unwrap/wrap if buffers are separate</li>
  * </ul>
  */
 public final class SslHandler implements ReadableByteChannel, WritableByteChannel, Closeable {
@@ -30,14 +30,14 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
     private final SocketChannel channel;
     private final SSLEngine engine;
 
-    // Buffers de lecture (unwrap) — accédés uniquement sous readLock
+    // Read buffers (unwrap) — accessed only under readLock
     private final ByteBuffer netInBuffer;
     private final ByteBuffer appInBuffer;
 
-    // Buffer d'écriture (wrap) — accédé uniquement sous writeLock
+    // Write buffer (wrap) — accessed only under writeLock
     private final ByteBuffer netOutBuffer;
 
-    // Verrous séparés pour read/write concurrent
+    // Separate locks for concurrent read/write
     private final ReentrantLock readLock = new ReentrantLock();
     private final ReentrantLock writeLock = new ReentrantLock();
 
@@ -57,7 +57,7 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
     }
 
     // -------------------------------------------------------------------------
-    // Handshake (single-threaded, avant read/write concurrents)
+    // Handshake (single-threaded, before concurrent read/write)
     // -------------------------------------------------------------------------
 
     public void doHandshake() throws IOException {
@@ -186,8 +186,8 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
     }
 
     /**
-     * Post-unwrap : gère les tâches déléguées et les key updates TLS 1.3.
-     * Les wraps nécessaires sont faits sous writeLock.
+     * Post-unwrap: handles delegated tasks and TLS 1.3 key updates.
+     * Required wraps are performed under writeLock.
      */
     private void handlePostUnwrap(SSLEngineResult result) throws IOException {
         HandshakeStatus hs = result.getHandshakeStatus();
@@ -197,7 +197,7 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
                 while ((task = engine.getDelegatedTask()) != null) {
                     task.run();
                 }
-            } else { // NEED_WRAP — doit utiliser writeLock
+            } else { // NEED_WRAP — must use writeLock
                 writeLock.lock();
                 try {
                     netOutBuffer.clear();
@@ -278,13 +278,13 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
                 }
             }
         } catch (IOException _) {
-            // best-effort : flush du close_notify sortant
+            // best-effort: flush outbound close_notify
         } finally {
             writeLock.unlock();
             try {
                 engine.closeInbound();
             } catch (javax.net.ssl.SSLException _) {
-                // best-effort : peer n'a pas envoyé close_notify
+                // best-effort: peer did not send close_notify
             }
             channel.close();
         }

@@ -4,12 +4,12 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 
 /**
- * Décodeur HPACK (RFC 7541) — décode un header block compressé
- * et émet les paires nom/valeur dans un {@link HeaderSink}.
+ * HPACK decoder (RFC 7541) — decodes a compressed header block
+ * and emits name/value pairs into a {@link HeaderSink}.
  */
 public final class HpackDecoder {
 
-    /** Sink des paires nom/valeur décodées — peut rejeter via une exception protocole. */
+    /** Sink for decoded name/value pairs — may reject via a protocol exception. */
     @FunctionalInterface
     public interface HeaderSink {
         void accept(String name, String value) throws Http2ConnectionException;
@@ -24,7 +24,7 @@ public final class HpackDecoder {
     }
 
     /**
-     * Décode un header block complet et émet les paires dans le sink.
+     * Decodes a full header block and emits the pairs into the sink.
      */
     public void decode(ByteBuffer headerBlock, HeaderSink sink) throws Http2ConnectionException {
         int totalSize = 0;
@@ -76,7 +76,7 @@ public final class HpackDecoder {
         }
     }
 
-    /** Met à jour la taille max de la table dynamique (depuis SETTINGS). */
+    /** Updates the maximum dynamic table size (from SETTINGS). */
     public void updateMaxTableSize(int newMax) {
         dynamicTable.setMaxSize(newMax);
     }
@@ -84,7 +84,7 @@ public final class HpackDecoder {
     // --- Helpers ---
 
     /**
-     * Décode un entier HPACK (RFC 7541 §5.1).
+     * Decodes an HPACK integer (RFC 7541 §5.1).
      */
     static int decodeInteger(ByteBuffer buf, int prefix) {
         int mask = (1 << prefix) - 1;
@@ -104,7 +104,7 @@ public final class HpackDecoder {
     }
 
     /**
-     * Décode une chaîne HPACK (RFC 7541 §5.2).
+     * Decodes an HPACK string (RFC 7541 §5.2).
      */
     private String decodeString(ByteBuffer buf) {
         int b = buf.get(buf.position()) & 0xFF;

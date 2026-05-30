@@ -9,23 +9,23 @@ import java.util.Base64;
 import java.util.Optional;
 
 /**
- * Implémentation {@link GrpcCall} adossée à un body HTTP/1.1 standard (buffered en
- * lecture, streaming en écriture via {@link OutputStream}).
+ * {@link GrpcCall} implementation backed by a standard HTTP/1.1 body (buffered for
+ * reading, streaming for writing via {@link OutputStream}).
  * <p>
- * Utilisé par {@link DefaultRouterBuilder#grpcWeb} quand la requête arrive en HTTP/1.1
- * (le client navigateur typique sans HTTP/2 ou {@code HttpClient} JDK en cleartext).
- * En HTTP/2, on bascule plutôt sur {@code GrpcWebCallImpl} (streaming par DATA frame)
- * via le marker {@link GrpcWebDispatch}.
+ * Used by {@link DefaultRouterBuilder#grpcWeb} when the request arrives over HTTP/1.1
+ * (the typical browser client without HTTP/2 or JDK {@code HttpClient} in cleartext).
+ * Over HTTP/2, it switches instead to {@code GrpcWebCallImpl} (streaming via DATA frames)
+ * through the {@link GrpcWebDispatch} marker.
  *
- * <p>Différences pratiques vs HTTP/2 :
+ * <p>Practical differences vs HTTP/2:
  * <ul>
- *   <li><b>Lecture</b> : tout le body request est lu d'avance au constructeur, donc
- *       {@code receive()} parse depuis un buffer en mémoire — pas de blocage I/O</li>
- *   <li><b>Écriture</b> : chaque {@code send}/{@code complete} écrit immédiatement
- *       dans l'{@link OutputStream} chunked-encoding du response HTTP/1.1</li>
+ *   <li><b>Reading</b>: the entire request body is read upfront in the constructor, so
+ *       {@code receive()} parses from an in-memory buffer — no I/O blocking</li>
+ *   <li><b>Writing</b>: each {@code send}/{@code complete} writes immediately to the
+ *       HTTP/1.1 response's chunked-encoding {@link OutputStream}</li>
  * </ul>
  *
- * <p>Package-private : usage interne à {@link DefaultRouterBuilder} uniquement.
+ * <p>Package-private: internal use by {@link DefaultRouterBuilder} only.
  */
 final class GrpcWebBufferedCall implements GrpcCall {
 
@@ -61,7 +61,7 @@ final class GrpcWebBufferedCall implements GrpcCall {
         }
         this.deadlineNanoTime = deadlineNs;
 
-        // Lit tout le body (POST navigateur : tout arrive en un coup).
+        // Read entire body (browser POST: everything arrives at once).
         byte[] raw = request.body() != null ? request.body().asInputStream().readAllBytes() : new byte[0];
         byte[] decoded = (mode == GrpcWebDispatch.Mode.TEXT && raw.length > 0)
                 ? Base64.getDecoder().decode(raw)
@@ -75,8 +75,8 @@ final class GrpcWebBufferedCall implements GrpcCall {
         if (b0 == -1) return null;
         int compressed = b0 & 0xFF;
         if (compressed != 0) {
-            // V1 buffered : compression entrante non implémentée (le H1 ne sert que
-            // de fallback pour navigateurs qui n'envoient quasi jamais en gzip).
+            // Buffered V1: inbound compression not implemented (H1 is only a fallback
+            // for browsers, which almost never send gzip payloads).
             throw new IOException("compressed inbound message not supported in HTTP/1.1 gRPC-Web fallback");
         }
         int b1 = bodyStream.read();
@@ -127,13 +127,13 @@ final class GrpcWebBufferedCall implements GrpcCall {
 
     @Override
     public void addHeader(String name, String value) {
-        // Les headers initiaux sont émis par le router via la Response builder ;
-        // en H1 buffered on ne supporte pas addHeader après ouverture.
+        // Initial headers are emitted by router through the Response builder;
+        // in buffered H1 we do not support addHeader after opening.
         if (initialEmissionDone) {
             throw new IllegalStateException("initial response already emitted");
         }
-        // En H1 buffered v1, addHeader est un no-op silencieux (les headers de
-        // response sont fixés par Router.grpcWeb avant que le handler tourne).
+        // In buffered H1 v1, addHeader is a silent no-op (response headers are
+        // fixed by Router.grpcWeb before the handler runs).
     }
 
     @Override
@@ -146,7 +146,7 @@ final class GrpcWebBufferedCall implements GrpcCall {
 
     @Override
     public boolean isCancelled() {
-        return false; // H1 buffered : pas de signal de cancellation côté serveur
+        return false; // Buffered H1: no server-side cancellation signal
     }
 
     @Override
@@ -164,8 +164,8 @@ final class GrpcWebBufferedCall implements GrpcCall {
     @Override
     public void useResponseEncoding(String encoding) {
         if (encoding == null || "identity".equalsIgnoreCase(encoding)) return;
-        // V1 H1 buffered : encoding sortant pas supporté (les frames sont émises
-        // identity ; le handler peut compresser lui-même son payload s'il le veut).
+        // Buffered H1 V1: outbound encoding not supported (frames are emitted
+        // as identity; handler may compress payload itself if desired).
         throw new UnsupportedOperationException(
                 "response encoding not supported in HTTP/1.1 gRPC-Web fallback (use HTTP/2 endpoint)");
     }
@@ -183,7 +183,7 @@ final class GrpcWebBufferedCall implements GrpcCall {
     }
 
     // ----------------------------------------------------------------------
-    // Framing helpers (copies locales pour éviter une dépendance chappe-http)
+    // Framing helpers (local copies to avoid dependency on chappe-http)
     // ----------------------------------------------------------------------
 
     private static byte[] encodeMessageFrame(byte[] payload) {
@@ -235,8 +235,8 @@ final class GrpcWebBufferedCall implements GrpcCall {
     }
 
     /**
-     * Parse {@code grpc-timeout} (RFC gRPC). Copie locale de la logique disponible
-     * dans {@code chappe-http} — évite une dépendance inversée pour le fallback H1.
+     * Parses {@code grpc-timeout} (gRPC RFC). Local copy of the logic available
+     * in {@code chappe-http} — avoids an inverted dependency for the H1 fallback.
      */
     private static long parseTimeoutNanos(String value) {
         if (value == null || value.length() < 2 || value.length() > 9) return -1L;

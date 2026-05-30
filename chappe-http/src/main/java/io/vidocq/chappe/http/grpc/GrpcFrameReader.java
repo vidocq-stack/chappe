@@ -5,9 +5,9 @@ import java.io.IOException;
 import java.io.InputStream;
 
 /**
- * Lit un message gRPC (préfixe 5 octets + payload) depuis un InputStream.
+ * Reads a gRPC message (5-byte prefix + payload) from an InputStream.
  * <p>
- * Format (gRPC Core protocol) :
+ * Format (gRPC Core protocol):
  * <pre>
  * +--------+----------------+------------------------+
  * | 1 byte | 4 bytes (BE)   | N bytes                |
@@ -15,19 +15,19 @@ import java.io.InputStream;
  * +--------+----------------+------------------------+
  * </pre>
  * <ul>
- *   <li>{@code compr} : flag de compression (0 = identity, 1 = compressed avec {@code grpc-encoding})</li>
- *   <li>{@code length} : longueur du payload, big-endian, non signée</li>
+ *   <li>{@code compr}: compression flag (0 = identity, 1 = compressed with {@code grpc-encoding})</li>
+ *   <li>{@code length}: payload length, big-endian, unsigned</li>
  * </ul>
  */
 public final class GrpcFrameReader {
 
-    /** Taille maximale d'un message reçu (4 MiB par défaut, alignée sur grpc-java). */
+    /** Maximum size of a received message (4 MiB by default, aligned with grpc-java). */
     public static final int DEFAULT_MAX_MESSAGE_SIZE = 4 * 1024 * 1024;
 
     /**
-     * Decompresseur d'un payload déjà extrait. Reçoit les bytes compressés,
-     * doit retourner les bytes décompressés. Lance {@link IOException} si le
-     * format est corrompu.
+     * Decompressor for an already extracted payload. Receives the compressed bytes,
+     * must return the decompressed bytes. Throws {@link IOException} if the
+     * format is corrupted.
      */
     @FunctionalInterface
     public interface Decompressor {
@@ -46,9 +46,9 @@ public final class GrpcFrameReader {
     }
 
     /**
-     * @param decompressor décompresseur appliqué aux messages dont le préfixe a
-     *                     {@code compressed=1}. Si {@code null}, un message
-     *                     compressé entrant fait lever {@link GrpcFrameException}.
+     * @param decompressor decompressor applied to messages whose prefix has
+     *                     {@code compressed=1}. If {@code null}, an incoming
+     *                     compressed message causes a {@link GrpcFrameException}.
      */
     public GrpcFrameReader(int maxMessageSize, Decompressor decompressor) {
         this.maxMessageSize = maxMessageSize;
@@ -56,14 +56,14 @@ public final class GrpcFrameReader {
     }
 
     /**
-     * Lit le prochain message.
+     * Reads the next message.
      *
-     * @return les bytes du payload (décompressés si nécessaire), ou {@code null}
-     *         si l'InputStream est fermé (EOF propre)
-     * @throws IOException                  si l'I/O échoue ou si le format est invalide
-     * @throws GrpcFrameException           si la longueur dépasse {@code maxMessageSize}
-     *                                      ou si un message compressé arrive sans
-     *                                      décompresseur configuré
+     * @return the payload bytes (decompressed if needed), or {@code null}
+     *         if the InputStream is closed (clean EOF)
+     * @throws IOException        if I/O fails or the format is invalid
+     * @throws GrpcFrameException if the length exceeds {@code maxMessageSize}
+     *                            or if a compressed message arrives without a
+     *                            configured decompressor
      */
     public byte[] readMessage(InputStream in) throws IOException {
         int b0 = in.read();

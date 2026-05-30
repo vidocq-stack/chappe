@@ -5,12 +5,12 @@ import java.time.Duration;
 import java.util.Optional;
 
 /**
- * Représente un appel gRPC en cours côté serveur.
+ * Represents an in-progress gRPC call on the server side.
  * <p>
- * API synchrone bloquante — un appel gRPC tourne sur un virtual thread dédié.
- * Couvre les 4 modes : unary, server-streaming, client-streaming, bidi-streaming.
+ * Blocking synchronous API — a gRPC call runs on a dedicated virtual thread.
+ * Covers all 4 modes: unary, server-streaming, client-streaming, bidi-streaming.
  * <p>
- * Cycle de vie typique :
+ * Typical lifecycle:
  * <pre>{@code
  * // unary
  * byte[] req = call.receive();
@@ -29,94 +29,94 @@ import java.util.Optional;
  * call.send(reduce());
  * call.complete(GrpcStatus.OK, "");
  *
- * // bidi-streaming (le handler peut lancer un autre virtual thread pour write)
+ * // bidi-streaming (the handler can spawn another virtual thread for writes)
  * }</pre>
  *
- * Les bytes échangés sont opaques pour Chappe — la sérialisation (protobuf ou autre)
- * est la responsabilité de l'extension.
+ * The bytes exchanged are opaque to Chappe — serialisation (protobuf or other)
+ * is the extension's responsibility.
  */
 public interface GrpcCall {
 
     /**
-     * Lit le prochain message du client.
+     * Reads the next message from the client.
      *
-     * @return les bytes du message, ou {@code null} si le client a fait half-close (END_STREAM)
-     * @throws IOException si l'I/O ou le framing échoue
+     * @return the message bytes, or {@code null} if the client half-closed (END_STREAM)
+     * @throws IOException if I/O or framing fails
      */
     byte[] receive() throws IOException;
 
     /**
-     * Émet un message vers le client. Bloque si le flow control HTTP/2 est saturé.
+     * Sends a message to the client. Blocks if HTTP/2 flow control is saturated.
      * <p>
-     * Le premier appel à {@code send} déclenche l'envoi des headers initiaux serveur si
-     * pas encore fait ({@code :status 200}, {@code content-type: application/grpc}).
+     * The first call to {@code send} triggers the sending of the initial server headers
+     * if not yet done ({@code :status 200}, {@code content-type: application/grpc}).
      */
     void send(byte[] message) throws IOException;
 
     /**
-     * Termine l'appel avec un statut gRPC final.
+     * Terminates the call with a final gRPC status.
      * <p>
-     * Émet les trailers HTTP/2 avec {@code grpc-status} (et {@code grpc-message} si non vide),
-     * avec END_STREAM. Si aucun {@link #send} n'a été appelé et que les headers initiaux n'ont
-     * pas été émis, fusionne tout dans un trailers-only HEADERS frame (RFC §8.1).
+     * Emits HTTP/2 trailers with {@code grpc-status} (and {@code grpc-message} if non-empty),
+     * with END_STREAM. If no {@link #send} has been called and the initial headers have not
+     * been emitted, merges everything into a trailers-only HEADERS frame (RFC §8.1).
      */
     void complete(int grpcStatus, String message) throws IOException;
 
-    /** Headers reçus du client en début de stream (avant DATA frames). */
+    /** Headers received from the client at stream start (before DATA frames). */
     Headers metadata();
 
     /**
-     * Ajoute un header au response initial (Initial-Metadata).
-     * Doit être appelé <b>avant</b> le premier {@link #send}.
-     * @throws IllegalStateException si les headers initiaux ont déjà été émis
+     * Adds a header to the initial response (Initial-Metadata).
+     * Must be called <b>before</b> the first {@link #send}.
+     * @throws IllegalStateException if the initial headers have already been emitted
      */
     void addHeader(String name, String value);
 
     /**
-     * Ajoute un trailer additionnel. Doit être appelé avant {@link #complete}.
-     * @throws IllegalStateException si {@code complete} a déjà été appelé
+     * Adds an additional trailer. Must be called before {@link #complete}.
+     * @throws IllegalStateException if {@code complete} has already been called
      */
     void addTrailer(String name, String value);
 
-    /** {@code true} si le client a annulé le stream (RST_STREAM ou déconnexion). */
+    /** {@code true} if the client cancelled the stream (RST_STREAM or disconnect). */
     boolean isCancelled();
 
-    /** Content-type négocié, ex. {@code application/grpc}, {@code application/grpc+proto}. */
+    /** Negotiated content-type, e.g. {@code application/grpc}, {@code application/grpc+proto}. */
     String contentType();
 
     /**
-     * Active la compression des messages sortants (RFC gRPC §"Compression").
+     * Enables compression of outgoing messages (gRPC RFC §"Compression").
      * <p>
-     * Doit être appelé <b>avant</b> le premier {@link #send(byte[])} sinon les headers
-     * initiaux auront déjà été émis. La couche transport ajoute alors :
+     * Must be called <b>before</b> the first {@link #send(byte[])} otherwise the
+     * initial headers will already have been emitted. The transport layer then adds:
      * <ul>
-     *   <li>{@code grpc-encoding: <encoding>} aux headers initiaux serveur</li>
-     *   <li>flag {@code compressed=1} dans le préfixe 5 octets de chaque message envoyé</li>
+     *   <li>{@code grpc-encoding: <encoding>} to the initial server headers</li>
+     *   <li>the {@code compressed=1} flag in the 5-byte prefix of each sent message</li>
      * </ul>
-     * En réception, le serveur déclare toujours {@code grpc-accept-encoding: identity,gzip}
-     * et décompresse automatiquement les messages entrants compressés selon le
-     * {@code grpc-encoding} du client.
+     * On the receive side, the server always advertises {@code grpc-accept-encoding: identity,gzip}
+     * and automatically decompresses incoming messages compressed according to the
+     * client's {@code grpc-encoding}.
      *
-     * @param encoding codec — actuellement {@code "identity"} (no-op) ou {@code "gzip"}
-     * @throws IllegalStateException         si les headers initiaux ont déjà été émis
-     * @throws UnsupportedOperationException si {@code encoding} n'est pas supporté
+     * @param encoding codec — currently {@code "identity"} (no-op) or {@code "gzip"}
+     * @throws IllegalStateException         if the initial headers have already been emitted
+     * @throws UnsupportedOperationException if {@code encoding} is not supported
      */
     void useResponseEncoding(String encoding);
 
     /**
-     * Deadline propagée par le client via le header {@code grpc-timeout} (RFC gRPC §"Requests").
+     * Deadline propagated by the client via the {@code grpc-timeout} header (gRPC RFC §"Requests").
      * <p>
-     * Si présent, la couche transport Chappe arme automatiquement un watchdog : à
-     * l'expiration, le stream est annulé (débloque les {@link #receive()} en cours) et un
-     * trailer {@code grpc-status: 4 (DEADLINE_EXCEEDED)} est émis vers le client si le
-     * handler n'avait pas encore appelé {@link #complete(int, String)}.
+     * If present, the Chappe transport layer automatically arms a watchdog: on expiry,
+     * the stream is cancelled (unblocks pending {@link #receive()} calls) and a
+     * {@code grpc-status: 4 (DEADLINE_EXCEEDED)} trailer is emitted to the client if the
+     * handler has not yet called {@link #complete(int, String)}.
      * <p>
-     * Le handler peut consulter cette valeur pour adapter son comportement — par exemple
-     * raccourcir la deadline d'un appel downstream.
+     * The handler can read this value to adapt its behaviour — for example to shorten
+     * the deadline of a downstream call.
      *
-     * @return durée restante depuis {@link System#nanoTime()}, ou {@link Optional#empty()} si
-     *         le client n'a pas envoyé de {@code grpc-timeout}. Peut être {@link Duration#ZERO}
-     *         si la deadline est déjà expirée au moment de l'appel.
+     * @return remaining duration since {@link System#nanoTime()}, or {@link Optional#empty()} if
+     *         the client did not send a {@code grpc-timeout}. May be {@link Duration#ZERO}
+     *         if the deadline has already expired at the time of the call.
      */
     Optional<Duration> deadline();
 }

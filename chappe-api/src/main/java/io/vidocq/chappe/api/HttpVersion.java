@@ -5,7 +5,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
- * Versions du protocole HTTP supportées.
+ * Supported HTTP protocol versions.
  */
 public enum HttpVersion {
     HTTP_1_0("HTTP/1.0"),
@@ -21,17 +21,17 @@ public enum HttpVersion {
         this.wire = wire;
     }
 
-    /** Format tel qu'il apparaît sur le réseau (ex. {@code "HTTP/1.1"}). */
+    /** Format as it appears on the wire (for example {@code "HTTP/1.1"}). */
     public String wireFormat() {
         return wire;
     }
 
     /**
-     * Résout une version HTTP à partir de sa représentation wire.
+     * Resolves an HTTP version from its wire representation.
      *
-     * @param wire le format réseau (ex. {@code "HTTP/1.1"})
-     * @return la constante correspondante
-     * @throws IllegalArgumentException si la version est inconnue
+     * @param wire the wire format (for example {@code "HTTP/1.1"})
+     * @return the matching constant
+     * @throws IllegalArgumentException if the version is unknown
      */
     public static HttpVersion of(String wire) {
         var v = LOOKUP.get(wire);

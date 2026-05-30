@@ -123,9 +123,9 @@ public final class HpackStaticTable {
 
     private record Key(String name, String value) {}
 
-    // Références cachées des noms ultra-chauds pour permettre un compare par identity.
-    // Comparer avec `==` avant `equals()` : coûteux 0 quand l'appelant passe la String
-    // internée (ce qui est le cas dans HpackEncoder qui utilise les constantes de cette classe).
+    // Cached references for ultra-hot names to enable identity comparisons.
+    // Compare with `==` before `equals()`: zero extra cost when caller passes interned
+    // String references (as HpackEncoder does using constants from this class).
     private static final String N_METHOD = ENTRIES[2][0]; // ":method"
     private static final String N_PATH = ENTRIES[4][0]; // ":path"
     private static final String N_SCHEME = ENTRIES[6][0]; // ":scheme"
@@ -136,10 +136,10 @@ public final class HpackStaticTable {
      *
      * @return 1-based index, or 0 if not found
      */
-    @SuppressWarnings("ReferenceEquality") // Comparaisons `==` intentionnelles : fast path HPACK
+    @SuppressWarnings("ReferenceEquality") // Intentional `==` comparisons: HPACK fast path
     public static int findExact(String name, String value) {
-        // Fast path inline pour les pseudo-headers (>90 % du trafic HTTP/2).
-        // Évite l'allocation du Key record + la traversée HashMap pour le cas chaud.
+        // Inline fast path for pseudo-headers (>90% of HTTP/2 traffic).
+        // Avoids Key-record allocation + HashMap traversal on the hot path.
         if (name == N_METHOD || ":method".equals(name)) {
             if ("GET".equals(value)) return 2;
             if ("POST".equals(value)) return 3;
@@ -170,9 +170,9 @@ public final class HpackStaticTable {
      *
      * @return 1-based index, or 0 if not found
      */
-    @SuppressWarnings("ReferenceEquality") // Comparaisons `==` intentionnelles : fast path HPACK
+    @SuppressWarnings("ReferenceEquality") // Intentional `==` comparisons: HPACK fast path
     public static int findByName(String name) {
-        // Fast path inline pour les pseudo-headers (>90 % du trafic HTTP/2).
+        // Inline fast path for pseudo-headers (>90% of HTTP/2 traffic).
         if (name == N_METHOD || ":method".equals(name)) return 2;
         if (name == N_PATH || ":path".equals(name)) return 4;
         if (name == N_SCHEME || ":scheme".equals(name)) return 6;

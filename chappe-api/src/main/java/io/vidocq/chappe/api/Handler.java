@@ -1,10 +1,10 @@
 package io.vidocq.chappe.api;
 
 /**
- * Gestionnaire de requête HTTP — interface fonctionnelle {@code Request → Response}.
+ * HTTP request handler — functional interface {@code Request → Response}.
  * <p>
- * C'est le contrat central de Chappe. Chaque handler reçoit une requête
- * immutable et retourne une réponse.
+ * This is Chappe's central contract. Each handler receives an immutable request
+ * and returns a response.
  *
  * <pre>{@code
  * Handler hello = request -> Response.ok("Hello, Chappe!");
@@ -14,11 +14,11 @@ package io.vidocq.chappe.api;
 public interface Handler {
 
     /**
-     * Traite une requête HTTP et retourne une réponse.
+     * Handles an HTTP request and returns a response.
      *
-     * @param request la requête entrante (lecture seule)
-     * @return la réponse à envoyer au client
-     * @throws Exception si le traitement échoue (sera converti en 500 par le serveur)
+     * @param request the incoming request (read-only)
+     * @return the response to send to the client
+     * @throws Exception if processing fails (it will be converted to 500 by the server)
      */
     Response handle(Request request) throws Exception;
 }

@@ -3,9 +3,9 @@ package io.vidocq.chappe.http;
 import io.vidocq.chappe.api.StatusCode;
 
 /**
- * Exception levée lors du parsing d'une requête HTTP malformée.
+ * Exception thrown while parsing a malformed HTTP request.
  * <p>
- * Porte le {@link StatusCode} approprié pour la réponse d'erreur
+ * Carries the appropriate {@link StatusCode} for the error response
  * (400, 413, 414, 431…).
  */
 public final class ParseException extends Exception {
@@ -17,7 +17,7 @@ public final class ParseException extends Exception {
         this.statusCode = statusCode;
     }
 
-    /** Code de statut HTTP à retourner au client. */
+    /** HTTP status code to return to the client. */
     public StatusCode statusCode() {
         return statusCode;
     }

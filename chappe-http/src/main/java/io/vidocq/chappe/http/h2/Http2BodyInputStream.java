@@ -5,10 +5,10 @@ import java.io.InputStream;
 import java.nio.ByteBuffer;
 
 /**
- * InputStream alimenté par la queue de DATA frames d'un stream HTTP/2.
+ * InputStream fed by the DATA frame queue of an HTTP/2 stream.
  * <p>
- * Bloque sur {@link Http2Stream#takeData()} quand aucune donnée n'est disponible
- * (naturel sur virtual threads).
+ * Blocks on {@link Http2Stream#takeData()} when no data is available
+ * (natural on virtual threads).
  */
 final class Http2BodyInputStream extends InputStream {
 

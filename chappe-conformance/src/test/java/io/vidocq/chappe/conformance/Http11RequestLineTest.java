@@ -13,7 +13,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * Tests de conformite HTTP/1.1 pour la ligne de requete (request-line).
+ * HTTP/1.1 conformance tests for the request line.
  * RFC 9112, Section 3.
  */
 class Http11RequestLineTest {

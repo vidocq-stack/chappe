@@ -1,5 +1,5 @@
 /**
- * Moteur serveur HTTP Chappe — virtual threads, lifecycle, configuration.
+ * Chappe HTTP server engine — virtual threads, lifecycle, configuration.
  */
 module io.vidocq.chappe.core {
     requires io.vidocq.chappe.api;

@@ -7,8 +7,8 @@ import io.vidocq.chappe.http.h2.HpackStaticTable;
 import org.openjdk.jmh.annotations.*;
 
 /**
- * Compare le lookup actuel (maps pré-construites, O(1)) à l'ancien scan linéaire O(61)
- * sur les deux méthodes chaudes du hot path HPACK.
+ * Compares the current lookup (prebuilt maps, O(1)) to the previous O(61) linear scan
+ * on the two hot methods of the HPACK hot path.
  */
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
@@ -18,17 +18,17 @@ import org.openjdk.jmh.annotations.*;
 @Fork(value = 1, jvmArgsAppend = "--enable-preview")
 public class HpackStaticTableBench {
 
-    // 61 entrées — copiées pour reproduire l'ancienne implémentation scan linéaire.
+    // 61 entries — copied to reproduce the old linear-scan implementation.
     private static final String[][] OLD_ENTRIES = buildOld();
 
-    // Inputs représentatifs : header fréquent (hit tôt), header rare (hit tardif), miss.
+    // Representative inputs: frequent header (early hit), rare header (late hit), miss.
     @Param({":method", "vary", "x-custom-header"})
     public String name;
 
     @Param({"GET", ""})
     public String value;
 
-    // ── findByName ──
+    // -- findByName --
 
     @Benchmark
     public int findByName_current() {
@@ -43,7 +43,7 @@ public class HpackStaticTableBench {
         return 0;
     }
 
-    // ── findExact ──
+    // -- findExact --
 
     @Benchmark
     public int findExact_current() {

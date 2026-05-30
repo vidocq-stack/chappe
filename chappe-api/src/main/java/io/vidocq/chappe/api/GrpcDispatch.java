@@ -3,12 +3,12 @@ package io.vidocq.chappe.api;
 import java.util.Objects;
 
 /**
- * Réponse marqueur signalant au transport HTTP/2 qu'un appel gRPC doit être dispatché
- * vers un {@link GrpcHandler}.
+ * Marker response telling the HTTP/2 transport that a gRPC call must be dispatched
+ * to a {@link GrpcHandler}.
  * <p>
- * Construite par {@link Router.Builder#grpc(String, GrpcHandler)} et reconnue par
- * {@code chappe-http} via {@code instanceof}. Une application normale n'a pas besoin
- * de l'instancier directement.
+ * Built by {@link Router.Builder#grpc(String, GrpcHandler)} and recognized by
+ * {@code chappe-http} via {@code instanceof}. A normal application does not need
+ * to instantiate it directly.
  */
 public final class GrpcDispatch implements Response {
 

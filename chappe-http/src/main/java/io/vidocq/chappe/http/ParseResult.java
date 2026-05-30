@@ -1,13 +1,13 @@
 package io.vidocq.chappe.http;
 
 /**
- * Résultat d'une tentative de parsing.
+ * Result of a parsing attempt.
  */
 public enum ParseResult {
 
-    /** Requête complètement parsée, prête pour le dispatch. */
+    /** Request fully parsed, ready for dispatch. */
     COMPLETE,
 
-    /** Le pair distant a fermé la connexion. */
+    /** The remote peer closed the connection. */
     CONNECTION_CLOSED
 }

@@ -11,8 +11,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * Tests de conformite HTTP/1.1 pour les en-tetes (headers).
- * RFC 9110, Section 5 ; RFC 9112, Section 5.
+ * HTTP/1.1 conformance tests for headers.
+ * RFC 9110, Section 5; RFC 9112, Section 5.
  */
 class Http11HeadersTest {
 

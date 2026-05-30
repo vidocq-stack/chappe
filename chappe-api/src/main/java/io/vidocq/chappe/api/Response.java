@@ -1,30 +1,30 @@
 package io.vidocq.chappe.api;
 
 /**
- * Réponse HTTP — immutable une fois construite.
+ * HTTP response — immutable once built.
  * <p>
- * Créer via les factories statiques ou le {@link Builder}.
+ * Create via the static factories or the {@link Builder}.
  */
 public interface Response {
 
-    /** Code de statut HTTP. */
+    /** HTTP status code. */
     StatusCode status();
 
-    /** En-têtes de la réponse. */
+    /** Response headers. */
     Headers headers();
 
-    /** Corps de la réponse. */
+    /** Response body. */
     Body body();
 
     /**
-     * Trailers HTTP envoyés après le corps (HTTP/2 §8.1, RFC 9113 §8.1, chunked HTTP/1.1 §7.1.2).
+     * HTTP trailers sent after the body (HTTP/2 §8.1, RFC 9113 §8.1, chunked HTTP/1.1 §7.1.2).
      * <p>
-     * Vide par défaut. Appelé par la couche transport <b>après</b> que {@link #body()}
-     * ait été entièrement consommé : une implémentation custom peut donc calculer les
-     * trailers à la volée (ex. {@code grpc-status} en gRPC streaming).
+     * Empty by default. Called by the transport layer <b>after</b> {@link #body()}
+     * has been fully consumed: a custom implementation can therefore compute the
+     * trailers on the fly (e.g. {@code grpc-status} in gRPC streaming).
      * <p>
-     * En HTTP/1.1, l'application doit explicitement annoncer les noms via le header
-     * {@code Trailer:} et utiliser l'encodage chunked.
+     * In HTTP/1.1, the application must explicitly announce the names via the
+     * {@code Trailer:} header and use chunked encoding.
      */
     default Headers trailers() {
         return Headers.empty();
@@ -32,15 +32,15 @@ public interface Response {
 
     // --- Factories ---
 
-    /** Réponse 200 OK "ok" pré-allouée (hot path benchmark). */
+    /** Pre-allocated 200 OK "ok" response (hot path benchmark). */
     Response OK_TEXT = Response.ok("ok");
 
-    /** 200 OK sans corps. */
+    /** 200 OK with no body. */
     static Response ok() {
         return builder().status(StatusCode.OK).build();
     }
 
-    /** 200 OK avec un corps texte UTF-8. */
+    /** 200 OK with a UTF-8 text body. */
     static Response ok(String text) {
         return builder()
                 .status(StatusCode.OK)
@@ -49,27 +49,27 @@ public interface Response {
                 .build();
     }
 
-    /** 200 OK avec un corps {@link Body}. */
+    /** 200 OK with a {@link Body} body. */
     static Response ok(Body body) {
         return builder().status(StatusCode.OK).body(body).build();
     }
 
-    /** Réponse avec le statut donné, sans corps. */
+    /** Response with the given status and no body. */
     static Response of(StatusCode status) {
         return builder().status(status).build();
     }
 
-    /** Réponse avec le statut et le corps donnés. */
+    /** Response with the given status and body. */
     static Response of(StatusCode status, Body body) {
         return builder().status(status).body(body).build();
     }
 
-    /** Crée un nouveau builder. */
+    /** Creates a new builder. */
     static Builder builder() {
         return new DefaultResponseBuilder();
     }
 
-    /** Builder fluide pour construire une {@link Response}. */
+    /** Fluent builder for constructing a {@link Response}. */
     interface Builder {
 
         Builder status(StatusCode status);
@@ -78,10 +78,10 @@ public interface Response {
 
         Builder headers(Headers headers);
 
-        /** Ajoute un trailer (HTTP/2 ou chunked HTTP/1.1). */
+        /** Adds a trailer (HTTP/2 or chunked HTTP/1.1). */
         Builder trailer(String name, String value);
 
-        /** Remplace l'ensemble des trailers. */
+        /** Replaces all trailers. */
         Builder trailers(Headers trailers);
 
         Builder body(Body body);

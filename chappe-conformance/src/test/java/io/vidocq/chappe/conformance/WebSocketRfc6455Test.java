@@ -21,7 +21,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * Conformité RFC 6455 — handshake et framing au niveau socket brut.
+ * RFC 6455 conformance — handshake and framing at the raw socket level.
  */
 class WebSocketRfc6455Test {
 
@@ -50,7 +50,7 @@ class WebSocketRfc6455Test {
 
     @Test
     void handshakeSecWebSocketAcceptIsRfc6455Compliant() {
-        // Cas canonique RFC 6455 §1.3
+        // Canonical RFC 6455 §1.3 case
         var key = "dGhlIHNhbXBsZSBub25jZQ==";
         var expected = "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=";
         assertEquals(expected, WebSocketHandshake.computeAccept(key));
@@ -107,7 +107,7 @@ class WebSocketRfc6455Test {
     @Test
     void serverDoesNotAcceptUnmaskedClientFrame() throws Exception {
         try (var socket = openHandshake()) {
-            // Frame texte non masquée — violation RFC §5.1
+            // Unmasked text frame — RFC §5.1 violation
             var out = socket.getOutputStream();
             out.write(new byte[] {
                 (byte) 0x81, // FIN + TEXT
@@ -120,7 +120,7 @@ class WebSocketRfc6455Test {
             });
             out.flush();
 
-            // Le serveur doit envoyer Close avec PROTOCOL_ERROR (1002) et fermer.
+            // Server must send Close with PROTOCOL_ERROR (1002) and close.
             var frame = readFrame(socket.getInputStream());
             assertEquals(0x8, frame.opcode, "Expected Close frame");
             assertTrue(frame.payload.length >= 2);
@@ -143,7 +143,7 @@ class WebSocketRfc6455Test {
     @Test
     void invalidUtf8InTextFrameTriggersClose1007() throws Exception {
         try (var socket = openHandshake()) {
-            // 0xC0 0xAF est une séquence UTF-8 invalide (overlong encoding du '/')
+            // 0xC0 0xAF is an invalid UTF-8 sequence (overlong encoding of '/')
             sendMaskedBytes(socket.getOutputStream(), 0x1, new byte[] {(byte) 0xC0, (byte) 0xAF});
             var frame = readFrame(socket.getInputStream());
             assertEquals(0x8, frame.opcode);
@@ -155,7 +155,7 @@ class WebSocketRfc6455Test {
     @Test
     void clientCloseIsEchoedWithSameCode() throws Exception {
         try (var socket = openHandshake()) {
-            // Envoyer Close 1000
+            // Send Close 1000
             byte[] closePayload = new byte[] {0x03, (byte) 0xE8}; // 1000
             sendMaskedBytes(socket.getOutputStream(), 0x8, closePayload);
             var frame = readFrame(socket.getInputStream());
@@ -165,7 +165,7 @@ class WebSocketRfc6455Test {
         }
     }
 
-    // ── Helpers ──
+    // -- Helpers --
 
     private Socket openHandshake() throws IOException {
         var socket = new Socket("127.0.0.1", port);
@@ -193,7 +193,7 @@ class WebSocketRfc6455Test {
         return Base64.getEncoder().encodeToString(bytes);
     }
 
-    /** Lit jusqu'à \r\n\r\n. */
+    /** Reads until \r\n\r\n. */
     private static String readHandshakeResponse(InputStream in) throws IOException {
         var sb = new StringBuilder();
         int b;
@@ -256,7 +256,7 @@ class WebSocketRfc6455Test {
         if (len7 < 126) len = len7;
         else if (len7 == 126) len = in.readUnsignedShort();
         else len = in.readLong();
-        // Pas de MASK côté serveur.
+        // No MASK on the server side.
         var payload = new byte[(int) len];
         in.readFully(payload);
         return new DecodedFrame(opcode, payload);

@@ -1,7 +1,7 @@
 /**
- * Chappe CLI — launcher standalone {@code chappe serve} pour servir des sites
- * statiques sans launcher Java applicatif. Configuration via mini-YAML in-house
- * et flags CLI. Zéro dépendance hors JDK.
+ * Chappe CLI — standalone {@code chappe serve} launcher for serving
+ * static sites without an application-specific Java launcher. Configuration via in-house mini-YAML
+ * and CLI flags. Zero dependencies outside the JDK.
  */
 module io.vidocq.chappe.cli {
     requires io.vidocq.chappe.api;

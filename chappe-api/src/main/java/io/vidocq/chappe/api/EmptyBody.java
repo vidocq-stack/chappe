@@ -5,7 +5,7 @@ import java.nio.ByteBuffer;
 import java.util.concurrent.Flow;
 
 /**
- * Corps vide — singleton.
+ * Empty body — singleton.
  */
 final class EmptyBody implements Body {
 

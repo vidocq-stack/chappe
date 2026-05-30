@@ -14,14 +14,14 @@ import io.vidocq.chappe.http.ws.WebSocketConnection;
 import io.vidocq.chappe.http.ws.WebSocketHandshake;
 
 /**
- * Gestion d'une connexion HTTP/1.1 — boucle keep-alive.
+ * HTTP/1.1 connection handler — keep-alive loop.
  * <p>
- * Exécuté sur un virtual thread par {@code chappe-core}.
- * Orchestre : parse → body setup → dispatch handler → write response → loop.
+ * Executed on a virtual thread by {@code chappe-core}.
+ * Orchestrates: parse → body setup → dispatch handler → write response → loop.
  */
 public final class HttpConnection {
 
-    private static final int BUFFER_SIZE = 16 * 1024; // 16 Ko
+    private static final int BUFFER_SIZE = 16 * 1024; // 16 KB
 
     private final ReadableByteChannel readChannel;
     private final WritableByteChannel writeChannel;
@@ -45,7 +45,7 @@ public final class HttpConnection {
     }
 
     /**
-     * Constructeur pour TLS — accepte des channels séparés (SslHandler).
+     * Constructor for TLS — accepts separate channels (SslHandler).
      */
     public HttpConnection(
             ReadableByteChannel readChannel,
@@ -79,8 +79,8 @@ public final class HttpConnection {
     }
 
     /**
-     * Point d'entrée — appelé par chappe-core sur un virtual thread.
-     * Boucle jusqu'à fermeture de la connexion ou erreur.
+     * Entry point — called by chappe-core on a virtual thread.
+     * Loops until the connection is closed or an error occurs.
      */
     public void run() {
         try {
@@ -88,7 +88,7 @@ public final class HttpConnection {
                 parser.reset();
                 request.reset();
 
-                // 1. Parser la requête (request-line + headers)
+                // 1. Parse request (request-line + headers)
                 ParseResult result;
                 try {
                     result = parser.parse(readBuffer, readChannel, request, config);
@@ -116,7 +116,7 @@ public final class HttpConnection {
 
                 // 3. Expect: 100-continue (RFC 9110 §10.1.1)
                 if ("100-continue".equalsIgnoreCase(request.headers().firstOrNull("Expect"))) {
-                    // Envoyer 100 Continue avant la lecture du body
+                    // Send 100 Continue before reading the body
                     var continueBytes = "HTTP/1.1 100 Continue\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
                     var buf = ByteBuffer.wrap(continueBytes);
                     while (buf.hasRemaining()) {
@@ -124,7 +124,7 @@ public final class HttpConnection {
                     }
                 }
 
-                // 4. Setup du body
+                // 4. Setup body
                 InputStream bodyStream;
                 try {
                     bodyStream = setupBody();
@@ -136,7 +136,7 @@ public final class HttpConnection {
                     request.body = Body.of(bodyStream, contentLength());
                 }
 
-                // 3. Dispatch au handler avec ScopedValue binding
+                // 3. Dispatch to handler with ScopedValue binding
                 boolean keepAlive = isKeepAlive();
                 Response response;
                 try {
@@ -149,14 +149,14 @@ public final class HttpConnection {
                             .build();
                 }
 
-                // 4a-bis. gRPC nécessite HTTP/2 — refus défensif sur la couche HTTP/1.1.
-                // En pratique le routeur retourne déjà 505 (cf. DefaultRouterBuilder.grpc()),
-                // ce check ne sert que de garde-fou si une extension construit GrpcDispatch ailleurs.
+                // 4a-bis. gRPC requires HTTP/2 — defensive rejection on HTTP/1.1 layer.
+                // In practice router already returns 505 (see DefaultRouterBuilder.grpc()),
+                // this check only acts as guardrail if an extension builds GrpcDispatch elsewhere.
                 if (response instanceof io.vidocq.chappe.api.GrpcDispatch) {
                     response = Response.of(StatusCode.HTTP_VERSION_NOT_SUPPORTED);
                 }
 
-                // 4a. WebSocket upgrade : bascule en mode frames et termine la boucle HTTP.
+                // 4a. WebSocket upgrade: switch to frame mode and end HTTP loop.
                 if (response instanceof WebSocketUpgrade upgrade) {
                     if (bodyStream != null) HttpBodyReader.drain(bodyStream);
                     var key = request.headers().firstOrNull("Sec-WebSocket-Key");
@@ -170,30 +170,30 @@ public final class HttpConnection {
                             request,
                             upgrade.subprotocol());
                     wsConn.run();
-                    return; // closeable déjà fermé par WebSocketConnection
+                    return; // closeable already closed by WebSocketConnection
                 }
 
-                // 4. Écrire la réponse
+                // 4. Write response
                 writer.write(response, writeBuffer, writeChannel, keepAlive, request.method());
 
-                // 5. Drainer le body non lu (pour keep-alive)
+                // 5. Drain unread body (for keep-alive)
                 if (bodyStream != null) {
                     HttpBodyReader.drain(bodyStream);
                 }
 
-                // 6. Vérifier keep-alive
+                // 6. Check keep-alive
                 if (!keepAlive) {
                     break;
                 }
             }
         } catch (IOException _) {
-            // Connexion perdue — silencieux
+            // Lost connection — silent
         } finally {
             close();
         }
     }
 
-    /** Ferme la connexion. */
+    /** Closes the connection. */
     public void close() {
         open = false;
         try {
@@ -203,19 +203,19 @@ public final class HttpConnection {
         }
     }
 
-    // --- Helpers internes ---
+    // --- Internal helpers ---
 
     /**
-     * Setup du body de la requête.
-     * @return l'InputStream du body, ou null si pas de body
-     * @throws BadBodyException si le Content-Length est invalide ou dépasse la limite
+     * Sets up the request body.
+     * @return the body InputStream, or null if there is no body
+     * @throws BadBodyException if Content-Length is invalid or exceeds the limit
      */
     private InputStream setupBody() throws BadBodyException {
         var headers = request.headers();
         var transferEncoding = headers.firstOrNull("Transfer-Encoding");
         var contentLengthStr = headers.firstOrNull("Content-Length");
 
-        // Transfer-Encoding: chunked gagne sur Content-Length (RFC 9112 §6.3)
+        // Transfer-Encoding: chunked wins over Content-Length (RFC 9112 §6.3)
         if ("chunked".equalsIgnoreCase(transferEncoding)) {
             return HttpBodyReader.chunked(readBuffer, readChannel);
         }
@@ -265,10 +265,10 @@ public final class HttpConnection {
     private boolean isKeepAlive() {
         var connection = request.headers().firstOrNull("Connection");
         if (request.version() == HttpVersion.HTTP_1_1) {
-            // HTTP/1.1 : keep-alive par défaut, sauf si Connection: close
+            // HTTP/1.1: keep-alive by default, unless Connection: close
             return !"close".equalsIgnoreCase(connection);
         }
-        // HTTP/1.0 : close par défaut, sauf si Connection: keep-alive
+        // HTTP/1.0: close by default, unless Connection: keep-alive
         return "keep-alive".equalsIgnoreCase(connection);
     }
 
@@ -276,7 +276,7 @@ public final class HttpConnection {
         try {
             writer.writeError(status, message, writeBuffer, writeChannel);
         } catch (IOException _) {
-            // Connexion déjà perdue
+            // Connection already lost
         }
     }
 }

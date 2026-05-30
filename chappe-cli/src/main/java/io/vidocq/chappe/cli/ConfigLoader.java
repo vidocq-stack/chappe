@@ -6,12 +6,12 @@ import java.nio.file.Path;
 
 import io.vidocq.chappe.cli.yaml.YamlReader;
 
-/** Charge un {@link ChappeConfig} depuis un fichier YAML sur disque. */
+/** Loads a {@link ChappeConfig} from a YAML file on disk. */
 public final class ConfigLoader {
 
     private ConfigLoader() {}
 
-    /** Lit le fichier UTF-8 et le projette sur un {@code ChappeConfig}. */
+    /** Reads the UTF-8 file and maps it to a {@code ChappeConfig}. */
     public static ChappeConfig load(Path file) throws IOException {
         String content = Files.readString(file);
         return ChappeConfig.from(YamlReader.parse(content));

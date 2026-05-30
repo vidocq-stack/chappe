@@ -153,8 +153,8 @@ public final class IndexMojo extends AbstractMojo {
         return target;
     }
 
-    // Clés = path classpath (préfixe rootPrefix inclus), ex. "static/index.html".
-    // Le runtime n'a pas à connaître rootPrefix : il cherche directement resourcePath.
+    // Keys = classpath paths (with rootPrefix included), e.g. "static/index.html".
+    // Runtime does not need to know rootPrefix: it looks up resourcePath directly.
     private void indexEntry(Properties props, Path outputDir, Path file) {
         String rel = outputDir.relativize(file).toString().replace('\\', '/');
         try {
@@ -180,8 +180,8 @@ public final class IndexMojo extends AbstractMojo {
         return HexFormat.of().formatHex(md.digest());
     }
 
-    // Mini table locale — évite une dépendance sur chappe-api depuis un plugin Maven.
-    // Alignée avec io.vidocq.chappe.api.MimeTypes.
+    // Local mini-table — avoids depending on chappe-api from this Maven plugin.
+    // Kept aligned with io.vidocq.chappe.api.MimeTypes.
     private static String detectMime(String path) {
         int dot = path.lastIndexOf('.');
         if (dot < 0 || dot == path.length() - 1) return "application/octet-stream";

@@ -5,7 +5,7 @@ import java.nio.ByteBuffer;
 import java.util.concurrent.Flow;
 
 /**
- * Corps basé sur un InputStream — adapté aux lectures en streaming.
+ * Body backed by an InputStream — suited for streaming reads.
  */
 final class InputStreamBody implements Body {
 

@@ -26,20 +26,20 @@ import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Handler de fichiers statiques avec fallback chain, support classpath, cache mémoire.
+ * Static file handler with fallback chain, classpath support, and in-memory cache.
  *
  * <pre>{@code
- * // Filesystem simple
+ * // Simple filesystem
  * StaticFileHandler.of(Path.of("./public"))
  *
- * // Builder avec fallback chain
+ * // Builder with fallback chain
  * StaticFileHandler.builder()
- *     .addPath(Path.of("./public"))              // filesystem d'abord
- *     .addClasspath("static")                     // puis classpath
- *     .addClasspath("META-INF/resources")         // puis META-INF
- *     .cacheInMemory(true)                        // cache les petites ressources
- *     .cacheControl("max-age=3600")               // header Cache-Control
- *     .indexFile("index.html")                    // fichier index pour les répertoires
+ *     .addPath(Path.of("./public"))              // filesystem first
+ *     .addClasspath("static")                     // then classpath
+ *     .addClasspath("META-INF/resources")         // then META-INF
+ *     .cacheInMemory(true)                        // cache small resources
+ *     .cacheControl("max-age=3600")               // Cache-Control header
+ *     .indexFile("index.html")                    // index file for directories
  *     .build()
  * }</pre>
  */
@@ -49,7 +49,7 @@ public final class StaticFileHandler implements Handler {
                     "EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.US)
             .withZone(ZoneOffset.UTC);
 
-    private static final int MAX_CACHE_ENTRY_SIZE = 64 * 1024; // 64 Ko max par entrée
+    private static final int MAX_CACHE_ENTRY_SIZE = 64 * 1024; // max 64 KB per entry
 
     private final List<ResourceSource> sources;
     private final String indexFile;
@@ -81,24 +81,24 @@ public final class StaticFileHandler implements Handler {
         this.cache = cacheInMemory ? new ConcurrentHashMap<>() : null;
     }
 
-    // ── Factories simples ──
+    // -- Simple factories --
 
-    /** Sert les fichiers depuis un répertoire du filesystem. */
+    /** Serves files from a filesystem directory. */
     public static Handler of(Path root) {
         return builder().addPath(root).build();
     }
 
-    /** Sert les fichiers depuis un répertoire avec un fichier index custom. */
+    /** Serves files from a directory with a custom index file. */
     public static Handler of(Path root, String indexFile) {
         return builder().addPath(root).indexFile(indexFile).build();
     }
 
-    /** Crée un builder pour une configuration avancée. */
+    /** Creates a builder for advanced configuration. */
     public static Builder builder() {
         return new Builder();
     }
 
-    // ── Handler ──
+    // -- Handler --
 
     @Override
     public Response handle(Request request) throws Exception {
@@ -113,7 +113,7 @@ public final class StaticFileHandler implements Handler {
 
         String relative = requestPath.startsWith("/") ? requestPath.substring(1) : requestPath;
 
-        // Précompression : tente .br puis .gz si client compatible
+        // Precompression: try .br then .gz if client is compatible
         if (preferPrecompressed && !relative.isEmpty() && !relative.endsWith("/")) {
             String acceptEnc = request.header("Accept-Encoding").orElse(null);
             String[][] sidecars = {{"br", ".br"}, {"gzip", ".gz"}};
@@ -129,7 +129,7 @@ public final class StaticFileHandler implements Handler {
             }
         }
 
-        // Cache hit ?
+        // Cache hit?
         if (cache != null) {
             var cached = cache.get(relative);
             if (cached != null) {
@@ -137,11 +137,11 @@ public final class StaticFileHandler implements Handler {
             }
         }
 
-        // Chercher dans les sources (fallback chain)
+        // Search through sources (fallback chain)
         for (var source : sources) {
             var resource = source.resolve(relative, indexFile);
             if (resource != null) {
-                // Mettre en cache si applicable
+                // Cache if applicable
                 if (cache != null && resource.size() >= 0 && resource.size() <= MAX_CACHE_ENTRY_SIZE) {
                     var cached = cacheResource(relative, resource);
                     return serveCached(request, cached, StatusCode.OK);
@@ -162,7 +162,7 @@ public final class StaticFileHandler implements Handler {
         return Response.of(StatusCode.NOT_FOUND);
     }
 
-    /** Sert un sidecar pré-compressé : Content-Type basé sur l'extension d'origine, ajoute Content-Encoding + Vary. */
+    /** Serves a pre-compressed sidecar: Content-Type based on original extension, adds Content-Encoding + Vary. */
     private Response serveEncoded(ResolvedResource resource, String originalRelative, String encoding) {
         var builder = Response.builder()
                 .status(StatusCode.OK)
@@ -190,7 +190,7 @@ public final class StaticFileHandler implements Handler {
         return null;
     }
 
-    // ── Serve helpers ──
+    // -- Serve helpers --
 
     private Response serveResource(Request request, ResolvedResource resource, StatusCode status) throws IOException {
         // If-Modified-Since (only for OK responses — fallbacks always serve fresh)
@@ -203,7 +203,7 @@ public final class StaticFileHandler implements Handler {
                         return Response.of(StatusCode.NOT_MODIFIED);
                     }
                 } catch (Exception _) {
-                    // If-Modified-Since mal formé — on ignore et on sert la ressource (RFC 9110 §13.1.3)
+                    // Malformed If-Modified-Since — ignore and serve resource (RFC 9110 §13.1.3)
                 }
             }
         }
@@ -257,8 +257,8 @@ public final class StaticFileHandler implements Handler {
 
     private static String computeEtag(byte[] data) {
         try {
-            // MD5 utilisé pour l'identifiant ETag HTTP, pas pour de l'intégrité cryptographique.
-            // Le contenu n'est jamais validé via ce hash — pas de surface d'attaque.
+            // MD5 is used for HTTP ETag identifier, not for cryptographic integrity.
+            // Content is never validated through this hash — no attack surface.
             var md = MessageDigest.getInstance("MD5");
             var hash = md.digest(data);
             return HexFormat.of().formatHex(hash).substring(0, 16);
@@ -267,12 +267,12 @@ public final class StaticFileHandler implements Handler {
         }
     }
 
-    // ── Types internes ──
+    // -- Internal types --
 
     @SuppressWarnings("ArrayRecordComponent") // record interne, jamais comparé via equals/hashCode
     private record CachedResource(byte[] data, String contentType, String etag) {}
 
-    /** Ressource résolue depuis une source. */
+    /** Resolved resource from a source. */
     private record ResolvedResource(
             String name,
             long size,
@@ -291,12 +291,12 @@ public final class StaticFileHandler implements Handler {
         }
     }
 
-    /** Source de ressources (filesystem ou classpath). */
+    /** Resource source (filesystem or classpath). */
     private sealed interface ResourceSource {
         ResolvedResource resolve(String relative, String indexFile);
     }
 
-    /** Source filesystem. */
+    /** Filesystem source. */
     private record PathSource(Path root) implements ResourceSource {
         @Override
         public ResolvedResource resolve(String relative, String indexFile) {
@@ -330,24 +330,24 @@ public final class StaticFileHandler implements Handler {
         }
     }
 
-    /** Source classpath (jar, module, classpath directory). */
+    /** Classpath source (jar, module, classpath directory). */
     private record ClasspathSource(ClassLoader loader, String basePath) implements ResourceSource {
         @Override
         public ResolvedResource resolve(String relative, String indexFile) {
             String resourcePath = basePath.isEmpty() ? relative : basePath + "/" + relative;
 
-            // Si la requête vise un répertoire (relative vide ou se termine par /),
-            // résoudre directement vers indexFile : sans ça, getResource() retourne
-            // l'URL du dir jar dans le slow path et URLConnection ne sait pas la
-            // servir (size = -1, openStream renvoie un listing texte).
+            // If request targets a directory (empty relative path or trailing /),
+            // resolve directly to indexFile: otherwise getResource() returns
+            // the jar-directory URL on slow path and URLConnection cannot
+            // serve it correctly (size = -1, openStream returns a text listing).
             if (relative.isEmpty() || relative.endsWith("/")) {
                 resourcePath = resourcePath.isEmpty() || resourcePath.endsWith("/")
                         ? resourcePath + indexFile
                         : resourcePath + "/" + indexFile;
             }
 
-            // Fast path : entrée précalculée au build par chappe-static-index-maven-plugin.
-            // Skip URLConnection.openConnection() entièrement — tout est déjà connu.
+            // Fast path: entry precomputed at build time by chappe-static-index-maven-plugin.
+            // Skip URLConnection.openConnection() entirely — everything is already known.
             IndexedEntry idx = StaticIndex.lookup(loader, resourcePath);
             if (idx == null) {
                 String indexPath =
@@ -373,7 +373,7 @@ public final class StaticFileHandler implements Handler {
                         null);
             }
 
-            // Slow path : lookup classique via URL.openConnection (hors index).
+            // Slow path: classic lookup via URL.openConnection (outside index).
             URL url = loader.getResource(resourcePath);
             if (url == null) {
                 String indexPath =
@@ -385,7 +385,7 @@ public final class StaticFileHandler implements Handler {
 
             try {
                 URLConnection conn = url.openConnection();
-                conn.setUseCaches(false); // évite le lock sur les jar files
+                conn.setUseCaches(false); // avoids lock contention on jar files
                 long size = conn.getContentLengthLong();
                 long lastMod = conn.getLastModified();
                 Instant lastModified =
@@ -405,7 +405,7 @@ public final class StaticFileHandler implements Handler {
                                 throw new UncheckedIOException(e);
                             }
                         },
-                        null); // pas de filePath pour classpath (pas de zero-copy)
+                        null); // no filePath for classpath (no zero-copy)
             } catch (IOException _) {
                 return null;
             }
@@ -417,12 +417,12 @@ public final class StaticFileHandler implements Handler {
         }
     }
 
-    /** Métadonnées d'une ressource classpath précalculées par le plugin Maven. */
+    /** Classpath resource metadata pre-computed by the Maven plugin. */
     private record IndexedEntry(long size, long mtime, String mime, String etag) {}
 
     /**
-     * Index chargé 1× par ClassLoader depuis {@code META-INF/chappe-static-index.properties}.
-     * Absent ⇒ map vide ⇒ fallback sur le chemin runtime classique (aucune régression).
+     * Index loaded once per ClassLoader from {@code META-INF/chappe-static-index.properties}.
+     * Absent ⇒ empty map ⇒ fallback to the classic runtime path lookup (no regression).
      */
     private static final class StaticIndex {
         private static final String RESOURCE = "META-INF/chappe-static-index.properties";
@@ -454,7 +454,7 @@ public final class StaticFileHandler implements Handler {
                                     new IndexedEntry(
                                             Long.parseLong(parts[0]), Long.parseLong(parts[1]), parts[2], parts[3]));
                         } catch (NumberFormatException _) {
-                            // entrée corrompue, on ignore
+                            // corrupted entry, ignore
                         }
                     }
                 }
@@ -465,7 +465,7 @@ public final class StaticFileHandler implements Handler {
         }
     }
 
-    // ── Builder ──
+    // -- Builder --
 
     public static final class Builder {
         private final List<ResourceSource> sources = new ArrayList<>();
@@ -478,20 +478,20 @@ public final class StaticFileHandler implements Handler {
 
         private Builder() {}
 
-        /** Ajoute un répertoire filesystem comme source (zero-copy via sendfile). */
+        /** Adds a filesystem directory as a source (zero-copy via sendfile). */
         public Builder addPath(Path root) {
             sources.add(new PathSource(root.toAbsolutePath().normalize()));
             return this;
         }
 
-        /** Ajoute un chemin classpath comme source (jar, module, META-INF/resources). */
+        /** Adds a classpath path as a source (jar, module, META-INF/resources). */
         public Builder addClasspath(String basePath) {
             return addClasspath(Thread.currentThread().getContextClassLoader(), basePath);
         }
 
-        /** Ajoute un chemin classpath avec un ClassLoader spécifique. */
+        /** Adds a classpath path with a specific ClassLoader. */
         public Builder addClasspath(ClassLoader loader, String basePath) {
-            // Normaliser : pas de / en début/fin
+            // Normalize: no leading/trailing /
             String normalized = basePath;
             if (normalized.startsWith("/")) normalized = normalized.substring(1);
             if (normalized.endsWith("/")) normalized = normalized.substring(0, normalized.length() - 1);
@@ -499,27 +499,27 @@ public final class StaticFileHandler implements Handler {
             return this;
         }
 
-        /** Fichier index pour les répertoires (défaut : "index.html"). */
+        /** Index file for directories (default: "index.html"). */
         public Builder indexFile(String indexFile) {
             this.indexFile = indexFile;
             return this;
         }
 
-        /** Header Cache-Control ajouté à chaque réponse (ex: "max-age=3600, public"). */
+        /** Cache-Control header added to every response (e.g. "max-age=3600, public"). */
         public Builder cacheControl(String cacheControl) {
             this.cacheControl = cacheControl;
             return this;
         }
 
-        /** Active le cache en mémoire pour les petites ressources classpath (< 64 Ko). */
+        /** Enables in-memory cache for small classpath resources (< 64 KB). */
         public Builder cacheInMemory(boolean enabled) {
             this.cacheInMemory = enabled;
             return this;
         }
 
         /**
-         * Fichier servi avec status 404 quand la ressource demandée n'existe pas.
-         * Mutuellement exclusif avec {@link #spaFallback(String)}.
+         * File served with status 404 when the requested resource does not exist.
+         * Mutually exclusive with {@link #spaFallback(String)}.
          */
         public Builder notFoundFile(String path) {
             this.notFoundFile = path;
@@ -527,9 +527,9 @@ public final class StaticFileHandler implements Handler {
         }
 
         /**
-         * Fichier servi avec status 200 quand la ressource demandée n'existe pas
-         * (typiquement {@code /index.html} pour les SPA à routing client).
-         * Mutuellement exclusif avec {@link #notFoundFile(String)}.
+         * File served with status 200 when the requested resource does not exist
+         * (typically {@code /index.html} for client-side-routed SPAs).
+         * Mutually exclusive with {@link #notFoundFile(String)}.
          */
         public Builder spaFallback(String path) {
             this.spaFallback = path;
@@ -537,17 +537,17 @@ public final class StaticFileHandler implements Handler {
         }
 
         /**
-         * Sert les sidecars pré-compressés ({@code path.br}, {@code path.gz}) en
-         * priorité sur l'original quand le client les accepte. Aucune génération
-         * runtime — les sidecars doivent exister sur le filesystem (typiquement
-         * produits par {@code chappe-static-index-maven-plugin}).
+         * Serves pre-compressed sidecars ({@code path.br}, {@code path.gz}) in preference
+         * over the original when the client accepts them. No runtime generation —
+         * sidecars must exist on the filesystem (typically produced by
+         * {@code chappe-static-index-maven-plugin}).
          */
         public Builder preferPrecompressed(boolean enabled) {
             this.preferPrecompressed = enabled;
             return this;
         }
 
-        /** Construit le handler. Au moins une source doit être configurée. */
+        /** Builds the handler. At least one source must be configured. */
         public Handler build() {
             if (sources.isEmpty()) {
                 throw new IllegalStateException("At least one source (addPath or addClasspath) is required");

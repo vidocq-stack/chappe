@@ -1,6 +1,6 @@
 package io.vidocq.chappe.cli.yaml;
 
-/** Erreur de parsing YAML — porte la position {@code line:col} pour le diagnostic. */
+/** YAML parsing error carrying the {@code line:col} position for diagnostics. */
 public final class YamlParseException extends RuntimeException {
 
     private final int line;

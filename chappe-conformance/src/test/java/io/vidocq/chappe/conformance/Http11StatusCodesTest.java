@@ -12,7 +12,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * Tests de conformite HTTP/1.1 pour les codes de statut.
+ * HTTP/1.1 conformance tests for status codes.
  * RFC 9110, Section 15.
  */
 class Http11StatusCodesTest {

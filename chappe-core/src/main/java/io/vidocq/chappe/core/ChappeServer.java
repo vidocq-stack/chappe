@@ -25,11 +25,11 @@ import io.vidocq.chappe.http.SslHandler;
 import io.vidocq.chappe.http.h2.Http2Connection;
 
 /**
- * Implémentation du serveur HTTP Chappe — virtual threads, TLS, buffer pooling.
+ * Chappe HTTP server implementation — virtual threads, TLS, buffer pooling.
  * <p>
- * Chaque connexion acceptée est gérée par un virtual thread dédié.
- * Le protocole (HTTP/1.1 ou HTTP/2) est détecté par ALPN (TLS) ou
- * par byte sniffing (cleartext).
+ * Each accepted connection is handled by a dedicated virtual thread.
+ * The protocol (HTTP/1.1 or HTTP/2) is detected via ALPN (TLS) or
+ * by byte sniffing (cleartext).
  */
 final class ChappeServer implements Server {
 
@@ -69,8 +69,8 @@ final class ChappeServer implements Server {
         serverChannel.set(ch);
         executor.set(Executors.newVirtualThreadPerTaskExecutor());
 
-        // unstarted() puis set() puis start() : garantit que acceptThread est visible
-        // avant un éventuel stop() concurrent (sinon le join serait sauté)
+        // unstarted() then set() then start(): guarantees acceptThread visibility
+        // before a concurrent stop() call (otherwise join could be skipped)
         var thread = Thread.ofVirtual().name("chappe-accept").unstarted(this::acceptLoop);
         acceptThread.set(thread);
         thread.start();
@@ -111,7 +111,7 @@ final class ChappeServer implements Server {
         } catch (IOException closeEx) {
             LOG.log(
                     System.Logger.Level.DEBUG,
-                    () -> "Cleanup serverChannel échoué avant retry bind: " + closeEx.getMessage());
+                    () -> "Cleanup serverChannel failed before bind retry: " + closeEx.getMessage());
         }
     }
 
@@ -129,7 +129,7 @@ final class ChappeServer implements Server {
         try {
             ch.setOption(java.net.StandardSocketOptions.SO_REUSEPORT, true);
         } catch (UnsupportedOperationException _) {
-            // SO_REUSEPORT non supporté sur cet OS — comportement attendu
+            // SO_REUSEPORT not supported on this OS — expected behavior
         }
     }
 
@@ -139,17 +139,17 @@ final class ChappeServer implements Server {
             return;
         }
 
-        // 1. Fermer le ServerSocketChannel — débloque accept()
+        // 1. Close the ServerSocketChannel — unblocks accept()
         var ch = serverChannel.getAndSet(null);
         if (ch != null) {
             try {
                 ch.close();
             } catch (IOException e) {
-                LOG.log(System.Logger.Level.DEBUG, () -> "Fermeture serverChannel pendant stop: " + e.getMessage());
+                LOG.log(System.Logger.Level.DEBUG, () -> "Closing serverChannel during stop: " + e.getMessage());
             }
         }
 
-        // 2. Attendre la fin de l'accept thread
+        // 2. Wait for accept thread termination
         var th = acceptThread.getAndSet(null);
         if (th != null) {
             try {
@@ -159,11 +159,11 @@ final class ChappeServer implements Server {
             }
         }
 
-        // 3. Graceful shutdown : interrompre les connexions bloquées sur I/O,
-        //    puis attendre le drain dans le grace period
+        // 3. Graceful shutdown: interrupt connections blocked on I/O,
+        //    then wait for draining during the grace period
         var exec = executor.getAndSet(null);
         if (exec != null) {
-            exec.shutdownNow(); // interrompt les virtual threads bloqués sur channel.read()
+            exec.shutdownNow(); // interrupts virtual threads blocked on channel.read()
             try {
                 long graceMs = config.shutdownGracePeriod().toMillis();
                 //noinspection ResultOfMethodCallIgnored
@@ -173,7 +173,7 @@ final class ChappeServer implements Server {
             }
         }
 
-        // 4. Libérer le pool de buffers
+        // 4. Release the buffer pool
         bufferPool.clear();
     }
 
@@ -214,7 +214,7 @@ final class ChappeServer implements Server {
     // --- Accept loop ---
 
     private void acceptLoop() {
-        // Capture une fois — ces références ne changent pas pendant la vie de l'acceptLoop
+        // Capture once — these references do not change during the acceptLoop lifetime
         var ch = serverChannel.get();
         var exec = executor.get();
         if (ch == null || exec == null) return;
@@ -224,9 +224,9 @@ final class ChappeServer implements Server {
             try {
                 SocketChannel clientChannel = ch.accept();
                 clientChannel.configureBlocking(true);
-                // Optimisation cruciale pour les benchmarks de latence/throughput
+                // Critical optimization for latency/throughput benchmarks
                 clientChannel.setOption(java.net.StandardSocketOptions.TCP_NODELAY, true);
-                // Configurer le timeout de lecture (idle/read timeout)
+                // Configure read timeout (idle/read timeout)
                 clientChannel.socket().setSoTimeout(timeoutMs);
                 exec.execute(() -> handleConnection(clientChannel));
             } catch (AsynchronousCloseException _) {
@@ -249,11 +249,11 @@ final class ChappeServer implements Server {
                 handleCleartextConnection(channel, readBuffer, writeBuffer);
             }
         } catch (IOException e) {
-            LOG.log(System.Logger.Level.DEBUG, () -> "I/O error sur connexion, fermeture: " + e.getMessage());
+            LOG.log(System.Logger.Level.DEBUG, () -> "I/O error on connection, closing: " + e.getMessage());
             try {
                 channel.close();
             } catch (IOException _) {
-                // best-effort, connexion déjà perdue
+                // best-effort, connection already lost
             }
         } finally {
             bufferPool.release(readBuffer);
@@ -262,7 +262,7 @@ final class ChappeServer implements Server {
     }
 
     /**
-     * Connexion TLS : handshake SSLEngine → ALPN → dispatch.
+     * TLS connection: SSLEngine handshake → ALPN → dispatch.
      */
     private void handleTlsConnection(SocketChannel channel, ByteBuffer readBuffer, ByteBuffer writeBuffer)
             throws IOException {
@@ -270,7 +270,7 @@ final class ChappeServer implements Server {
         SSLEngine engine = sslContext.createSSLEngine();
         engine.setUseClientMode(false);
 
-        // Configurer ALPN
+        // Configure ALPN
         var sslParams = engine.getSSLParameters();
         sslParams.setApplicationProtocols(config.alpnProtocols().toArray(String[]::new));
         engine.setSSLParameters(sslParams);
@@ -279,17 +279,17 @@ final class ChappeServer implements Server {
         var sslHandler = new SslHandler(channel, engine);
         sslHandler.doHandshake();
 
-        // Protocole négocié via ALPN
+        // Protocol negotiated via ALPN
         String protocol = sslHandler.getAlpnProtocol();
         boolean isH2 = "h2".equals(protocol);
 
         if (isH2) {
-            // HTTP/2 via ALPN — pas de pré-lecture, Http2Connection gère le preface
+            // HTTP/2 via ALPN — no pre-read, Http2Connection handles the preface
             readBuffer.clear();
-            readBuffer.flip(); // vide
+            readBuffer.flip(); // empty
             new Http2Connection(sslHandler, sslHandler, handler, config, readBuffer).run();
         } else {
-            // HTTP/1.1 — pré-lire pour le parser
+            // HTTP/1.1 — pre-read for the parser
             readBuffer.clear();
             int read = sslHandler.read(readBuffer);
             if (read == -1) {
@@ -302,7 +302,7 @@ final class ChappeServer implements Server {
     }
 
     /**
-     * Connexion cleartext : byte sniffing → dispatch.
+     * Cleartext connection: byte sniffing → dispatch.
      */
     private void handleCleartextConnection(SocketChannel channel, ByteBuffer readBuffer, ByteBuffer writeBuffer)
             throws IOException {

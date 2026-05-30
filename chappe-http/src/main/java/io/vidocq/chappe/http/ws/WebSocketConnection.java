@@ -23,13 +23,13 @@ import io.vidocq.chappe.api.WebSocket;
 import io.vidocq.chappe.api.WebSocketHandler;
 
 /**
- * Connexion WebSocket active — implémente {@link WebSocket} et la boucle I/O serveur.
+ * Active WebSocket connection — implements {@link WebSocket} and the server I/O loop.
  * <p>
- * Exécutée sur le virtual thread initialement alloué à la connexion HTTP par {@code chappe-core}.
- * Les écritures sont sérialisées via {@link #writeLock} : plusieurs threads (ex. timer applicatif
- * appelant {@code sendText}) peuvent écrire sans risque d'entrelacement de frames (RFC 6455 §5.4).
- * Toutes les frames lues sont dispatchées au {@link WebSocketHandler} sur ce même thread —
- * pas de synchronisation requise pour la lecture côté handler.
+ * Executed on the virtual thread initially allocated to the HTTP connection by {@code chappe-core}.
+ * Writes are serialized via {@link #writeLock}: multiple threads (for example an application timer
+ * calling {@code sendText}) can write without risking frame interleaving (RFC 6455 §5.4).
+ * All incoming frames are dispatched to the {@link WebSocketHandler} on that same thread —
+ * no synchronization is required for handler-side reads.
  */
 public final class WebSocketConnection implements WebSocket {
 
@@ -76,8 +76,8 @@ public final class WebSocketConnection implements WebSocket {
     }
 
     /**
-     * Boucle de lecture — bloque jusqu'à la fermeture (Close handshake ou EOF).
-     * Appelée par {@code HttpConnection} après {@link WebSocketHandshake#writeResponse}.
+     * Read loop — blocks until closure (Close handshake or EOF).
+     * Called by {@code HttpConnection} after {@link WebSocketHandshake#writeResponse}.
      */
     public void run() {
         try {
@@ -88,7 +88,7 @@ public final class WebSocketConnection implements WebSocket {
             return;
         }
 
-        int currentDataOpcode = -1; // -1 = pas de message data en cours d'assemblage
+        int currentDataOpcode = -1; // -1 = no data message currently being assembled
         ByteArrayOutputStream messageBuf = null;
 
         try {
@@ -97,7 +97,7 @@ public final class WebSocketConnection implements WebSocket {
                 try {
                     frame = reader.readFrame(readBuffer, readChannel);
                 } catch (EOFException eof) {
-                    // Le pair a coupé la TCP sans Close — fermeture anormale.
+                    // Peer closed TCP without Close frame — abnormal closure.
                     receivedCloseCode = CloseCodes.ABNORMAL_CLOSURE;
                     break;
                 }
@@ -107,7 +107,7 @@ public final class WebSocketConnection implements WebSocket {
                     continue;
                 }
 
-                // ── Frames data (TEXT / BINARY / CONTINUATION) ──
+                // -- Data frames (TEXT / BINARY / CONTINUATION) --
                 if (frame.opcode() == WebSocketFrame.OP_CONTINUATION) {
                     if (currentDataOpcode == -1) {
                         throw new WebSocketProtocolException(
@@ -158,7 +158,7 @@ public final class WebSocketConnection implements WebSocket {
         }
     }
 
-    // ── Dispatch d'une frame data complète ──
+    // -- Dispatch a full data frame --
     private void dispatchMessage(int opcode, byte[] payload) throws Exception {
         if (opcode == WebSocketFrame.OP_TEXT) {
             String text;
@@ -177,11 +177,11 @@ public final class WebSocketConnection implements WebSocket {
         }
     }
 
-    // ── Frames de contrôle ──
+    // -- Control frames --
     private void handleControl(WebSocketFrame frame) throws Exception {
         switch (frame.opcode()) {
             case WebSocketFrame.OP_PING -> {
-                // RFC §5.5.2 : répondre par un PONG avec exactement le même payload.
+                // RFC §5.5.2: reply with PONG using exactly the same payload.
                 var pongPayload = frame.payload().duplicate();
                 writeLocked(() -> WebSocketFrameWriter.writeFrame(writeChannel, WebSocketFrame.OP_PONG, pongPayload));
                 handler.onPing(this, frame.payload().duplicate());
@@ -205,7 +205,7 @@ public final class WebSocketConnection implements WebSocket {
         if (p.remaining() >= 2) {
             code = ((p.get() & 0xFF) << 8) | (p.get() & 0xFF);
             if (!CloseCodes.isValidOnWire(code)) {
-                // §7.4.1 : un code invalide reçu → PROTOCOL_ERROR
+                // §7.4.1: invalid received code -> PROTOCOL_ERROR
                 throw new WebSocketProtocolException(CloseCodes.PROTOCOL_ERROR, "Invalid close code: " + code);
             }
             if (p.hasRemaining()) {
@@ -227,13 +227,13 @@ public final class WebSocketConnection implements WebSocket {
         receivedCloseCode = code;
         receivedCloseReason = reason;
         closeReceived = true;
-        // Echo si on n'a pas déjà initié.
+        // Echo close if we did not already initiate it.
         if (!closeSent) {
             sendCloseSilent(code == CloseCodes.NO_STATUS_RCVD ? CloseCodes.NORMAL_CLOSURE : code, "");
         }
     }
 
-    // ── Implémentation WebSocket ──
+    // -- WebSocket implementation --
 
     @Override
     public void sendText(String message) throws IOException {
@@ -306,7 +306,7 @@ public final class WebSocketConnection implements WebSocket {
         return this;
     }
 
-    // ── Helpers ──
+    // -- Helpers --
 
     private void checkOpen() throws IOException {
         if (!open || closeSent) throw new IOException("WebSocket closed");
@@ -315,7 +315,7 @@ public final class WebSocketConnection implements WebSocket {
     private static ByteBuffer buildClosePayload(int code, String reason) {
         byte[] reasonBytes = reason == null ? new byte[0] : reason.getBytes(StandardCharsets.UTF_8);
         if (reasonBytes.length > 123) {
-            // Tronquer : 125 max pour la frame, 2 octets pour le code.
+            // Truncate: max 125 for frame payload, 2 bytes reserved for code.
             var truncated = new byte[123];
             System.arraycopy(reasonBytes, 0, truncated, 0, 123);
             reasonBytes = truncated;
@@ -334,7 +334,7 @@ public final class WebSocketConnection implements WebSocket {
                     writeChannel, WebSocketFrame.OP_CLOSE, buildClosePayload(code, reason)));
             closeSent = true;
         } catch (IOException _) {
-            // Ignore — la TCP est déjà cassée.
+            // Ignore — TCP is already broken.
         }
     }
 
@@ -381,7 +381,7 @@ public final class WebSocketConnection implements WebSocket {
         try {
             handler.onError(this, t);
         } catch (Throwable _) {
-            // Ignore — l'application a une erreur dans son onError
+            // Ignore — application raised an error in onError
         }
     }
 }

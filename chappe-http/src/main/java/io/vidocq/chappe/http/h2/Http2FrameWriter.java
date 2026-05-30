@@ -11,8 +11,8 @@ import java.util.concurrent.locks.ReentrantLock;
  * Uses a {@link ReentrantLock} instead of {@code synchronized} to avoid
  * pinning virtual threads.
  * <p>
- * Thread-safe : plusieurs virtual threads peuvent appeler les méthodes d'écriture
- * concurremment. Le lock garantit que les frames ne sont pas entrelacées.
+ * Thread-safe: multiple virtual threads can call the write methods
+ * concurrently. The lock guarantees that frames are not interleaved.
  */
 public final class Http2FrameWriter {
 
@@ -35,7 +35,7 @@ public final class Http2FrameWriter {
     }
 
     // -------------------------------------------------------------------------
-    // Méthodes publiques — toutes throws IOException
+    // Public methods — all throw IOException
     // -------------------------------------------------------------------------
 
     public void writeFrame(int type, int flags, int streamId, byte[] payload, int off, int len) throws IOException {
@@ -182,7 +182,7 @@ public final class Http2FrameWriter {
     }
 
     // -------------------------------------------------------------------------
-    // Helpers internes
+    // Internal helpers
     // -------------------------------------------------------------------------
 
     private void writeFrameHeader(int payloadLen, int type, int flags, int streamId) throws IOException {

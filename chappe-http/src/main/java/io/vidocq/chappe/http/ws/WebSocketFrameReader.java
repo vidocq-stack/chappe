@@ -8,14 +8,14 @@ import java.nio.channels.ReadableByteChannel;
 import io.vidocq.chappe.api.CloseCodes;
 
 /**
- * Lecture de frames WebSocket entrantes (côté serveur) — RFC 6455 §5.2.
+ * Reads incoming WebSocket frames (server side) — RFC 6455 §5.2.
  * <p>
- * Le serveur impose que toutes les frames client soient masquées (§5.1) :
- * une frame non masquée fait lever une {@link WebSocketProtocolException} avec
+ * The server requires all client frames to be masked (§5.1):
+ * an unmasked frame causes a {@link WebSocketProtocolException} with
  * {@link CloseCodes#PROTOCOL_ERROR}.
  * <p>
- * Le buffer source ({@code src}) est en mode lecture (after {@code flip()}) et est
- * progressivement consommé. Quand il est vide, on lit dans le channel.
+ * The source buffer ({@code src}) is in read mode (after {@code flip()}) and is
+ * consumed progressively. When it is empty, data is read from the channel.
  */
 public final class WebSocketFrameReader {
 
@@ -26,10 +26,10 @@ public final class WebSocketFrameReader {
     }
 
     /**
-     * Lit une frame complète depuis {@code src}, remplissant via {@code channel} si nécessaire.
+     * Reads a complete frame from {@code src}, filling via {@code channel} if necessary.
      *
-     * @throws WebSocketProtocolException violation RFC (mask absent, RSV non nul, payload trop long, opcode invalide)
-     * @throws EOFException                connexion fermée par le pair sans frame Close préalable
+     * @throws WebSocketProtocolException RFC violation (missing mask, non-zero RSV, payload too long, invalid opcode)
+     * @throws EOFException               connection closed by the peer without a prior Close frame
      */
     public WebSocketFrame readFrame(ByteBuffer src, ReadableByteChannel channel) throws IOException {
         ensure(src, channel, 2);
@@ -86,7 +86,7 @@ public final class WebSocketFrameReader {
         int m2 = src.get() & 0xFF;
         int m3 = src.get() & 0xFF;
 
-        // Lit le payload complet
+        // Read the full payload
         var payload = new byte[(int) payloadLen];
         int read = 0;
         while (read < payload.length) {
@@ -98,7 +98,7 @@ public final class WebSocketFrameReader {
             read += take;
         }
 
-        // Démasquage (XOR avec la clé répétée)
+        // Unmasking (XOR with repeated key)
         for (int i = 0; i < payload.length; i++) {
             int mask =
                     switch (i & 3) {
@@ -125,7 +125,7 @@ public final class WebSocketFrameReader {
         };
     }
 
-    /** Garantit qu'au moins {@code n} octets sont disponibles dans {@code src}, lit dans le channel si besoin. */
+    /** Ensures that at least {@code n} bytes are available in {@code src}, reading from the channel if needed. */
     private static void ensure(ByteBuffer src, ReadableByteChannel channel, int n) throws IOException {
         while (src.remaining() < n) {
             fill(src, channel);
@@ -133,7 +133,7 @@ public final class WebSocketFrameReader {
     }
 
     private static void fill(ByteBuffer src, ReadableByteChannel channel) throws IOException {
-        // Compacte les données restantes en début de buffer, puis lit.
+        // Compact remaining bytes at buffer start, then read.
         src.compact();
         int n = channel.read(src);
         src.flip();

@@ -1,8 +1,8 @@
 package io.vidocq.chappe.api;
 
 /**
- * Hiérarchie d'exceptions de Chappe — sealed pour permettre
- * le pattern matching exhaustif.
+ * Chappe exception hierarchy — sealed to allow
+ * exhaustive pattern matching.
  */
 public sealed class ChappeException extends RuntimeException {
 
@@ -15,7 +15,7 @@ public sealed class ChappeException extends RuntimeException {
     }
 
     /**
-     * Requête malformée ou dépassant les limites configurées.
+     * Malformed request or request exceeding configured limits.
      */
     public static final class BadRequestException extends ChappeException {
 
@@ -29,7 +29,7 @@ public sealed class ChappeException extends RuntimeException {
     }
 
     /**
-     * Erreur levée par un {@link Handler} lors du traitement.
+     * Error raised by a {@link Handler} during processing.
      */
     public static final class HandlerException extends ChappeException {
 
@@ -39,7 +39,7 @@ public sealed class ChappeException extends RuntimeException {
     }
 
     /**
-     * Erreur liée au cycle de vie du serveur (bind, start, stop).
+     * Error related to the server lifecycle (bind, start, stop).
      */
     public static final class ServerException extends ChappeException {
 

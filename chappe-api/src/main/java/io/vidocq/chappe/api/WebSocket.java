@@ -5,60 +5,60 @@ import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 
 /**
- * Connexion WebSocket active — RFC 6455.
+ * Active WebSocket connection — RFC 6455.
  * <p>
- * Une instance est fournie au {@link WebSocketHandler} après un handshake réussi.
- * Les méthodes {@code send*} sont thread-safe : les frames sortantes sont sérialisées
- * en interne pour éviter l'entrelacement (interdit par la RFC §5.4).
+ * An instance is provided to the {@link WebSocketHandler} after a successful handshake.
+ * The {@code send*} methods are thread-safe: outgoing frames are serialised
+ * internally to prevent interleaving (forbidden by RFC §5.4).
  * <p>
- * Les appels bloquent jusqu'à ce que la frame complète soit écrite dans la socket —
- * naturel sur virtual threads. Une connexion fermée fait lever {@link IOException}.
+ * Calls block until the complete frame has been written to the socket —
+ * natural on virtual threads. A closed connection raises {@link IOException}.
  */
 public interface WebSocket {
 
-    /** Envoie un message texte (frame TEXT, opcode 0x1) en une seule frame non fragmentée. */
+    /** Sends a text message (TEXT frame, opcode 0x1) as a single unfragmented frame. */
     void sendText(String message) throws IOException;
 
-    /** Envoie un message binaire (frame BINARY, opcode 0x2) en une seule frame non fragmentée. */
+    /** Sends a binary message (BINARY frame, opcode 0x2) as a single unfragmented frame. */
     void sendBinary(ByteBuffer payload) throws IOException;
 
-    /** Envoie un PING (opcode 0x9) — payload ≤ 125 octets. */
+    /** Sends a PING (opcode 0x9) — payload ≤ 125 bytes. */
     void sendPing(ByteBuffer payload) throws IOException;
 
-    /** Envoie un PONG (opcode 0xA) — payload ≤ 125 octets. */
+    /** Sends a PONG (opcode 0xA) — payload ≤ 125 bytes. */
     void sendPong(ByteBuffer payload) throws IOException;
 
     /**
-     * Initie le close handshake avec un code de statut et un motif texte.
+     * Initiates the close handshake with a status code and a text reason.
      * <p>
-     * Le motif est encodé en UTF-8 et limité à 123 octets ({@code 125 - 2} pour le code).
-     * Après cet appel, la connexion attend la frame Close du pair puis se ferme.
+     * The reason is UTF-8 encoded and limited to 123 bytes ({@code 125 - 2} for the code).
+     * After this call, the connection waits for the peer's Close frame and then closes.
      */
     void close(int code, String reason) throws IOException;
 
-    /** Raccourci : ferme avec {@link CloseCodes#NORMAL_CLOSURE} et sans motif. */
+    /** Shortcut: closes with {@link CloseCodes#NORMAL_CLOSURE} and no reason. */
     default void close() throws IOException {
         close(CloseCodes.NORMAL_CLOSURE, "");
     }
 
-    /** Vrai tant que la connexion n'a pas reçu ni envoyé de frame Close. */
+    /** {@code true} as long as the connection has neither received nor sent a Close frame. */
     boolean isOpen();
 
-    /** Adresse de l'extrémité distante (client). */
+    /** Remote (client) endpoint address. */
     InetSocketAddress remoteAddress();
 
-    /** Vrai si la connexion sous-jacente est TLS (wss://). */
+    /** {@code true} if the underlying connection is TLS-secured (wss://). */
     boolean isSecure();
 
     /**
-     * Sous-protocole négocié (header {@code Sec-WebSocket-Protocol}), ou {@code null}
-     * si aucun n'a été demandé ou accepté.
+     * Negotiated sub-protocol (header {@code Sec-WebSocket-Protocol}), or {@code null}
+     * if none was requested or accepted.
      */
     String subprotocol();
 
-    /** Attribut mutable attaché à la connexion (état session). */
+    /** Mutable attribute attached to the connection (session state). */
     Object attribute(String key);
 
-    /** Affecte un attribut. Retourne {@code this} pour chaînage. */
+    /** Sets an attribute. Returns {@code this} for chaining. */
     WebSocket attribute(String key, Object value);
 }

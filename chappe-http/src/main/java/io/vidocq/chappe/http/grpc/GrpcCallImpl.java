@@ -18,14 +18,14 @@ import io.vidocq.chappe.http.h2.Http2Connection;
 import io.vidocq.chappe.http.h2.Http2Stream;
 
 /**
- * Implémentation de {@link GrpcCall} adossée à un stream HTTP/2.
+ * {@link GrpcCall} implementation backed by an HTTP/2 stream.
  * <p>
- * Synchrone bloquante : {@code receive()} bloque sur la prochaine DATA frame,
- * {@code send()} bloque sur le flow control H2.
+ * Blocking synchronous model: {@code receive()} blocks on the next DATA frame,
+ * {@code send()} blocks on H2 flow control.
  */
 public final class GrpcCallImpl implements GrpcCall {
 
-    /** Codecs annoncés par le serveur dans {@code grpc-accept-encoding}. */
+    /** Codecs advertised by the server in {@code grpc-accept-encoding}. */
     private static final String SERVER_ACCEPT_ENCODING = "identity, gzip";
 
     private final Http2Stream stream;
@@ -35,9 +35,9 @@ public final class GrpcCallImpl implements GrpcCall {
     private final InputStream bodyStream;
     private final String contentType;
     private final long deadlineNanoTime;
-    /** Codec demandé par le client en réception, non null si valide ; null si "identity" ou absent. */
+    /** Codec requested by the client for inbound messages, non-null if valid; null if "identity" or absent. */
     private final String requestEncoding;
-    /** {@code true} si le client a envoyé un codec inconnu — la run() doit complete(UNIMPLEMENTED). */
+    /** {@code true} if the client sent an unknown codec — run() must complete(UNIMPLEMENTED). */
     private final boolean requestEncodingUnsupported;
 
     private final Headers.Builder responseHeadersBuilder = Headers.builder();
@@ -45,7 +45,7 @@ public final class GrpcCallImpl implements GrpcCall {
     private final Object writeLock = new Object();
     private final AtomicBoolean completed = new AtomicBoolean(false);
     private boolean initialHeadersSent;
-    /** Codec actif en émission ; null = identity (défaut). */
+    /** Active outbound codec; null = identity (default). */
     private String responseEncoding;
 
     public GrpcCallImpl(Http2Stream stream, HttpRequestImpl request, Http2Connection connection) {
@@ -63,9 +63,9 @@ public final class GrpcCallImpl implements GrpcCall {
         }
         this.deadlineNanoTime = deadlineNs;
 
-        // Négociation grpc-encoding entrant : si codec inconnu, on diffère le
-        // complete(UNIMPLEMENTED) à run() pour que la sortie d'erreur passe par
-        // le pipeline normal (trailers-only response).
+        // Inbound grpc-encoding negotiation: if codec is unknown, defer
+        // complete(UNIMPLEMENTED) to run() so error output goes through
+        // the normal pipeline (trailers-only response).
         var clientEncoding = request.headers().firstOrNull("grpc-encoding");
         String reqEnc = null;
         boolean unsupported = false;
@@ -116,15 +116,15 @@ public final class GrpcCallImpl implements GrpcCall {
             }
 
             if (!initialHeadersSent) {
-                // Trailers-only response (RFC gRPC §"Responses") :
-                // un seul HEADERS frame contenant :status, content-type et grpc-status, END_STREAM=1.
+                // Trailers-only response (gRPC RFC "Responses"):
+                // a single HEADERS frame containing :status, content-type and grpc-status, END_STREAM=1.
                 var combined = Headers.builder()
                         .add("content-type", "application/grpc")
                         .add("grpc-status", Integer.toString(grpcStatus));
                 if (message != null && !message.isEmpty()) {
                     combined.add("grpc-message", encodePercent(message));
                 }
-                // Headers applicatifs déclarés via addHeader avant complete
+                // Application headers declared via addHeader before complete
                 for (var entry : responseHeadersBuilder.build()) {
                     combined.add(entry.name(), entry.value());
                 }
@@ -135,7 +135,7 @@ public final class GrpcCallImpl implements GrpcCall {
                 return;
             }
 
-            // Streaming terminé : émettre les trailers HEADERS séparés avec END_STREAM=1.
+            // Streaming finished: emit separate trailer HEADERS with END_STREAM=1.
             byte[] encodedTrailers = connection.hpackEncoder().encodeTrailers(responseTrailersBuilder.build());
             connection.frameWriter().writeHeaders(stream.streamId(), encodedTrailers, true);
             stream.halfCloseLocal();
@@ -197,8 +197,8 @@ public final class GrpcCallImpl implements GrpcCall {
     }
 
     /**
-     * Garantit l'émission des headers initiaux serveur (avant la 1re DATA frame).
-     * RFC gRPC : {@code :status 200} + {@code content-type: application/grpc} obligatoires.
+     * Ensures emission of the initial server headers (before the first DATA frame).
+     * gRPC RFC: {@code :status 200} + {@code content-type: application/grpc} are mandatory.
      */
     private void ensureInitialHeadersSent() throws IOException {
         if (initialHeadersSent) return;
@@ -217,8 +217,8 @@ public final class GrpcCallImpl implements GrpcCall {
     }
 
     /**
-     * Percent-encoding RFC 3986 minimal pour {@code grpc-message} (RFC gRPC §"Status codes").
-     * Préserve les caractères imprimables, encode les autres en UTF-8.
+     * Minimal RFC 3986 percent-encoding for {@code grpc-message} (gRPC RFC §"Status codes").
+     * Preserves printable characters, encodes the others as UTF-8.
      */
     private static String encodePercent(String s) {
         var bytes = s.getBytes(java.nio.charset.StandardCharsets.UTF_8);
@@ -237,14 +237,14 @@ public final class GrpcCallImpl implements GrpcCall {
     }
 
     /**
-     * Parser du header {@code grpc-timeout} (RFC gRPC §"Requests" — Timeout grammar) :
+     * Parser for the {@code grpc-timeout} header (gRPC RFC §"Requests" — Timeout grammar):
      * <pre>{@code Timeout -> TimeoutValue TimeoutUnit
      * TimeoutValue -> { positive decimal up to 8 digits }
      * TimeoutUnit -> Hour | Minute | Second | Millisecond | Microsecond | Nanosecond
      *             -> "H" | "M" | "S" | "m" | "u" | "n"}</pre>
      *
-     * @return nombre de nanosecondes du timeout, ou {@code -1} si la valeur est absente,
-     *         malformée, négative ou nulle.
+     * @return timeout length in nanoseconds, or {@code -1} if the value is missing,
+     *         malformed, negative, or zero.
      */
     public static long parseTimeoutNanos(String value) {
         if (value == null || value.length() < 2 || value.length() > 9) return -1L;
@@ -268,7 +268,7 @@ public final class GrpcCallImpl implements GrpcCall {
         };
     }
 
-    /** Multiplication avec saturation à {@link Long#MAX_VALUE} en cas d'overflow. */
+    /** Multiplication with saturation to {@link Long#MAX_VALUE} on overflow. */
     private static long safeMul(long a, long b) {
         try {
             return Math.multiplyExact(a, b);
@@ -277,7 +277,7 @@ public final class GrpcCallImpl implements GrpcCall {
         }
     }
 
-    /** Gzip-compresse {@code payload}. */
+    /** Gzip-compresses {@code payload}. */
     static byte[] gzip(byte[] payload) throws IOException {
         var baos = new ByteArrayOutputStream(payload.length);
         try (var gz = new GZIPOutputStream(baos)) {
@@ -286,7 +286,7 @@ public final class GrpcCallImpl implements GrpcCall {
         return baos.toByteArray();
     }
 
-    /** Gzip-décompresse {@code compressed}. */
+    /** Gzip-decompresses {@code compressed}. */
     static byte[] gunzip(byte[] compressed) throws IOException {
         try (var gz = new GZIPInputStream(new ByteArrayInputStream(compressed))) {
             return gz.readAllBytes();
@@ -294,18 +294,18 @@ public final class GrpcCallImpl implements GrpcCall {
     }
 
     /**
-     * Boucle d'exécution du handler avec gestion d'erreur : si le handler sort sans
-     * avoir appelé complete, on envoie INTERNAL avec le message d'exception.
+     * Handler execution loop with error handling: if the handler exits without
+     * calling complete, INTERNAL is sent with the exception message.
      * <p>
-     * Si la requête portait un {@code grpc-timeout}, un watchdog virtual thread est
-     * démarré en parallèle : à expiration il annule le stream (déblocage de
-     * {@link GrpcCall#receive()}) puis tente {@link GrpcCall#complete} avec
-     * {@link GrpcStatus#DEADLINE_EXCEEDED}. Le CAS sur {@code completed} garantit
-     * qu'au plus un statut final est émis.
+     * If the request carried a {@code grpc-timeout}, a watchdog virtual thread is
+     * started in parallel: on expiry it cancels the stream (unblocking
+     * {@link GrpcCall#receive()}) and then attempts {@link GrpcCall#complete} with
+     * {@link GrpcStatus#DEADLINE_EXCEEDED}. The CAS on {@code completed} guarantees
+     * that at most one final status is emitted.
      */
     public static void run(GrpcCallImpl call, io.vidocq.chappe.api.GrpcHandler handler) {
-        // Court-circuit : codec request inconnu -> UNIMPLEMENTED immédiat,
-        // sans même appeler le handler (RFC gRPC §"Compression").
+        // Short-circuit: unknown request codec -> immediate UNIMPLEMENTED,
+        // without even calling the handler (gRPC RFC "Compression").
         if (call.requestEncodingUnsupported) {
             String clientEnc = call.request.headers().firstOrNull("grpc-encoding");
             try {
@@ -313,7 +313,7 @@ public final class GrpcCallImpl implements GrpcCall {
                         GrpcStatus.UNIMPLEMENTED,
                         "grpc-encoding '" + clientEnc + "' not supported (accepted: " + SERVER_ACCEPT_ENCODING + ")");
             } catch (IOException _) {
-                // connexion perdue
+                // lost connection
             }
             return;
         }
@@ -328,16 +328,16 @@ public final class GrpcCallImpl implements GrpcCall {
                             long sleepNanos = deadline - System.nanoTime();
                             if (sleepNanos > 0L) Thread.sleep(Duration.ofNanos(sleepNanos));
                             if (call.completed.get()) return;
-                            // Annule d'abord le stream : débloque un handler bloqué dans receive()
-                            // et signale isCancelled() pour les boucles qui poll.
+                            // Cancel stream first: unblocks a handler stuck in receive()
+                            // and toggles isCancelled() for polling loops.
                             call.stream.cancel();
                             try {
                                 call.complete(GrpcStatus.DEADLINE_EXCEEDED, "deadline exceeded");
                             } catch (IOException _) {
-                                // connexion perdue ; rien à faire
+                                // lost connection; nothing to do
                             }
                         } catch (InterruptedException _) {
-                            // watchdog arrêté car le handler a fini avant la deadline
+                            // watchdog stopped because the handler finished before deadline
                         }
                     });
         }
@@ -351,7 +351,7 @@ public final class GrpcCallImpl implements GrpcCall {
                 try {
                     call.complete(GrpcStatus.INTERNAL, String.valueOf(e.getMessage()));
                 } catch (IOException _) {
-                    // connexion perdue
+                    // lost connection
                 }
             }
         } finally {

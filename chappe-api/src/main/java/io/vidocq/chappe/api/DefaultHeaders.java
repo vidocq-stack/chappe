@@ -7,9 +7,9 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Implémentation par défaut de {@link Headers}.
+ * Default implementation of {@link Headers}.
  * <p>
- * Stockage en tableau plat pour un parcours cache-friendly.
+ * Flat-array storage for cache-friendly iteration.
  */
 final class DefaultHeaders implements Headers {
 

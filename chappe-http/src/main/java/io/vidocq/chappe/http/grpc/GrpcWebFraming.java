@@ -7,12 +7,12 @@ import java.util.Base64;
 import io.vidocq.chappe.api.Headers;
 
 /**
- * Framing spécifique à gRPC-Web (PROTOCOL-WEB.md).
+ * gRPC-Web-specific framing (PROTOCOL-WEB.md).
  * <p>
- * Contrairement à gRPC sur HTTP/2 où les trailers sont transportés via un HEADERS
- * frame en fin de stream, les navigateurs n'exposent pas les trailers HTTP/2 à
- * JavaScript. gRPC-Web sérialise donc les "trailers" comme une frame DATA spéciale
- * intégrée au corps de la réponse :
+ * Unlike gRPC over HTTP/2, where trailers are carried in a HEADERS
+ * frame at the end of the stream, browsers do not expose HTTP/2 trailers to
+ * JavaScript. gRPC-Web therefore serializes the "trailers" as a special DATA frame
+ * embedded in the response body:
  *
  * <pre>
  * +--------+----------------+--------------------------------+
@@ -21,12 +21,12 @@ import io.vidocq.chappe.api.Headers;
  * +--------+----------------+--------------------------------+
  * </pre>
  *
- * Le MSB du premier octet (0x80) distingue le trailer frame d'un message normal
- * (où ce bit indique simplement {@code compressed=0} ou {@code 1}).
+ * The MSB of the first byte (0x80) distinguishes the trailer frame from a normal message
+ * (where this bit simply indicates {@code compressed=0} or {@code 1}).
  *
- * <p>Le mode {@code grpc-web-text} (content-type {@code application/grpc-web-text})
- * réencode l'intégralité du corps en Base64 — chaque chunk dans la requête et
- * la réponse est Base64-encodé indépendamment.
+ * <p>{@code grpc-web-text} mode (content type {@code application/grpc-web-text})
+ * re-encodes the entire body as Base64 — each chunk in the request and
+ * response is Base64-encoded independently.
  */
 public final class GrpcWebFraming {
 
@@ -35,12 +35,11 @@ public final class GrpcWebFraming {
     private GrpcWebFraming() {}
 
     /**
-     * Encode un trailer frame gRPC-Web : préfixe 5 octets ({@code 0x80} + length BE)
-     * suivi du payload texte ("key:value\r\n...").
+     * Encodes a gRPC-Web trailer frame: 5-byte prefix ({@code 0x80} + BE length)
+     * followed by the text payload ("key:value\r\n...").
      * <p>
-     * Les noms de headers sont émis en lowercase (alignement avec HTTP/2). La spec
-     * gRPC-Web autorise n'importe quelle casse — on choisit lowercase pour la
-     * cohérence cross-protocol.
+     * Header names are emitted in lowercase (aligned with HTTP/2). The gRPC-Web spec
+     * allows any casing — lowercase is chosen for cross-protocol consistency.
      */
     public static byte[] encodeTrailerFrame(Headers trailers) {
         var sb = new StringBuilder();
@@ -62,24 +61,24 @@ public final class GrpcWebFraming {
         return out;
     }
 
-    /** {@code true} si l'octet de tête est un trailer frame gRPC-Web (MSB set). */
+    /** {@code true} if the leading byte is a gRPC-Web trailer frame (MSB set). */
     public static boolean isTrailerFlag(byte b0) {
         return (b0 & 0x80) != 0;
     }
 
-    /** Encode {@code bytes} en Base64 standard (sans padding URL-safe). */
+    /** Encodes {@code bytes} as standard Base64 (without URL-safe padding). */
     public static byte[] base64Encode(byte[] bytes) {
         return Base64.getEncoder().encode(bytes);
     }
 
-    /** Décode {@code base64Bytes} en bytes bruts. */
+    /** Decodes {@code base64Bytes} into raw bytes. */
     public static byte[] base64Decode(byte[] base64Bytes) {
         return Base64.getDecoder().decode(base64Bytes);
     }
 
     /**
-     * Parse un payload de trailer frame en {@code Map<lowercase-name, value>}.
-     * Format attendu : "key:value\r\nkey:value\r\n...".
+     * Parses a trailer-frame payload into {@code Map<lowercase-name, value>}.
+     * Expected format: "key:value\r\nkey:value\r\n...".
      */
     public static java.util.Map<String, String> parseTrailerPayload(byte[] payload) {
         var map = new java.util.LinkedHashMap<String, String>();
@@ -95,13 +94,13 @@ public final class GrpcWebFraming {
         return map;
     }
 
-    /** Pratique pour les tests : encode plusieurs bytes intermédiaires (helper pour ByteArrayOutputStream). */
+    /** Handy for tests: encodes multiple intermediate bytes (helper for ByteArrayOutputStream). */
     public static byte[] concat(byte[]... chunks) {
         var baos = new ByteArrayOutputStream();
         try {
             for (byte[] c : chunks) baos.write(c);
         } catch (java.io.IOException _) {
-            // ByteArrayOutputStream ne lève pas
+            // ByteArrayOutputStream does not throw here
         }
         return baos.toByteArray();
     }

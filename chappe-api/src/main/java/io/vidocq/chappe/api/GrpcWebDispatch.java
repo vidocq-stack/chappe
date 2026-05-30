@@ -3,30 +3,29 @@ package io.vidocq.chappe.api;
 import java.util.Objects;
 
 /**
- * Réponse marqueur signalant au transport HTTP/2 qu'un appel <b>gRPC-Web</b> doit être
- * dispatché vers un {@link GrpcHandler}.
+ * Marker response telling the HTTP/2 transport that a <b>gRPC-Web</b> call must be
+ * dispatched to a {@link GrpcHandler}.
  * <p>
- * gRPC-Web (PROTOCOL-WEB.md) est une variante de gRPC compatible navigateurs : les
- * trailers HTTP/2 ne sont pas exposés à JavaScript, donc les "trailers" sont
- * sérialisés inline comme une frame DATA spéciale (préfixe {@code 0x80}). Deux
- * content-types :
+ * gRPC-Web (PROTOCOL-WEB.md) is a browser-compatible variant of gRPC: HTTP/2
+ * trailers are not exposed to JavaScript, so the "trailers" are serialized
+ * inline as a special DATA frame ({@code 0x80} prefix). Two content types:
  * <ul>
- *   <li>{@code application/grpc-web} — binaire (le payload protobuf est transporté brut)</li>
- *   <li>{@code application/grpc-web-text} — Base64 (chaque chunk request/response est
- *       Base64-encodé, pour les transports texte uniquement comme XHR.responseText)</li>
+ *   <li>{@code application/grpc-web} — binary (the protobuf payload is transported as-is)</li>
+ *   <li>{@code application/grpc-web-text} — Base64 (each request/response chunk is
+ *       Base64-encoded, for text-only transports such as XHR.responseText)</li>
  * </ul>
  *
- * <p>Construit par {@link Router.Builder#grpcWeb(String, GrpcHandler)} et reconnu par
- * {@code chappe-http} via {@code instanceof}. Une application n'a pas besoin de
- * l'instancier directement.
+ * <p>Built by {@link Router.Builder#grpcWeb(String, GrpcHandler)} and recognized by
+ * {@code chappe-http} via {@code instanceof}. An application does not need to
+ * instantiate it directly.
  */
 public final class GrpcWebDispatch implements Response {
 
-    /** Mode d'encodage du corps : binaire ou Base64. */
+    /** Body encoding mode: binary or Base64. */
     public enum Mode {
         /** {@code application/grpc-web} : payload binaire brut. */
         BINARY,
-        /** {@code application/grpc-web-text} : payload Base64 (chaque chunk indépendamment). */
+        /** {@code application/grpc-web-text}: Base64 payload (each chunk independently). */
         TEXT
     }
 

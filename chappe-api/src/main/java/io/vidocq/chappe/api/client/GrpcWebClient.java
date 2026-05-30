@@ -14,26 +14,25 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * Client <b>gRPC-Web</b> Java, zéro dépendance externe (basé sur {@link HttpClient} du JDK).
+ * Java <b>gRPC-Web</b> client, zero external dependencies (based on the JDK's {@link HttpClient}).
  * <p>
- * Pourquoi gRPC-Web et pas gRPC standard ? {@code java.net.http.HttpClient} ne donne
- * pas accès aux trailers HTTP/2 (documenté upstream), or {@code grpc-status} est
- * justement transporté en trailer. gRPC-Web sérialise les trailers inline dans le
- * corps de la réponse (frame DATA avec préfixe {@code 0x80}), donc lisibles depuis
- * HttpClient.
+ * Why gRPC-Web instead of standard gRPC? {@code java.net.http.HttpClient} does not provide
+ * access to HTTP/2 trailers (documented upstream), while {@code grpc-status} is carried
+ * precisely in a trailer. gRPC-Web serializes trailers inline in the response body
+ * (DATA frame with {@code 0x80} prefix), so they can be read from HttpClient.
  *
- * <p><b>Modes supportés :</b>
+ * <p><b>Supported modes:</b>
  * <ul>
- *   <li>{@link #unary} : 1 message in → 1 message out + trailers</li>
- *   <li>{@link #serverStream} : 1 message in → N messages out + trailers (collectés)</li>
+ *   <li>{@link #unary}: 1 message in → 1 message out + trailers</li>
+ *   <li>{@link #serverStream}: 1 message in → N messages out + trailers (collected)</li>
  * </ul>
- * <p><b>Hors scope v1 :</b> client-streaming et bidi-streaming (HttpClient ne supporte
- * pas le full duplex côté request body), gRPC natif (nécessite un client HTTP/2 custom).
+ * <p><b>Out of scope for v1:</b> client-streaming and bidi-streaming (HttpClient does not support
+ * full duplex on the request body side), native gRPC (requires a custom HTTP/2 client).
  *
- * <p><b>Mode body :</b> {@link Mode#BINARY} (content-type {@code application/grpc-web})
- * par défaut, ou {@link Mode#TEXT} ({@code application/grpc-web-text} avec Base64).
+ * <p><b>Body mode:</b> {@link Mode#BINARY} (content type {@code application/grpc-web})
+ * by default, or {@link Mode#TEXT} ({@code application/grpc-web-text} with Base64).
  *
- * <p>Usage :
+ * <p>Usage:
  * <pre>{@code
  * var client = GrpcWebClient.builder()
  *         .baseUri(URI.create("http://127.0.0.1:8080"))
@@ -44,14 +43,14 @@ import java.util.Objects;
  */
 public final class GrpcWebClient {
 
-    /** Préfixe du trailer frame gRPC-Web ({@code 0x80}, MSB set). */
+    /** Prefix of the gRPC-Web trailer frame ({@code 0x80}, MSB set). */
     private static final byte TRAILER_FLAG = (byte) 0x80;
 
-    /** Encodage de transport choisi pour les bodies request/response. */
+    /** Transport encoding chosen for request/response bodies. */
     public enum Mode {
-        /** {@code application/grpc-web} : payload binaire brut. */
+        /** {@code application/grpc-web}: raw binary payload. */
         BINARY,
-        /** {@code application/grpc-web-text} : tout le body Base64-encodé. */
+        /** {@code application/grpc-web-text}: the entire body Base64-encoded. */
         TEXT
     }
 
@@ -77,21 +76,21 @@ public final class GrpcWebClient {
     }
 
     /**
-     * Appel unary : envoie un message, attend un message + trailers.
+     * Unary call: sends one message, waits for one message + trailers.
      *
-     * @param path chemin gRPC ({@code /service.Name/Method}) — sera concaténé au {@code baseUri}
-     * @param requestPayload bytes opaques du request (la sérialisation protobuf/JSON est
-     *                       à la charge de l'appelant)
+     * @param path gRPC path ({@code /service.Name/Method}) — concatenated with {@code baseUri}
+     * @param requestPayload opaque request bytes (protobuf/JSON serialization is the
+     *                       caller's responsibility)
      */
     public GrpcWebResponse unary(String path, byte[] requestPayload) throws IOException, InterruptedException {
         return invoke(path, requestPayload);
     }
 
     /**
-     * Appel server-streaming : envoie un message, collecte les N messages reçus + trailers.
+     * Server-streaming call: sends one message, collects the N received messages + trailers.
      * <p>
-     * V1 : on lit tout le body en une fois puis on parse. Le streaming incrémental (callback
-     * sur chaque message) viendra dans une itération ultérieure si besoin.
+     * V1: the entire body is read at once and then parsed. Incremental streaming (callback
+     * on each message) may come in a later iteration if needed.
      */
     public GrpcWebResponse serverStream(String path, byte[] requestPayload) throws IOException, InterruptedException {
         return invoke(path, requestPayload);
@@ -124,8 +123,8 @@ public final class GrpcWebClient {
     }
 
     /**
-     * Encode un message gRPC (préfixe 5 octets + payload). Le flag {@code compressed=0}
-     * en v1 — la compression sortante côté client n'est pas exposée.
+     * Encodes a gRPC message (5-byte prefix + payload). The {@code compressed=0} flag
+     * is used in v1 — outgoing client-side compression is not exposed.
      */
     private static byte[] encodeMessageFrame(byte[] payload, boolean compressed) {
         int len = payload.length;
@@ -140,8 +139,8 @@ public final class GrpcWebClient {
     }
 
     /**
-     * Parse le body gRPC-Web (suite de frames 5 octets) : sépare les messages applicatifs
-     * du trailer frame final (préfixe {@code 0x80}).
+     * Parses the gRPC-Web body (sequence of 5-byte-framed records): separates application
+     * messages from the final trailer frame ({@code 0x80} prefix).
      */
     private static GrpcWebResponse parseBody(byte[] body) {
         var messages = new ArrayList<byte[]>();
@@ -194,7 +193,7 @@ public final class GrpcWebClient {
         return map;
     }
 
-    /** Marker pour les tests : permet d'injecter un {@link HttpClient} configuré différemment. */
+    /** Test hook: allows injecting an {@link HttpClient} configured differently. */
     public HttpClient httpClient() {
         return httpClient;
     }
@@ -244,7 +243,7 @@ public final class GrpcWebClient {
         }
     }
 
-    /** Liste de codes gRPC standards exposée pour faciliter les tests/assert client-side. */
+    /** List of standard gRPC codes exposed to simplify client-side tests/assertions. */
     public static final class Status {
         public static final int OK = 0;
         public static final int CANCELLED = 1;

@@ -1,172 +1,173 @@
 # Chappe - Claude Code Guidelines
 
-> Claude Chappe (1763–1805) a inventé le télégraphe sémaphorique — un réseau de tours optiques
-> qui couvrait toute la France et transmettait des messages à des centaines de km en quelques minutes.
-> C'était littéralement le serveur HTTP le plus rapide de son époque.
+> Claude Chappe (1763–1805) invented the semaphore telegraph — a network of optical towers
+> that covered all of France and transmitted messages across hundreds of km in a few minutes.
+> It was literally the fastest HTTP server of its time.
 
-## Projet
+## Project
 
-Serveur HTTP haute performance en Java 25 pur (zéro dépendance hors JDK), conçu pour servir
-de fondation aux futurs projets JAX-RS et Servlet de l'écosystème Vidocq.
+High-performance HTTP server in pure Java 25 (zero dependencies outside the JDK), designed to serve
+as the foundation for the future JAX-RS and Servlet projects of the Vidocq ecosystem.
 
-### Protocoles implémentés
-- **HTTP/1.1** — RFC 9110/9112 (keep-alive, chunked, pipelining, conformité testée)
-- **HTTP/2** — RFC 9113 (multiplexage, HPACK Huffman, flow control, CONTINUATION)
+### Implemented protocols
+- **HTTP/1.1** — RFC 9110/9112 (keep-alive, chunked, pipelining, tested conformance)
+- **HTTP/2** — RFC 9113 (multiplexing, HPACK Huffman, flow control, CONTINUATION)
 - **HTTPS** — TLS via SSLContext/SSLEngine, ALPN h2 + http/1.1
-- **WebSocket** — RFC 6455 sur HTTP/1.1 (handshake `Sec-WebSocket-Accept`, framing TEXT/BINARY/PING/PONG/CLOSE, fragmentation, validation UTF-8, masking client obligatoire, close handshake bilatéral, auto-PONG)
-- **gRPC (transport)** — framing core (préfixe 5 octets) sur HTTP/2 + trailers (RFC 9113 §8.1) ; 4 modes (unary, server-stream, client-stream, bidi) ; SPI `GrpcCall` byte-level ; sérialisation (protobuf, JSON…) déléguée aux extensions (`champollion` pour protobuf)
-- **HTTP/3** — RFC 9114 (objectif futur, QUIC via JDK 26+)
+- **WebSocket** — RFC 6455 over HTTP/1.1 (handshake `Sec-WebSocket-Accept`, TEXT/BINARY/PING/PONG/CLOSE framing, fragmentation, UTF-8 validation, mandatory client masking, bidirectional close handshake, auto-PONG)
+- **gRPC (transport)** — core framing (5-byte prefix) over HTTP/2 + trailers (RFC 9113 §8.1); 4 modes (unary, server-stream, client-stream, bidi); byte-level `GrpcCall` SPI; serialization (protobuf, JSON…) delegated to extensions (`champollion` for protobuf)
+- **HTTP/3** — RFC 9114 (future target, QUIC via JDK 26+)
 
 ### Architecture
-- Virtual Threads (Project Loom) — un thread virtuel par connexion
-- Scoped Values (JEP 506) — `RequestContext.CURRENT` propagé avant chaque handler
-- Zero-copy I/O — `FileChannel.transferTo()` pour fichiers statiques
-- Java Modules (JPMS) — chaque module a un `module-info.java`
-- ServiceLoader SPI — `ServerProvider` pour découvrir l'implémentation
+- Virtual Threads (Project Loom) — one virtual thread per connection
+- Scoped Values (JEP 506) — `RequestContext.CURRENT` propagated before each handler
+- Zero-copy I/O — `FileChannel.transferTo()` for static files
+- Java Modules (JPMS) — each module has a `module-info.java`
+- ServiceLoader SPI — `ServerProvider` to discover the implementation
 
-### Intégration Vauban (prévue, pas encore active)
-Chappe fonctionne **de manière autonome sans Vauban**. L'intégration CDI se fera
-via les extensions `vidocq-servlet` et `vidocq-jaxrs` qui utiliseront Vauban pour
-le lifecycle des composants. Chappe lui-même utilise `ServiceLoader` (pas CDI).
-- `vauban-api`/`vauban-core` sont déclarés dans le parent POM mais non utilisés par les modules
-- Source Vauban : `../vauban/` (projet frère dans le monorepo)
+### Vauban integration (planned, not active yet)
+Chappe works **autonomously without Vauban**. CDI integration will happen
+through the `vidocq-servlet` and `vidocq-jaxrs` extensions, which will use
+Vauban for component lifecycle. Chappe itself uses `ServiceLoader` (not CDI).
+- `vauban-api`/`vauban-core` are declared in the parent POM but not used by the modules
+- Vauban source: `../vauban/` (sibling project in the monorepo)
 
 ### Modules
 | Module | Description |
 |---|---|
-| `chappe-api` | API publique : `Server`, `Router`, `Handler`, `Request`, `Response`, `Filter`, `StaticFileHandler`, `MimeTypes`, `AcceptEncoding`, `RequestContext`, `WebSocket`, `WebSocketHandler`, `CloseCodes`, `GrpcHandler`, `GrpcCall`, `GrpcStatus` |
-| `chappe-http` | Protocoles HTTP/1.1, HTTP/2 (avec trailers), WebSocket (RFC 6455) et gRPC core (transport, sous-package `grpc`), SslHandler TLS, ByteBufferPool |
-| `chappe-core` | Moteur serveur, virtual threads, protocol detection, lifecycle |
-| `chappe-cli` | Launcher CLI standalone `chappe serve` (mini-YAML, fat jar, jlink) — voir `chappe-cli/README.md` |
-| `chappe-tests` | Tests d'intégration |
-| `chappe-bench` | Benchmarks : comparatif Jetty/Helidon/JDK, throughput/latence |
-| `chappe-conformance` | Suite de conformité HTTP/WS (53 tests RFC 9110/9112/9113/6455) ; tests gRPC dans `chappe-tests/Http2GrpcTransportTest` |
-| `chappe-examples` | Exemples d'utilisation |
-| `chappe-static-index-maven-plugin` | Plugin Maven : index O(1) + sidecars `.gz` au build (`<compress>gzip</compress>`) |
+| `chappe-api` | Public API: `Server`, `Router`, `Handler`, `Request`, `Response`, `Filter`, `StaticFileHandler`, `MimeTypes`, `AcceptEncoding`, `RequestContext`, `WebSocket`, `WebSocketHandler`, `CloseCodes`, `GrpcHandler`, `GrpcCall`, `GrpcStatus` |
+| `chappe-http` | HTTP/1.1, HTTP/2 (with trailers), WebSocket (RFC 6455), and gRPC core (transport, `grpc` sub-package) protocols, TLS `SslHandler`, `ByteBufferPool` |
+| `chappe-core` | Server engine, virtual threads, protocol detection, lifecycle |
+| `chappe-cli` | Standalone `chappe serve` CLI launcher (mini-YAML, fat jar, jlink) — see `chappe-cli/README.md` |
+| `chappe-tests` | Integration tests |
+| `chappe-bench` | Benchmarks: Jetty/Helidon/JDK comparison, throughput/latency |
+| `chappe-conformance` | HTTP/WS conformance suite (53 RFC 9110/9112/9113/6455 tests); gRPC tests in `chappe-tests/Http2GrpcTransportTest` |
+| `chappe-examples` | Usage examples |
+| `chappe-static-index-maven-plugin` | Maven plugin: O(1) index + `.gz` sidecars at build time (`<compress>gzip</compress>`) |
 
 ### Extension SPI
-Chappe fournit les hooks pour les extensions Servlet/JAX-RS/WebSocket/gRPC :
-- **`Router.webSocket(pattern, handler)`** — endpoint WebSocket RFC 6455 (handshake automatique, frames TEXT/BINARY/PING/PONG/CLOSE, fragmentation, validation UTF-8, sous-protocole optionnel)
-- **`Router.grpc(pattern, GrpcHandler)`** — endpoint gRPC transport-only ; expose `GrpcCall.receive()/send()/complete(status, msg)` byte-level (la sérialisation protobuf/JSON est à la charge de l'extension, p.ex. `champollion`) ; refuse HTTP/1.1 avec 505 et content-type non-grpc avec 415
-- **`Router.mount(prefix, handler)`** — enregistrement par path prefix avec stripping automatique
-- **`Request.contextPath()`/`pathInfo()`** — path relatif au mount point
-- **`Request.attribute(key, value)`** — attributs mutables per-request (Servlet compat)
-- **`Request.remoteAddress()`/`isSecure()`/`scheme()`** — metadata connexion
-- **`RequestContext.CURRENT`** — ScopedValue propagé avant chaque handler
-- **`Body.ofOutputStream()`** — streaming body (Servlet OutputStream compat)
+Chappe provides the hooks for Servlet/JAX-RS/WebSocket/gRPC extensions:
+- **`Router.webSocket(pattern, handler)`** — RFC 6455 WebSocket endpoint (automatic handshake, TEXT/BINARY/PING/PONG/CLOSE frames, fragmentation, UTF-8 validation, optional subprotocol)
+- **`Router.grpc(pattern, GrpcHandler)`** — transport-only gRPC endpoint; exposes byte-level `GrpcCall.receive()/send()/complete(status, msg)` (protobuf/JSON serialization is the extension's responsibility, e.g. `champollion`); rejects HTTP/1.1 with 505 and non-grpc content-type with 415
+- **`Router.mount(prefix, handler)`** — path-prefix registration with automatic stripping
+- **`Request.contextPath()`/`pathInfo()`** — path relative to the mount point
+- **`Request.attribute(key, value)`** — mutable per-request attributes (Servlet compatibility)
+- **`Request.remoteAddress()`/`isSecure()`/`scheme()`** — connection metadata
+- **`RequestContext.CURRENT`** — ScopedValue propagated before each handler
+- **`Body.ofOutputStream()`** — streaming body (Servlet OutputStream compatibility)
 - **`Body.ofFile()`** — zero-copy via `FileChannel.transferTo()` (sendfile)
-- **`StaticFileHandler.builder()`** — fichiers statiques avec fallback chain (filesystem → classpath), cache mémoire, ETag, Cache-Control, `notFoundFile`/`spaFallback`, `preferPrecompressed` (sidecars `.br`/`.gz`)
-- **`Filter.addHeader()`/`addHeaderIf()`/`addHeaderIfEnv()`/`gzip()`** — middleware déclaratif headers + compression
-- **`AcceptEncoding.parse()`/`accepts()`** — négociation `Accept-Encoding` (RFC 9110 §12.5.3)
-- **`MimeTypes.detect()`** — détection MIME par extension (26+ types)
+- **`StaticFileHandler.builder()`** — static files with fallback chain (filesystem → classpath), in-memory cache, ETag, Cache-Control, `notFoundFile`/`spaFallback`, `preferPrecompressed` (`.br`/`.gz` sidecars)
+- **`Filter.addHeader()`/`addHeaderIf()`/`addHeaderIfEnv()`/`gzip()`** — declarative header + compression middleware
+- **`AcceptEncoding.parse()`/`accepts()`** — `Accept-Encoding` negotiation (RFC 9110 §12.5.3)
+- **`MimeTypes.detect()`** — MIME detection by extension (26+ types)
 
-### Validation du Serveur
-Le serveur doit être validé sur trois axes :
-- **Conformité protocole** — vérifier le respect des RFC via une suite de tests exhaustive (headers, chunked encoding, status codes, HTTP/2 framing, HPACK, flow control, stream priorities)
-- **Performance** — benchmarks JMH reproductibles : throughput (req/sec), latence (p50/p99/p999), allocation mémoire (GC pressure), scalabilité (connexions concurrentes)
-- **Robustesse** — tests de charge prolongée (soak tests), requêtes malformées, slow clients (slowloris), connexions abandonnées, backpressure, limites mémoire
+### Server validation
+The server must be validated on three axes:
+- **Protocol conformance** — verify RFC compliance with an exhaustive test suite (headers, chunked encoding, status codes, HTTP/2 framing, HPACK, flow control, stream priorities)
+- **Performance** — reproducible JMH benchmarks: throughput (req/sec), latency (p50/p99/p999), memory allocation (GC pressure), scalability (concurrent connections)
+- **Robustness** — prolonged load tests (soak tests), malformed requests, slow clients (slowloris), abandoned connections, backpressure, memory limits
 
-## 1. Plan Mode Default
+## 1. Default Plan Mode
 
-- Entrer en plan mode pour toute tâche non-triviale (3+ étapes ou décisions d'architecture)
-- Si quelque chose tourne mal, STOP et re-planifier immédiatement
-- Utiliser le plan mode pour les étapes de vérification, pas seulement la construction
-- Écrire des specs détaillées en amont pour réduire l'ambiguïté
+- Enter plan mode for any non-trivial task (3+ steps or architecture decisions)
+- If something goes wrong, STOP and re-plan immediately
+- Use plan mode for verification steps, not just implementation
+- Write detailed specs up front to reduce ambiguity
 
-## 2. Stratégie Subagents
+## 2. Subagent Strategy
 
-- Utiliser les subagents fréquemment pour garder la fenêtre de contexte principale propre
-- Déléguer la recherche, l'exploration et l'analyse parallèle aux subagents
-- Pour les problèmes complexes, utiliser plus de compute via subagents
-- Assigner une tâche par subagent pour une exécution focalisée
+- Use subagents frequently to keep the main context window clean
+- Delegate research, exploration, and parallel analysis to subagents
+- For complex problems, use more compute via subagents
+- Assign one task per subagent for focused execution
 
-## 3. Boucle d'Amélioration Continue
+## 3. Continuous Improvement Loop
 
-- Après toute correction de l'utilisateur, mettre à jour `tasks/lessons.md`
-- Écrire des règles pour éviter de répéter la même erreur
-- Itérer sans pitié sur ces leçons
-- Revoir les leçons au début de chaque session
+- After any user correction, update `tasks/lessons.md`
+- Write rules to avoid repeating the same mistake
+- Iterate relentlessly on those lessons
+- Review the lessons at the start of each session
 
-## 4. Vérification Avant Terminaison
+## 4. Verification Before Completion
 
-- Ne jamais marquer une tâche complète sans preuve de fonctionnement
-- Comparer le comportement entre main et les changements quand pertinent
-- Se demander : "Un staff engineer approuverait-il ceci ?"
-- Exécuter les tests, vérifier les logs, démontrer la correction
+- Never mark a task complete without proof that it works
+- Compare behavior between main and the changes when relevant
+- Ask yourself: "Would a staff engineer approve this?"
+- Run tests, check logs, demonstrate the fix
 
-## 5. Exiger l'Élégance (Équilibrée)
+## 5. Demand Elegance (Balanced)
 
-- Pour les changements non-triviaux, demander : "Y a-t-il une solution plus élégante ?"
-- Si un fix semble hacky, demander : "Connaissant tout ce que je sais, implémenter la solution élégante."
-- Sauter ceci pour les fixes simples — ne pas sur-engineer
-- Challenger son propre travail avant de le présenter
+- For non-trivial changes, ask: "Is there a more elegant solution?"
+- If a fix looks hacky, ask: "Knowing everything I know, implement the elegant solution."
+- Skip this for simple fixes — do not over-engineer
+- Challenge your own work before presenting it
 
-## 6. Correction de Bugs Autonome
+## 6. Autonomous Bug Fixing
 
-- Quand on reçoit un rapport de bug : juste le corriger
-- Utiliser logs, erreurs et tests qui échouent pour diagnostiquer
-- Nécessiter zéro context switching de l'utilisateur
-- Corriger les tests CI qui échouent automatiquement
+- When receiving a bug report: just fix it
+- Use logs, errors, and failing tests to diagnose
+- Require zero context switching from the user
+- Fix failing CI tests automatically
 
-## Gestion des Tâches
+## Task Management
 
-1. **Planifier** – Écrire le plan dans `tasks/todo.md` avec des items cochables
-2. **Vérifier le plan** – Confirmer le plan avant implémentation
-3. **Suivre la progression** – Marquer les items complétés au fur et à mesure
-4. **Expliquer les changements** – Fournir un résumé haut niveau à chaque étape
-5. **Documenter les résultats** – Ajouter une section review à `tasks/todo.md`
-6. **Capturer les leçons** – Mettre à jour `tasks/lessons.md` après corrections
+1. **Plan** – Write the plan in `tasks/todo.md` with checkable items
+2. **Verify the plan** – Confirm the plan before implementation
+3. **Track progress** – Mark items complete as work proceeds
+4. **Explain changes** – Provide a high-level summary at each step
+5. **Document results** – Add a review section to `tasks/todo.md`
+6. **Capture lessons** – Update `tasks/lessons.md` after fixes
 
-## Environnement
+## Environment
 
-- Utiliser **sdkman** pour gérer les versions Java et Maven
-- Requis : **Java 25** (`sdk use java 25-open` ou équivalent)
-- Requis : **Maven 3.9.16** (`sdk use maven 3.9.16`)
-- Tous les POMs sont en `modelVersion 4.0.0` (le workspace est sorti de la RC Maven 4 pour la GA 3.9)
+- Use **sdkman** to manage Java and Maven versions
+- Required: **Java 25** (`sdk use java 25-open` or equivalent)
+- Required: **Maven 4** (`sdk use maven 4.0.0-rc-5`)
+- If `mvn` fails with "modelVersion 4.1.0 not supported", Maven `current` was reset to 3.x — switch back to 4.x
 
 ## Context Mode
 
-- Utiliser `ctx_batch_execute` pour les commandes produisant beaucoup d'output (builds, tests, logs)
-- Utiliser `ctx_search` pour les recherches de suivi après un batch_execute
-- Utiliser `ctx_execute` / `ctx_execute_file` pour l'analyse de données, parsing de logs, transformations
-- **Ne jamais** utiliser Bash pour des commandes produisant >20 lignes d'output — passer par context-mode
-- **Ne jamais** utiliser ctx_execute/ctx_execute_file pour créer ou modifier des fichiers — utiliser Write/Edit
-- Read est réservé aux fichiers qu'on va éditer ensuite — pour l'analyse, utiliser ctx_execute_file
+- Use `ctx_batch_execute` for commands producing lots of output (builds, tests, logs)
+- Use `ctx_search` for follow-up searches after a batch_execute
+- Use `ctx_execute` / `ctx_execute_file` for data analysis, log parsing, transformations
+- **Never** use Bash for commands producing >20 lines of output — use context-mode instead
+- **Never** use ctx_execute/ctx_execute_file to create or modify files — use Write/Edit
+- Read is reserved for files that will be edited afterward — for analysis, use ctx_execute_file
 
-## Conventions de Code
+## Code Conventions
 
-### Nommage
-- Packages : `io.vidocq.chappe.*`
-- GroupId Maven : `io.vidocq.chappe`
-- Modules JPMS : `io.vidocq.chappe.*`
+### Naming
+- Packages: `io.vidocq.chappe.*`
+- Maven GroupId: `io.vidocq.chappe`
+- JPMS modules: `io.vidocq.chappe.*`
 
 ### Standards
-- Zéro dépendance hors JDK — c'est la règle absolue du projet
-- Tout le code utilise les virtual threads — jamais de pool de threads classique
-- Préférer les records aux classes pour les objets immutables
-- Utiliser les sealed interfaces pour les hiérarchies de types fermées
-- Pattern matching exhaustif avec switch expressions
-- Utiliser `java.lang.foreign` pour les opérations mémoire critiques
+- Zero dependencies outside the JDK — that is the project's absolute rule
+- All code uses virtual threads — never use a classic thread pool
+- Prefer records over classes for immutable objects
+- Use sealed interfaces for closed type hierarchies
+- Exhaustive pattern matching with switch expressions
+- Use `java.lang.foreign` for critical memory operations
 
 ### Tests
 - JUnit 6 (jupiter)
-- Tests d'intégration avec des vrais sockets (pas de mocking HTTP)
-- Benchmarks avec JMH dans un module séparé si nécessaire
+- Integration tests with real sockets (no HTTP mocking)
+- Benchmarks with JMH in a separate module when needed
 
-### Performance (résultats mesurés, voir BENCHMARKS.md)
-- **101K ops/s** throughput concurrent JMH 8t (run 2026-05-20) ; **96K req/s** in-process closed-loop NIO (run 2026-04-16, validé)
-- **Latence p99 = 57 µs** raw socket (run JMH 2026-05-20, 317k samples) — 17× sous l'objectif de 1ms
-- Optimisations : write coalescing, zero-alloc headers, thread-local buffer pool, fast path 200 OK
-- Zero-allocation sur le hot path (réutiliser les buffers)
+### Performance (measured results, see BENCHMARKS.md)
+- **101K ops/s** JMH concurrent throughput on 8t (run 2026-05-20); **96K req/s** in-process closed-loop NIO (run 2026-04-16, validated)
+- **p99 latency = 57 µs** raw socket (JMH run 2026-05-20, 317k samples) — 17× below the 1ms target
+- Optimizations: write coalescing, zero-alloc headers, thread-local buffer pool, fast path 200 OK
+- Zero allocation on the hot path (reuse buffers)
+- **Language** — commit messages, Javadoc, and the content of all `.md` files must be written in **English**.
 
-## Principes Fondamentaux
+## Core Principles
 
-### Simplicité d'abord
-Chaque changement doit être aussi simple que possible et minimiser l'impact sur le code.
+### Simplicity first
+Every change must be as simple as possible and minimize impact on the code.
 
-### Pas de paresse
-Trouver les causes racines. Éviter les fixes temporaires. Maintenir des standards d'ingénierie senior.
+### No laziness
+Find root causes. Avoid temporary fixes. Maintain senior engineering standards.
 
-### Zéro dépendance
-Si une fonctionnalité nécessite une dépendance externe, elle n'a pas sa place dans Chappe.
-La seule exception est le framework de test (JUnit).
+### Zero dependency
+If a feature requires an external dependency, it has no place in Chappe.
+The only exception is the test framework (JUnit).

@@ -7,11 +7,11 @@ import java.util.Map;
 import io.vidocq.chappe.cli.yaml.YamlNode;
 
 /**
- * Configuration résolue de la CLI {@code chappe serve}, projection d'un
- * {@link YamlNode.Map} sur un graphe de records typés.
+ * Resolved configuration of the {@code chappe serve} CLI, projection of a
+ * {@link YamlNode.Map} onto a graph of typed records.
  *
- * <p>Tous les champs sont nullable / optionnels — c'est la responsabilité du
- * {@link ServeCommand} de combiner avec les flags CLI puis de valider.</p>
+ * <p>All fields are nullable / optional — it is the responsibility of
+ * {@link ServeCommand} to merge them with CLI flags and then validate.</p>
  */
 public record ChappeConfig(Server server, Static staticCfg, Headers headers, Logging logging) {
 
@@ -39,7 +39,7 @@ public record ChappeConfig(Server server, Static staticCfg, Headers headers, Log
 
     public static final ChappeConfig EMPTY = new ChappeConfig(Server.EMPTY, Static.EMPTY, Headers.EMPTY, Logging.EMPTY);
 
-    /** Projette un nœud YAML racine sur un {@code ChappeConfig}. */
+    /** Projects a root YAML node into a {@code ChappeConfig}. */
     public static ChappeConfig from(YamlNode root) {
         if (!(root instanceof YamlNode.Map m)) return EMPTY;
         return new ChappeConfig(

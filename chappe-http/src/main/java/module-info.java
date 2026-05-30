@@ -1,5 +1,5 @@
 /**
- * Implémentation des protocoles HTTP/1.1 (RFC 9112) et HTTP/2 (RFC 9113).
+ * Implementation of the HTTP/1.1 (RFC 9112) and HTTP/2 (RFC 9113) protocols.
  */
 module io.vidocq.chappe.http {
     requires io.vidocq.chappe.api;

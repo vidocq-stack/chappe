@@ -2,7 +2,7 @@ package io.vidocq.chappe.http.grpc;
 
 import java.io.IOException;
 
-/** Erreur de framing gRPC (format invalide, taille excessive, compression non supportée). */
+/** gRPC framing error (invalid format, excessive size, unsupported compression). */
 public final class GrpcFrameException extends IOException {
 
     public GrpcFrameException(String message) {

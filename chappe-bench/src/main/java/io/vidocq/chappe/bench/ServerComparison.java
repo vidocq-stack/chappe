@@ -15,10 +15,10 @@ import io.vidocq.chappe.api.Response;
 import io.vidocq.chappe.api.Server;
 
 /**
- * Benchmark comparatif de 5 serveurs HTTP avec un client NIO ultra-léger.
+ * Comparative benchmark of 5 HTTP servers with an ultra-light NIO client.
  * <p>
- * Mesure le throughput brut (req/s) avec 1, 4, 8 et 16 threads concurrents.
- * Chaque thread maintient une connexion keep-alive et envoie des requêtes GET en boucle.
+ * Measures raw throughput (req/s) with 1, 4, 8, and 16 concurrent threads.
+ * Each thread keeps a keep-alive connection and sends GET requests in a loop.
  */
 @SuppressWarnings({"FutureReturnValueIgnored", "AddressSelection", "StringCaseLocaleUsage"}) // Bench code
 public class ServerComparison {

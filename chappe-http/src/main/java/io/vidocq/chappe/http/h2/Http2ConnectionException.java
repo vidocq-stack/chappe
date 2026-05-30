@@ -3,8 +3,8 @@ package io.vidocq.chappe.http.h2;
 import java.io.IOException;
 
 /**
- * Exception de connexion HTTP/2 — porte un {@link Http2ErrorCode}
- * qui sera envoyé dans un GOAWAY frame.
+ * HTTP/2 connection exception — carries an {@link Http2ErrorCode}
+ * that will be sent in a GOAWAY frame.
  */
 public final class Http2ConnectionException extends IOException {
 

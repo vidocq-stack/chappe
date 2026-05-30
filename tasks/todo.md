@@ -1,102 +1,102 @@
-# Chappe — Plan de Développement
+# Chappe — Development Plan
 
-## Phase 1 : Fondations ✅
-- [x] Structure Maven multi-module avec JPMS
-- [x] API publique (chappe-api) : Server, Handler, Request, Response, Router
-- [x] Parsing HTTP/1.1 (RFC 9112)
-- [x] Serveur TCP basique avec virtual threads
-- [x] Keep-alive et pipelining HTTP/1.1
-- [x] Tests d'intégration avec java.net.http.HttpClient
+## Phase 1: Foundations ✅
+- [x] Multi-module Maven structure with JPMS
+- [x] Public API (chappe-api): Server, Handler, Request, Response, Router
+- [x] HTTP/1.1 parsing (RFC 9112)
+- [x] Basic TCP server with virtual threads
+- [x] HTTP/1.1 keep-alive and pipelining
+- [x] Integration tests with java.net.http.HttpClient
 
-## Phase 2 : HTTP/2 ✅
-- [x] Framing HTTP/2 (RFC 9113)
-- [x] HPACK (decode complet + encode Huffman + table dynamique)
-- [x] Multiplexage de streams (virtual thread par stream)
+## Phase 2: HTTP/2 ✅
+- [x] HTTP/2 framing (RFC 9113)
+- [x] HPACK (full decode + Huffman encode + dynamic table)
+- [x] Stream multiplexing (one virtual thread per stream)
 - [x] Flow control (connection + per-stream, WINDOW_UPDATE, AtomicInteger)
 - [x] h2c cleartext + ALPN h2 via TLS
-- [ ] Server push (PUSH_PROMISE) — déféré
+- [ ] Server push (PUSH_PROMISE) — deferred
 
-## Phase 3 : Validation ✅
-- [x] Conformité HTTP/1.1 (RFC 9110/9112) : 32 tests
-- [x] Conformité HTTP/2 (RFC 9113) : 8 tests
-- [x] Benchmarks JMH + comparatif Jetty/Helidon/JDK
-- [x] Tests de robustesse : malformées, slowloris, abandon, oversized
+## Phase 3: Validation ✅
+- [x] HTTP/1.1 conformance (RFC 9110/9112): 32 tests
+- [x] HTTP/2 conformance (RFC 9113): 8 tests
+- [x] JMH benchmarks + Jetty/Helidon/JDK comparison
+- [x] Robustness tests: malformed requests, slowloris, abandonment, oversized
 
-## Phase 4 : Production-ready ✅
+## Phase 4: Production-ready ✅
 - [x] TLS/SSL (SSLContext, SSLEngine, ALPN)
-- [x] Buffer pooling (ThreadLocal, zero-contention)
-- [x] Graceful shutdown configurable
+- [x] Buffer pooling (ThreadLocal, zero contention)
+- [x] Configurable graceful shutdown
 - [x] Timeouts (SO_TIMEOUT)
 
-## Audit RFC ✅
-### Bugs critiques corrigés (8) :
-- [x] Chunked TE réponses, flow control H2, timeouts, Content-Length validation
+## RFC Audit ✅
+### Critical bugs fixed (8):
+- [x] Chunked TE responses, H2 flow control, timeouts, Content-Length validation
 - [x] Chunk size overflow, SslHandler thread safety, max concurrent streams, FrameWriter IOException
 
-### Conformité RFC (9) :
-- [x] Date, HEAD/204/304 suppression body, 405+Allow, Host validation
-- [x] 100-continue, H2 INITIAL_WINDOW_SIZE, pseudo-headers, headers interdits
+### RFC conformance (9):
+- [x] Date, HEAD/204/304 body suppression, 405+Allow, Host validation
+- [x] 100-continue, H2 INITIAL_WINDOW_SIZE, pseudo-headers, forbidden headers
 
-### Optimisations perf (63K → 96K req/s, +53%) :
+### Performance optimizations (63K → 96K req/s, +53%):
 - [x] Write coalescing (1 syscall), zero-alloc headers (putAsciiString)
 - [x] Thread-local buffer pool, fast path 200 OK, header value interning
-- [x] HPACK Huffman encoding + table dynamique
+- [x] HPACK Huffman encoding + dynamic table
 
-## Phase 5 : Préparation extensions Vidocq ✅
-### SPI d'extension :
-- [x] `Router.mount(prefix, handler)` — enregistrement par path prefix avec stripping
-- [x] `Request` enrichi — contextPath, pathInfo, attributes, remoteAddress, isSecure, scheme
-- [x] `RequestContext` ScopedValue — contexte propagé sans parameter passing
-- [x] `Body.ofOutputStream()` — streaming body (Servlet OutputStream compat)
+## Phase 5: Preparing Vidocq extensions ✅
+### Extension SPI:
+- [x] `Router.mount(prefix, handler)` — registration by path prefix with stripping
+- [x] Enriched `Request` — contextPath, pathInfo, attributes, remoteAddress, isSecure, scheme
+- [x] `RequestContext` ScopedValue — context propagated without parameter passing
+- [x] `Body.ofOutputStream()` — streaming body (Servlet OutputStream compatibility)
 - [x] `Body.ofFile()` + `FileBody` — zero-copy via FileChannel.transferTo()
 
-### Fichiers statiques :
-- [x] `StaticFileHandler` builder avec fallback chain
-- [x] Sources filesystem (zero-copy) et classpath (jar, META-INF/resources)
-- [x] Cache en mémoire avec ETag pour ressources classpath
-- [x] Cache-Control configurable
-- [x] `MimeTypes` — détection par extension (26+ types)
+### Static files:
+- [x] `StaticFileHandler` builder with fallback chain
+- [x] Filesystem (zero-copy) and classpath (jar, META-INF/resources) sources
+- [x] In-memory cache with ETag for classpath resources
+- [x] Configurable Cache-Control
+- [x] `MimeTypes` — detection by extension (26+ types)
 - [x] Last-Modified / If-Modified-Since → 304
 - [x] If-None-Match / ETag → 304 (cache)
 - [x] Path traversal protection
 - [x] Directory index (index.html)
 
-## Phase 6 : Intégration Vidocq (à venir)
-- [ ] `vidocq-servlet` — extension CDI montant Servlet 6.1 sur Chappe
-- [ ] `vidocq-jaxrs` — extension CDI montant JAX-RS 4.0 sur Chappe (natif, pas via Servlet)
-- [ ] Coexistence Servlet + JAX-RS sur prefixes différents
-- [ ] Plugin Maven pour le lancement embedded
-- [ ] Documentation et exemples
+## Phase 6: Vidocq integration (coming soon)
+- [ ] `vidocq-servlet` — CDI extension mounting Servlet 6.1 on Chappe
+- [ ] `vidocq-jaxrs` — CDI extension mounting JAX-RS 4.0 on Chappe (native, not via Servlet)
+- [ ] Servlet + JAX-RS coexistence on different prefixes
+- [ ] Maven plugin for embedded launch
+- [ ] Documentation and examples
 
-## Phase 6.5 : WebSocket (RFC 6455) ✅
-- [x] API publique : `WebSocket`, `WebSocketHandler`, `CloseCodes`, `WebSocketUpgrade`, `Router.Builder.webSocket(pattern, handler)`
-- [x] Handshake serveur : validation `Upgrade`/`Connection`/`Sec-WebSocket-Version: 13`/`Sec-WebSocket-Key`, calcul `Sec-WebSocket-Accept` (SHA-1 + base64 + GUID RFC), 101 Switching Protocols, support sous-protocole
-- [x] Framing RFC 6455 §5 : opcodes (TEXT/BINARY/PING/PONG/CLOSE/CONTINUATION), FIN, RSV, masking client (XOR unmask), payload 7/16/64 bits, validation UTF-8 sur TEXT, control frames ≤ 125o, rejet RSV non nul / opcode inconnu / mask absent / continuation orpheline / payload > 64 MiB
-- [x] Lifecycle : auto-PONG sur PING (avant `onPing` observation), close handshake bidirectionnel (echo du code reçu), `onError` sur exception, fermeture TCP en `finally`
-- [x] Thread-safety : `ReentrantLock` sérialise les writes (RFC §5.4), callbacks séquentiels sur le virtual thread de la connexion
-- [x] Tests : 5 tests d'intégration (`WebSocketEchoTest` via `java.net.http.WebSocket`) + 8 tests conformance brute (`WebSocketRfc6455Test` via socket : Sec-WebSocket-Accept canonique RFC §1.3, missing version → 426, unmasked → close 1002, UTF-8 invalide → close 1007, echo Close client avec même code)
-- [ ] permessage-deflate (RFC 7692) — déféré, à brancher comme extension négociée
-- [ ] WebSocket sur HTTP/2 (RFC 8441) — déféré
+## Phase 6.5: WebSocket (RFC 6455) ✅
+- [x] Public API: `WebSocket`, `WebSocketHandler`, `CloseCodes`, `WebSocketUpgrade`, `Router.Builder.webSocket(pattern, handler)`
+- [x] Server handshake: validation of `Upgrade`/`Connection`/`Sec-WebSocket-Version: 13`/`Sec-WebSocket-Key`, computation of `Sec-WebSocket-Accept` (SHA-1 + base64 + RFC GUID), 101 Switching Protocols, subprotocol support
+- [x] RFC 6455 §5 framing: opcodes (TEXT/BINARY/PING/PONG/CLOSE/CONTINUATION), FIN, RSV, client masking (XOR unmask), 7/16/64-bit payload, UTF-8 validation on TEXT, control frames ≤ 125o, rejection of non-zero RSV / unknown opcode / missing mask / orphan continuation / payload > 64 MiB
+- [x] Lifecycle: auto-PONG on PING (before `onPing` observation), bidirectional close handshake (echo of received code), `onError` on exception, TCP close in `finally`
+- [x] Thread safety: `ReentrantLock` serializes writes (RFC §5.4), sequential callbacks on the connection virtual thread
+- [x] Tests: 5 integration tests (`WebSocketEchoTest` via `java.net.http.WebSocket`) + 8 raw conformance tests (`WebSocketRfc6455Test` via socket: canonical RFC §1.3 `Sec-WebSocket-Accept`, missing version → 426, unmasked → close 1002, invalid UTF-8 → close 1007, client Close echo with same code)
+- [ ] permessage-deflate (RFC 7692) — deferred, to be wired as a negotiated extension
+- [ ] WebSocket over HTTP/2 (RFC 8441) — deferred
 
-## Phase 6.6 : HTTP/2 Trailers (RFC 9113 §8.1) ✅
-- [x] API publique : `Response.trailers()` + `Builder.trailer(name, value)` / `trailers(headers)` ; `Request.trailers()`
-- [x] Envoi serveur : HEADERS frame additionnelle après les DATA frames avec END_STREAM=1, encodage HPACK `encodeTrailers` (pas de pseudo-header)
-- [x] Réception serveur : détection second HEADERS frame sur stream existant via `Http2Stream.markTrailers()`, rejet de pseudo-headers en trailers, exposition via `request.trailers()`
-- [x] Refactor `HpackDecoder.decode(ByteBuffer, HeaderSink)` pour découpler la cible d'écriture
-- [x] Tests `Http2TrailersTest` : 2 scénarios round-trip via client H2 raw (envoi + réception)
+## Phase 6.6: HTTP/2 Trailers (RFC 9113 §8.1) ✅
+- [x] Public API: `Response.trailers()` + `Builder.trailer(name, value)` / `trailers(headers)`; `Request.trailers()`
+- [x] Server sending: additional HEADERS frame after DATA frames with END_STREAM=1, HPACK `encodeTrailers` encoding (no pseudo-headers)
+- [x] Server receiving: detection of a second HEADERS frame on an existing stream via `Http2Stream.markTrailers()`, rejection of pseudo-headers in trailers, exposure through `request.trailers()`
+- [x] Refactor `HpackDecoder.decode(ByteBuffer, HeaderSink)` to decouple the write target
+- [x] `Http2TrailersTest` tests: 2 round-trip scenarios via raw H2 client (send + receive)
 
-## Phase 6.7 : gRPC transport (RFC HTTP/2 + framing core) ✅
-> gRPC sur le fil = HTTP/2 + trailers + framing length-prefixed 5 octets. **Aucune dépendance** grpc-java / Netty / perfmark / protobuf-java. La sérialisation (protobuf, JSON, …) reste à la charge de l'application ou d'une extension dédiée (`champollion` pour protobuf, en parallèle).
-- [x] API publique `chappe-api` : `GrpcHandler`, `GrpcCall` (SPI synchrone bloquante byte-level), `GrpcStatus` (17 codes RFC), `GrpcDispatch` (marker Response), `Router.Builder.grpc(pattern, handler)`
-- [x] Framing core `chappe-http/grpc/` : `GrpcFrameReader` (préfixe 5 octets, rejet `compressed=1`, garde `maxMessageSize=4 MiB`), `GrpcFrameWriter` (encode préfixe + payload), `GrpcFrameException`
-- [x] `GrpcCallImpl` : émission auto-headers (`:status 200`, `content-type: application/grpc`, `grpc-accept-encoding: identity`), trailers avec percent-encoding RFC 3986 sur `grpc-message`, trailers-only fusionné en un seul HEADERS frame, gestion erreur handler → `INTERNAL`
-- [x] Dispatch HTTP/2 : `Http2Connection.dispatchStream` détecte `instanceof GrpcDispatch` et bascule sans `sendResponse`, helpers publics `frameWriter()`/`hpackEncoder()`/`sendDataChunked()` exposés
-- [x] Refus défensif HTTP/1.1 : `DefaultRouterBuilder.grpc()` retourne `505` si version ≠ HTTP/2, `415` si content-type ≠ `application/grpc*` ; `HttpConnection` blinde un cas résiduel
-- [x] Cancellation : `Http2Stream.cancel()` câblé dans `handleRstStream`, exposé via `GrpcCall.isCancelled()`
-- [x] Tests `Http2GrpcTransportTest` : 7 scénarios (unary, server-stream, client-stream, bidi 3/3, handler-error, trailers-only, reject HTTP/1.1)
-- [x] Compression `grpc-encoding: gzip` : décompression auto en réception (négociation via `grpc-encoding` request header), opt-in compression sortante via `GrpcCall.useResponseEncoding("gzip")`, annonce `grpc-accept-encoding: identity, gzip` dans tous les responses, UNIMPLEMENTED (12) trailers-only si codec request inconnu ; tests : 4 e2e (decode gzip in, encode gzip out, codec inconnu = UNIMPLEMENTED, accept-encoding annoncé par défaut)
-- [x] `grpc-timeout` deadline propagation : parser RFC (H/M/S/m/u/n, saturation overflow), watchdog virtual thread, cancel stream + trailers DEADLINE_EXCEEDED (4) si handler dépasse, exposé via `GrpcCall.deadline()` (Optional<Duration>) ; tests : `GrpcTimeoutParserTest` (13) + `deadlineExceededViaGrpcTimeout` + `deadlineRespectedReturnsOk`
-- [x] gRPC-Web V1 (HTTP/2 only) : `GrpcWebDispatch` marker + `Router.grpcWeb(pattern, handler)`, modes BINARY (`application/grpc-web`) et TEXT (`application/grpc-web-text` avec Base64 chunk-par-chunk), trailers sérialisés inline comme frame DATA 0x80, réutilise parser timeout + négociation grpc-encoding, dispatch H2 dans `Http2Connection.dispatchStream` ; tests : 6 scénarios (binary unary, binary server-streaming, text unary, handler-error, content-type inconnu = 415, HTTP/1.1 = 505). HTTP/1.1 mode déferré (les navigateurs modernes parlent H2 nativement)
-- [x] Client gRPC-Web v1 (zéro-dep via `HttpClient` JDK) : `GrpcWebClient` + `GrpcWebResponse` dans `chappe-api.client`, modes BINARY/TEXT, unary + server-streaming (collecté), parser des frames body 5-octets + trailer 0x80, expose `grpc-status`/`grpc-message`/trailers ; tests self-loop client↔serveur (4) + serveur H1 (1 nouveau). Client gRPC natif (sur trailers H2) déféré (nécessite client HTTP/2 custom)
-- [x] gRPC-Web HTTP/1.1 mode (était déféré) : `Router.grpcWeb` accepte H1 via `Body.ofOutputStream` callback + `GrpcWebBufferedCall` package-private (buffered read, streaming write chunked-transfer). En H2 le marker `GrpcWebDispatch` reste pour le streaming via Http2Connection. Tests : H1 unary echo via HttpClient JDK
-- [x] Conformité protocole : `grpcurl` cross-impl — `GrpcurlConformanceTest` (2 scénarios : unary echo + erreur handler → INTERNAL ; skip propre si binaire absent)
+## Phase 6.7: gRPC transport (RFC HTTP/2 + core framing) ✅
+> gRPC on the wire = HTTP/2 + trailers + length-prefixed 5-byte framing. **No dependency** on grpc-java / Netty / perfmark / protobuf-java. Serialization (protobuf, JSON, …) remains the responsibility of the application or of a dedicated extension (`champollion` for protobuf, in parallel).
+- [x] Public `chappe-api` API: `GrpcHandler`, `GrpcCall` (blocking synchronous byte-level SPI), `GrpcStatus` (17 RFC codes), `GrpcDispatch` (marker Response), `Router.Builder.grpc(pattern, handler)`
+- [x] Core framing `chappe-http/grpc/`: `GrpcFrameReader` (5-byte prefix, rejects `compressed=1`, guard `maxMessageSize=4 MiB`), `GrpcFrameWriter` (encodes prefix + payload), `GrpcFrameException`
+- [x] `GrpcCallImpl`: automatic headers emission (`:status 200`, `content-type: application/grpc`, `grpc-accept-encoding: identity`), trailers with RFC 3986 percent-encoding on `grpc-message`, trailers-only merged into a single HEADERS frame, handler error handling → `INTERNAL`
+- [x] HTTP/2 dispatch: `Http2Connection.dispatchStream` detects `instanceof GrpcDispatch` and switches without `sendResponse`, public helpers `frameWriter()`/`hpackEncoder()`/`sendDataChunked()` exposed
+- [x] Defensive HTTP/1.1 refusal: `DefaultRouterBuilder.grpc()` returns `505` if version ≠ HTTP/2, `415` if content-type ≠ `application/grpc*`; `HttpConnection` hardens a residual case
+- [x] Cancellation: `Http2Stream.cancel()` wired in `handleRstStream`, exposed via `GrpcCall.isCancelled()`
+- [x] `Http2GrpcTransportTest` tests: 7 scenarios (unary, server-stream, client-stream, bidi 3/3, handler-error, trailers-only, reject HTTP/1.1)
+- [x] `grpc-encoding: gzip` compression: automatic decompression on receive (negotiated via `grpc-encoding` request header), opt-in outbound compression via `GrpcCall.useResponseEncoding("gzip")`, advertises `grpc-accept-encoding: identity, gzip` in all responses, trailers-only UNIMPLEMENTED (12) if request codec is unknown; tests: 4 e2e (decode gzip in, encode gzip out, unknown codec = UNIMPLEMENTED, accept-encoding advertised by default)
+- [x] `grpc-timeout` deadline propagation: RFC parser (H/M/S/m/u/n, overflow saturation), watchdog virtual thread, cancel stream + DEADLINE_EXCEEDED (4) trailers if handler overruns, exposed via `GrpcCall.deadline()` (Optional<Duration>); tests: `GrpcTimeoutParserTest` (13) + `deadlineExceededViaGrpcTimeout` + `deadlineRespectedReturnsOk`
+- [x] gRPC-Web V1 (HTTP/2 only): `GrpcWebDispatch` marker + `Router.grpcWeb(pattern, handler)`, BINARY (`application/grpc-web`) and TEXT (`application/grpc-web-text` with Base64 chunk-by-chunk) modes, trailers serialized inline as DATA frame 0x80, reuses timeout parser + grpc-encoding negotiation, H2 dispatch in `Http2Connection.dispatchStream`; tests: 6 scenarios (binary unary, binary server-streaming, text unary, handler-error, unknown content-type = 415, HTTP/1.1 = 505). HTTP/1.1 mode deferred (modern browsers speak H2 natively)
+- [x] gRPC-Web v1 client (zero-dep via JDK `HttpClient`): `GrpcWebClient` + `GrpcWebResponse` in `chappe-api.client`, BINARY/TEXT modes, unary + server-streaming (collected), parser for 5-byte body frames + 0x80 trailer, exposes `grpc-status`/`grpc-message`/trailers; self-loop client↔server tests (4) + H1 server test (1 new). Native gRPC client (on H2 trailers) deferred (requires custom HTTP/2 client)
+- [x] gRPC-Web HTTP/1.1 mode (was deferred): `Router.grpcWeb` accepts H1 via `Body.ofOutputStream` callback + package-private `GrpcWebBufferedCall` (buffered read, chunked-transfer streaming write). In H2 the `GrpcWebDispatch` marker remains for streaming via Http2Connection. Tests: H1 unary echo via JDK HttpClient
+- [x] Protocol conformance: `grpcurl` cross-impl — `GrpcurlConformanceTest` (2 scenarios: unary echo + handler error → INTERNAL; clean skip if binary absent)

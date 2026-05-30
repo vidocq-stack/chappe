@@ -4,8 +4,8 @@ import org.openjdk.jmh.runner.Runner;
 import org.openjdk.jmh.runner.options.OptionsBuilder;
 
 /**
- * Runner dédié aux micro-benchs validant les optimisations de la série "OPTIMS".
- * Lance : HPACK, MimeTypes, ClasspathLookup, RouterDispatch.
+ * Runner dedicated to the micro-benchmarks validating the "OPTIMS" series of optimizations.
+ * Runs: HPACK, MimeTypes, ClasspathLookup, RouterDispatch.
  */
 public final class OptimizationsRunner {
 

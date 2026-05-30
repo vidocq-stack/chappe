@@ -1,15 +1,16 @@
-# Chappe Shootout — Harness OOP multi-runtime
+# Chappe Shootout — Multi-runtime OOP Harness
 
-Compare Chappe (JVM + native) contre les serveurs HTTP de référence du marché en
-**out-of-process** : un container par serveur, mesures via `wrk2` (HdrHistogram,
-rate constant). Complément du `ServerComparison` in-process — l'OOP est l'unique
-moyen de comparer équitablement contre Nginx, Go et le binaire natif Chappe.
+Compare Chappe (JVM + native) against the market's reference HTTP servers in
+**out-of-process** mode: one container per server, measurements via `wrk2`
+(HdrHistogram, constant rate). This complements the in-process
+`ServerComparison` — OOP is the only way to compare fairly against Nginx, Go,
+and the native Chappe binary.
 
-## Cibles
+## Targets
 
 | Service       | Lib / Runtime           | Image                                            |
 |---------------|-------------------------|--------------------------------------------------|
-| chappe-jvm    | Chappe sur Temurin 25   | `chappe-shootout-jvm:local`                      |
+| chappe-jvm    | Chappe on Temurin 25    | `chappe-shootout-jvm:local`                      |
 | chappe-native | Chappe via GraalVM CE 25| `chappe-shootout-native:local` (distroless base) |
 | jetty         | Jetty 12.0.21           | `chappe-shootout-jvm:local`                      |
 | helidon       | Helidon SE 4.2.2        | `chappe-shootout-jvm:local`                      |
@@ -19,7 +20,7 @@ moyen de comparer équitablement contre Nginx, Go et le binaire natif Chappe.
 | nginx         | Nginx 1.27-alpine       | `chappe-shootout-nginx:local`                    |
 | go            | Go 1.24 `net/http`      | `chappe-shootout-go:local` (distroless static)   |
 
-Tous exposent `GET / → "ok"` (2 bytes, `text/plain`) sur le port interne 8080.
+All expose `GET / → "ok"` (2 bytes, `text/plain`) on internal port 8080.
 
 ## Architecture
 
@@ -44,51 +45,51 @@ Tous exposent `GET / → "ok"` (2 bytes, `text/plain`) sur le port interne 8080.
    └────────────────────────────────────────────────────────────────┘
 ```
 
-## Reproductibilité
+## Reproducibility
 
 ```bash
-# Depuis la racine du repo chappe :
-./chappe-bench/docker/run-remote.sh shootout            # tout (avec native)
-./chappe-bench/docker/run-remote.sh shootout-jvm-only   # sans chappe-native
+# From the root of the chappe repo:
+./chappe-bench/docker/run-remote.sh shootout            # everything (with native)
+./chappe-bench/docker/run-remote.sh shootout-jvm-only   # without chappe-native
 
-# Override CPU sets si moins de 8 cores :
+# Override CPU sets if fewer than 8 cores:
 SERVER_CPUSET=0-1 CLIENT_CPUSET=2-3 \
     ./chappe-bench/docker/run-remote.sh shootout
 
-# Override rates wrk2 :
+# Override wrk2 rates:
 SHOOTOUT_RATES="10000 50000" SHOOTOUT_DURATION=10s \
     ./chappe-bench/docker/run-remote.sh shootout
 ```
 
-## Sortie
+## Output
 
-- Markdown récapitulatif : `chappe-bench/target/shootout/shootout-results.md`
-- Runs wrk2 bruts : `chappe-bench/target/shootout/<service>-rate<N>.txt`
+- Summary Markdown: `chappe-bench/target/shootout/shootout-results.md`
+- Raw wrk2 runs: `chappe-bench/target/shootout/<service>-rate<N>.txt`
 
-Le récap contient : taille d'image (Mo), RSS idle, throughput soutenu max (à
-p99 < 10 ms), latence p50 / p99 / p999.
+The summary contains: image size (MB), idle RSS, max sustained throughput (at
+p99 < 10 ms), and p50 / p99 / p999 latency.
 
 ## Debug
 
 ```bash
-# Démarrer juste un service pour inspection :
+# Start only one service for inspection:
 docker compose -f chappe-bench/docker/shootout/docker-compose.yml \
     --profile servers up chappe-jvm
 
-# Logs d'un container :
+# Logs from a container:
 docker compose -f chappe-bench/docker/shootout/docker-compose.yml logs chappe-native
 
-# Cleanup forcé :
+# Forced cleanup:
 docker compose -f chappe-bench/docker/shootout/docker-compose.yml down -v --remove-orphans
 ```
 
-## Hypothèses & limites
+## Assumptions & limits
 
-- Le client `williamyeh/wrk2` est dans le même réseau bridge → latence intra-host
-  Docker, équitable entre tous les serveurs.
-- `wrk2 -R<rate>` envoie à débit constant ; si le serveur ne tient pas, la
-  latence explose et le rate est rejeté (filtré p99 < 10 ms).
-- Le profil `compatibility` du native-image est utilisé pour la portabilité de
-  l'image (évite l'optimisation `-march=native` qui dépend de la VM hôte).
-- Grizzly retiré du périmètre (échoue avec keep-alive, déjà noté dans
+- The `williamyeh/wrk2` client is on the same bridge network → intra-host Docker
+  latency, fair across all servers.
+- `wrk2 -R<rate>` sends at a constant rate; if the server cannot keep up,
+  latency explodes and the rate is rejected (filtered with p99 < 10 ms).
+- The native-image `compatibility` profile is used for image portability
+  (avoids the `-march=native` optimization that depends on the host VM).
+- Grizzly was removed from the scope (fails with keep-alive, already noted in
   `BENCHMARKS.md`).

@@ -6,29 +6,29 @@ import java.nio.ByteBuffer;
 import java.nio.channels.ReadableByteChannel;
 
 /**
- * Factory pour les InputStreams de lecture du body HTTP.
+ * Factory for InputStreams used to read the HTTP body.
  */
 public final class HttpBodyReader {
 
     private HttpBodyReader() {}
 
     /**
-     * Crée un InputStream pour un body de taille fixe (Content-Length).
+     * Creates an InputStream for a fixed-size body (Content-Length).
      */
     static InputStream fixedLength(ByteBuffer buffer, ReadableByteChannel channel, long contentLength) {
         return new FixedLengthInputStream(buffer, channel, contentLength);
     }
 
     /**
-     * Crée un InputStream pour un body en chunked transfer encoding.
+     * Creates an InputStream for a chunked-transfer-encoded body.
      */
     static InputStream chunked(ByteBuffer buffer, ReadableByteChannel channel) {
         return new ChunkedInputStream(buffer, channel);
     }
 
     /**
-     * Draine les octets restants du body (pour keep-alive quand le handler
-     * n'a pas lu le body).
+     * Drains the remaining body bytes (for keep-alive when the handler
+     * did not read the body).
      */
     static void drain(InputStream bodyStream) throws IOException {
         if (bodyStream == null) return;

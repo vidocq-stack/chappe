@@ -4,11 +4,11 @@ import java.nio.ByteBuffer;
 import java.util.ArrayDeque;
 
 /**
- * Pool de ByteBuffer directs basé sur ThreadLocal — zéro contention.
+ * ThreadLocal-based direct ByteBuffer pool — zero contention.
  * <p>
- * Chaque carrier thread (platform thread) a son propre pool.
- * Les virtual threads héritent du carrier sur lequel ils s'exécutent,
- * ce qui est idéal : pas de CAS, pas de lock, accès direct.
+ * Each carrier thread (platform thread) has its own pool.
+ * Virtual threads inherit the carrier they run on,
+ * which is ideal: no CAS, no lock, direct access.
  */
 public final class ByteBufferPool {
 
@@ -19,12 +19,12 @@ public final class ByteBufferPool {
 
     public ByteBufferPool(int bufferSize, int maxPoolSize) {
         this.bufferSize = bufferSize;
-        // Distribuer le max sur ~8 carrier threads
+        // Spread max capacity across ~8 carrier threads
         this.maxPerThread = Math.max(4, maxPoolSize / 8);
         this.local = ThreadLocal.withInitial(ArrayDeque::new);
     }
 
-    /** Acquiert un buffer (cleared). Zéro contention. */
+    /** Acquires a buffer (cleared). Zero contention. */
     public ByteBuffer acquire() {
         var pool = local.get();
         ByteBuffer buf = pool.pollFirst();
@@ -35,17 +35,17 @@ public final class ByteBufferPool {
         return ByteBuffer.allocateDirect(bufferSize);
     }
 
-    /** Retourne un buffer au pool local. Zéro contention. */
+    /** Returns a buffer to the local pool. Zero contention. */
     public void release(ByteBuffer buffer) {
         if (buffer == null || buffer.capacity() != bufferSize) return;
         var pool = local.get();
         if (pool.size() < maxPerThread) {
             pool.offerFirst(buffer);
         }
-        // sinon discard — sera GC'd
+        // otherwise discard — will be GC'd
     }
 
-    /** Vide le pool du thread courant. */
+    /** Clears the current thread's pool. */
     public void clear() {
         local.get().clear();
     }

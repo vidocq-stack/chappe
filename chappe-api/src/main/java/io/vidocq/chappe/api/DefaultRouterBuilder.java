@@ -15,7 +15,7 @@ import java.util.Set;
 import java.util.function.Consumer;
 
 /**
- * Implémentation par défaut de {@link Router.Builder}.
+ * Default implementation of {@link Router.Builder}.
  */
 final class DefaultRouterBuilder implements Router.Builder {
 
@@ -81,10 +81,10 @@ final class DefaultRouterBuilder implements Router.Builder {
     @Override
     public Router.Builder group(String groupPrefix, Consumer<Router.Builder> configurator) {
         var child = new DefaultRouterBuilder(prefix + groupPrefix);
-        // Les filtres du parent sont hérités par le groupe enfant
+        // Parent filters are inherited by the child group
         child.filters.addAll(this.filters);
         configurator.accept(child);
-        // Les routes enfant portent déjà leurs filtres (parent + enfant)
+        // Child routes already include their filters (parent + child)
         routes.addAll(child.routes);
         mounts.addAll(child.mounts);
         return this;
@@ -105,7 +105,7 @@ final class DefaultRouterBuilder implements Router.Builder {
     @Override
     public Router.Builder webSocket(String pattern, WebSocketHandler handler) {
         return route(HttpMethod.GET, pattern, request -> {
-            // RFC 6455 §4.2.1 : valide les headers de handshake côté serveur.
+            // RFC 6455 §4.2.1: validate server-side handshake headers.
             if (request.version() != HttpVersion.HTTP_1_1) {
                 return Response.builder()
                         .status(StatusCode.BAD_REQUEST)
@@ -159,7 +159,7 @@ final class DefaultRouterBuilder implements Router.Builder {
     @Override
     public Router.Builder grpc(String pattern, GrpcHandler handler) {
         return route(HttpMethod.POST, pattern, request -> {
-            // gRPC exige HTTP/2.
+            // gRPC requires HTTP/2.
             if (request.version() != HttpVersion.HTTP_2) {
                 return Response.of(StatusCode.HTTP_VERSION_NOT_SUPPORTED);
             }
@@ -188,15 +188,15 @@ final class DefaultRouterBuilder implements Router.Builder {
                 return Response.of(StatusCode.UNSUPPORTED_MEDIA_TYPE);
             }
 
-            // En HTTP/2 : marker GrpcWebDispatch -> dispatch streaming via Http2Connection
-            // (frames émises au fil de l'eau côté DATA frames H2).
+            // In HTTP/2: GrpcWebDispatch marker -> streaming dispatch via Http2Connection
+            // (frames emitted progressively through H2 DATA frames).
             if (request.version() == HttpVersion.HTTP_2) {
                 return new GrpcWebDispatch(handler, mode);
             }
 
-            // En HTTP/1.1 : Response standard avec Body.ofOutputStream callback.
-            // Le handler tourne dans le callback, les frames sont écrites en chunked
-            // transfer encoding au fur et à mesure. gRPC-Web sur H1 est l'usage navigateur
+            // In HTTP/1.1: standard Response with Body.ofOutputStream callback.
+            // Handler runs in callback, frames are written incrementally using chunked
+            // transfer encoding. gRPC-Web over H1 is the typical browser use case
             // typique (XHR/fetch POST, response chunked).
             String responseContentType =
                     (mode == GrpcWebDispatch.Mode.TEXT) ? "application/grpc-web-text" : "application/grpc-web";
@@ -227,7 +227,7 @@ final class DefaultRouterBuilder implements Router.Builder {
                 try {
                     call.complete(GrpcStatus.INTERNAL, String.valueOf(e.getMessage()));
                 } catch (java.io.IOException _) {
-                    // connexion perdue
+                    // lost connection
                 }
             }
         }
@@ -254,8 +254,8 @@ final class DefaultRouterBuilder implements Router.Builder {
         var globalFilters = List.copyOf(filters);
         var fallback = notFoundHandler;
 
-        // Fast path : routes statiques (sans {param} ni /*) indexées par (path → method → route).
-        // O(1) pour le cas fréquent. Les patterns paramétriques vont dans dynamicRoutes.
+        // Fast path: static routes (without {param} or /*) indexed by (path -> method -> route).
+        // O(1) for common case. Parameterized patterns go into dynamicRoutes.
         var staticByPath = new HashMap<String, EnumMap<HttpMethod, Route>>();
         var dynamicRoutes = new ArrayList<Route>();
         for (var r : snapshot) {
@@ -263,7 +263,7 @@ final class DefaultRouterBuilder implements Router.Builder {
             if (isStaticPattern(normPattern)) {
                 staticByPath
                         .computeIfAbsent(normPattern, _ -> new EnumMap<>(HttpMethod.class))
-                        .putIfAbsent(r.method(), r); // premier gagnant, cohérent avec scan linéaire
+                        .putIfAbsent(r.method(), r); // first match wins, consistent with linear scan
             } else {
                 dynamicRoutes.add(r);
             }
@@ -272,17 +272,17 @@ final class DefaultRouterBuilder implements Router.Builder {
         List<Route> dynamicSnapshot = List.copyOf(dynamicRoutes);
 
         return request -> {
-            // Normalisation trailing slash : /users/ → /users (sauf /)
+            // Trailing-slash normalization: /users/ -> /users (except /)
             String path = request.path();
             if (path.length() > 1 && path.endsWith("/")) {
                 path = path.substring(0, path.length() - 1);
             }
 
             HttpMethod method = request.method();
-            // Auto HEAD pour routes GET (RFC 9110 §9.3.2)
+            // Auto HEAD for GET routes (RFC 9110 §9.3.2)
             boolean tryHeadAsGet = (method == HttpMethod.HEAD);
 
-            // ── Fast path : routes statiques ──
+            // -- Fast path: static routes --
             var methodsForPath = staticIndex.get(path);
             if (methodsForPath != null) {
                 Route route = methodsForPath.get(method);
@@ -292,10 +292,10 @@ final class DefaultRouterBuilder implements Router.Builder {
                 if (route != null) {
                     return invoke(route, request, Collections.emptyMap(), globalFilters);
                 }
-                // Path matché mais pas la méthode → 405, on continue pour agréger avec dynamic
+                // Path matched but method did not -> 405; continue to aggregate with dynamic routes
             }
 
-            // ── Scan dynamique : patterns paramétriques ──
+            // -- Dynamic scan: parameterized patterns --
             boolean pathMatched = (methodsForPath != null);
             Set<HttpMethod> allowedMethods = null;
             if (pathMatched) {
@@ -320,7 +320,7 @@ final class DefaultRouterBuilder implements Router.Builder {
                 }
             }
 
-            // 405 Method Not Allowed si le path matche mais pas la méthode (RFC 9110 §15.5.6)
+            // 405 Method Not Allowed if path matches but method does not (RFC 9110 §15.5.6)
             if (pathMatched) {
                 if (tryHeadAsGet) allowedMethods.add(HttpMethod.HEAD);
                 var allow = String.join(
@@ -372,10 +372,10 @@ final class DefaultRouterBuilder implements Router.Builder {
     }
 
     /**
-     * Matche un pattern contre un path. Retourne les params capturés, ou null si pas de match.
+     * Matches a pattern against a path. Returns captured params, or null if no match.
      */
     private static Map<String, String> matchPath(String pattern, String path) {
-        // Normalisation trailing slash sur le pattern aussi
+        // Also normalize trailing slash on pattern
         String normPattern =
                 (pattern.length() > 1 && pattern.endsWith("/")) ? pattern.substring(0, pattern.length() - 1) : pattern;
         if (normPattern.equals(path)) return Collections.emptyMap();
@@ -406,7 +406,7 @@ final class DefaultRouterBuilder implements Router.Builder {
     }
 
     /**
-     * Crée un wrapper de Request qui ajoute les pathParams.
+     * Creates a Request wrapper that adds pathParams.
      */
     private static Request withPathParams(Request delegate, Map<String, String> pathParams) {
         return new Request() {

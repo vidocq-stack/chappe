@@ -1,7 +1,7 @@
 package io.vidocq.chappe.api;
 
 /**
- * Implémentation par défaut de {@link Response.Builder}.
+ * Default implementation of {@link Response.Builder}.
  */
 final class DefaultResponseBuilder implements Response.Builder {
 

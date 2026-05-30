@@ -4,7 +4,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Cache des codes de statut HTTP standard — accès O(1).
+ * Cache of standard HTTP status codes — O(1) access.
  */
 final class StatusCodeCache {
 
@@ -12,8 +12,8 @@ final class StatusCodeCache {
 
     static {
         var map = new HashMap<Integer, StatusCode.Standard>();
-        // Forcer l'initialisation des constantes de StatusCode,
-        // puis les indexer par code.
+        // Force initialization of StatusCode constants,
+        // then index them by code.
         var constants = new StatusCode[] {
             StatusCode.OK,
             StatusCode.CREATED,

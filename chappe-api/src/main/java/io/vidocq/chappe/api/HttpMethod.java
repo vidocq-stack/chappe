@@ -6,7 +6,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
- * Méthodes HTTP standard définies par la RFC 9110.
+ * Standard HTTP methods defined by RFC 9110.
  */
 public enum HttpMethod {
     GET,
@@ -23,12 +23,12 @@ public enum HttpMethod {
             .collect(Collectors.toUnmodifiableMap(m -> m.name().toUpperCase(Locale.ROOT), m -> m));
 
     /**
-     * Résout une méthode HTTP à partir de sa représentation textuelle.
-     * La comparaison est insensible à la casse.
+     * Resolves an HTTP method from its textual representation.
+     * Comparison is case-insensitive.
      *
-     * @param method le nom de la méthode (ex. {@code "GET"})
-     * @return la constante correspondante
-     * @throws IllegalArgumentException si la méthode est inconnue
+     * @param method the method name (for example {@code "GET"})
+     * @return the matching constant
+     * @throws IllegalArgumentException if the method is unknown
      */
     public static HttpMethod of(String method) {
         var m = LOOKUP.get(method.toUpperCase(Locale.ROOT));

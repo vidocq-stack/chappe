@@ -3,8 +3,8 @@ package io.vidocq.chappe.api;
 import java.nio.file.Path;
 
 /**
- * Détection de type MIME basée sur l'extension de fichier.
- * Couvre les types les plus courants pour un serveur HTTP.
+ * MIME type detection based on the file extension.
+ * Covers the most common types for an HTTP server.
  */
 public final class MimeTypes {
 
@@ -22,8 +22,8 @@ public final class MimeTypes {
     public static final String IMAGE_JPEG = "image/jpeg";
     public static final String IMAGE_SVG = "image/svg+xml";
 
-    // Ordonné par fréquence approximative sur le web (hit rapide sur html/css/js/png/jpg).
-    // Lookup zero-alloc via String.regionMatches(true, ...) — évite substring + toLowerCase.
+    // Ordered by approximate web frequency (fast hits on html/css/js/png/jpg).
+    // Zero-allocation lookup via String.regionMatches(true, ...) — avoids substring + toLowerCase.
     private static final String[][] ENTRIES = {
         {"html", TEXT_HTML},
         {"css", TEXT_CSS},
@@ -54,18 +54,18 @@ public final class MimeTypes {
     };
 
     /**
-     * Détecte le type MIME d'un fichier à partir de son chemin.
+     * Detects the MIME type of a file from its path.
      *
-     * @return le type MIME détecté, ou {@code application/octet-stream} par défaut
+     * @return the detected MIME type, or {@code application/octet-stream} by default
      */
     public static String detect(Path path) {
         return detect(path.getFileName().toString());
     }
 
     /**
-     * Détecte le type MIME à partir d'un nom de fichier.
+     * Detects the MIME type from a file name.
      *
-     * @return le type MIME détecté, ou {@code application/octet-stream} par défaut
+     * @return the detected MIME type, or {@code application/octet-stream} by default
      */
     public static String detect(String filename) {
         int len = filename.length();

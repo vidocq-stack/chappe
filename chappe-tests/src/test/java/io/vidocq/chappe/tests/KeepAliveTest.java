@@ -55,7 +55,7 @@ class KeepAliveTest {
 
     @Test
     void connectionCloseHeaderViaRawSocket() throws IOException {
-        // HttpClient interdit le header Connection — on utilise un raw socket
+        // HttpClient forbids the Connection header — use a raw socket
         try (var socket = new Socket("127.0.0.1", port)) {
             socket.setSoTimeout(5000);
             var out = socket.getOutputStream();

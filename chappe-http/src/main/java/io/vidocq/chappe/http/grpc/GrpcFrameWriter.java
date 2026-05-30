@@ -1,22 +1,22 @@
 package io.vidocq.chappe.http.grpc;
 
 /**
- * Encode un message gRPC (préfixe 5 octets + payload) en un seul {@code byte[]} prêt à
- * être passé à {@code Http2FrameWriter.writeData}.
+ * Encodes a gRPC message (5-byte prefix + payload) into a single {@code byte[]} ready to
+ * be passed to {@code Http2FrameWriter.writeData}.
  */
 public final class GrpcFrameWriter {
 
     private GrpcFrameWriter() {}
 
-    /** Encode un message non compressé (préfixe avec {@code compressed=0}). */
+    /** Encodes an uncompressed message (prefix with {@code compressed=0}). */
     public static byte[] encode(byte[] payload) {
         return encode(payload, false);
     }
 
     /**
-     * Encode un message avec le flag {@code compressed} explicite. Le {@code payload}
-     * fourni doit déjà être compressé selon le {@code grpc-encoding} négocié si
-     * {@code compressed=true} — ce framing ne fait que poser le préfixe.
+     * Encodes a message with an explicit {@code compressed} flag. The provided
+     * {@code payload} must already be compressed according to the negotiated
+     * {@code grpc-encoding} if {@code compressed=true} — this framing only adds the prefix.
      */
     public static byte[] encode(byte[] payload, boolean compressed) {
         int len = payload.length;

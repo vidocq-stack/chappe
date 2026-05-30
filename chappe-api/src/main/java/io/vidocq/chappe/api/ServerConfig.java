@@ -6,19 +6,19 @@ import java.util.List;
 import javax.net.ssl.SSLContext;
 
 /**
- * Configuration immutable du serveur HTTP.
+ * Immutable HTTP server configuration.
  *
- * @param host adresse d'écoute (défaut : {@code "0.0.0.0"})
- * @param port port d'écoute (défaut : {@code 8080}, {@code 0} pour port éphémère)
- * @param backlog taille de la file d'attente TCP (défaut : {@code 1024})
- * @param readTimeout délai max de lecture (défaut : 30s)
- * @param writeTimeout délai max d'écriture (défaut : 30s)
- * @param idleTimeout délai d'inactivité avant fermeture de connexion (défaut : 60s)
- * @param maxRequestSize taille max du corps de requête en octets (défaut : 10 Mo)
- * @param maxHeaderSize taille max des en-têtes en octets (défaut : 8 Ko)
- * @param sslContext contexte SSL/TLS ({@code null} = cleartext)
- * @param alpnProtocols protocoles ALPN négociés (défaut : {@code ["h2", "http/1.1"]})
- * @param shutdownGracePeriod délai de drain avant fermeture forcée (défaut : 30s)
+ * @param host listen address (default: {@code "0.0.0.0"})
+ * @param port listen port (default: {@code 8080}, {@code 0} for an ephemeral port)
+ * @param backlog TCP backlog size (default: {@code 1024})
+ * @param readTimeout maximum read timeout (default: 30s)
+ * @param writeTimeout maximum write timeout (default: 30s)
+ * @param idleTimeout idle timeout before closing the connection (default: 60s)
+ * @param maxRequestSize maximum request body size in bytes (default: 10 MiB)
+ * @param maxHeaderSize maximum header size in bytes (default: 8 KiB)
+ * @param sslContext SSL/TLS context ({@code null} = cleartext)
+ * @param alpnProtocols negotiated ALPN protocols (default: {@code ["h2", "http/1.1"]})
+ * @param shutdownGracePeriod drain timeout before forced shutdown (default: 30s)
  */
 public record ServerConfig(
         String host,
@@ -33,7 +33,7 @@ public record ServerConfig(
         List<String> alpnProtocols,
         Duration shutdownGracePeriod) {
 
-    /** Configuration par défaut (cleartext). */
+    /** Default configuration (cleartext). */
     public static final ServerConfig DEFAULT = new ServerConfig(
             "0.0.0.0",
             8080,
@@ -47,7 +47,7 @@ public record ServerConfig(
             List.of("h2", "http/1.1"),
             Duration.ofSeconds(30));
 
-    /** {@code true} si TLS est activé. */
+    /** {@code true} if TLS is enabled. */
     public boolean tlsEnabled() {
         return sslContext != null;
     }

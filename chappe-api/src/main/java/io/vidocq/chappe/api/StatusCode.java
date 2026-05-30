@@ -1,10 +1,10 @@
 package io.vidocq.chappe.api;
 
 /**
- * Code de statut HTTP (RFC 9110, Section 15).
+ * HTTP status code (RFC 9110, Section 15).
  * <p>
- * Les codes standard sont pré-cachés en tant que constantes.
- * Les codes personnalisés sont supportés via {@link #of(int, String)}.
+ * Standard codes are pre-cached as constants.
+ * Custom codes are supported via {@link #of(int, String)}.
  */
 public sealed interface StatusCode permits StatusCode.Standard, StatusCode.Custom {
 
@@ -50,15 +50,15 @@ public sealed interface StatusCode permits StatusCode.Standard, StatusCode.Custo
     StatusCode HTTP_VERSION_NOT_SUPPORTED = new Standard(505, "HTTP Version Not Supported");
 
     /**
-     * Retourne un {@code StatusCode} pour le code et la raison donnés.
-     * Les codes standard sont retournés depuis le cache.
+     * Returns a {@code StatusCode} for the given code and reason.
+     * Standard codes are returned from the cache.
      */
     static StatusCode of(int code, String reason) {
         var cached = StatusCodeCache.get(code);
         return cached != null ? cached : new Custom(code, reason);
     }
 
-    /** Retourne un {@code StatusCode} pour un code connu, avec la raison par défaut. */
+    /** Returns a {@code StatusCode} for a known code, with the default reason phrase. */
     static StatusCode of(int code) {
         var cached = StatusCodeCache.get(code);
         return cached != null ? cached : new Custom(code, "");

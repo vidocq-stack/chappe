@@ -10,10 +10,10 @@ import io.vidocq.chappe.api.ServerConfig;
 import io.vidocq.chappe.api.StatusCode;
 
 /**
- * Parser incrémental HTTP/1.1 (RFC 9112) — state machine sur {@link ByteBuffer}.
+ * Incremental HTTP/1.1 parser (RFC 9112) — state machine over a {@link ByteBuffer}.
  * <p>
- * Lit depuis le buffer et remplit directement un {@link HttpRequestImpl}.
- * Bloque sur le channel quand le buffer est épuisé (virtual threads).
+ * Reads from the buffer and fills a {@link HttpRequestImpl} directly.
+ * Blocks on the channel when the buffer is exhausted (virtual threads).
  */
 public final class HttpRequestParser {
 
@@ -26,7 +26,7 @@ public final class HttpRequestParser {
     private static final int MAX_URI_LENGTH = 8192;
     private static final int MAX_HEADER_COUNT = 100;
 
-    // Headers courants internés pour éviter les allocations
+    // Common interned headers to avoid allocations
     private static final String H_HOST = "Host";
     private static final String H_CONTENT_LENGTH = "Content-Length";
     private static final String H_CONTENT_TYPE = "Content-Type";
@@ -55,7 +55,7 @@ public final class HttpRequestParser {
         reset();
     }
 
-    /** Réinitialise le parser pour la prochaine requête. */
+    /** Resets the parser for the next request. */
     public void reset() {
         state = State.REQUEST_LINE_METHOD;
         token.setLength(0);
@@ -64,15 +64,15 @@ public final class HttpRequestParser {
     }
 
     /**
-     * Parse une requête depuis le channel dans l'objet request.
+     * Parses a request from the channel into the request object.
      *
-     * @param buffer  le buffer de lecture (partagé avec la connexion)
-     * @param channel le channel socket pour lire plus de données
-     * @param target  l'objet requête à remplir
-     * @param config  la configuration serveur (limites)
-     * @return résultat du parsing
-     * @throws ParseException si la requête est malformée
-     * @throws IOException    si une erreur I/O survient
+     * @param buffer  the read buffer (shared with the connection)
+     * @param channel the socket channel used to read more data
+     * @param target  the request object to fill
+     * @param config  the server configuration (limits)
+     * @return parsing result
+     * @throws ParseException if the request is malformed
+     * @throws IOException    if an I/O error occurs
      */
     public ParseResult parse(
             ByteBuffer buffer, ReadableByteChannel channel, HttpRequestImpl target, ServerConfig config)
@@ -105,9 +105,9 @@ public final class HttpRequestParser {
                             token.setLength(0);
                             state = State.REQUEST_LINE_URI;
                         } else if (b == CR || b == LF) {
-                            // Lignes vides avant la request-line : ignorer (RFC 9112 §2.2)
+                            // Empty lines before request-line: ignore (RFC 9112 §2.2)
                             if (token.isEmpty()) {
-                                headerBytesRead = 0; // ne pas compter les lignes vides
+                                headerBytesRead = 0; // do not count empty lines
                             } else {
                                 throw badRequest("Unexpected line break in request method");
                             }
@@ -134,7 +134,7 @@ public final class HttpRequestParser {
 
                     case REQUEST_LINE_VERSION -> {
                         if (b == CR) {
-                            // Version terminée, attend LF
+                            // Version ended, waiting for LF
                         } else if (b == LF) {
                             target.version = resolveVersion(token);
                             token.setLength(0);
@@ -146,9 +146,9 @@ public final class HttpRequestParser {
 
                     case HEADER_LINE_START -> {
                         if (b == CR) {
-                            // Début de la ligne vide terminale
+                            // Start of final empty line
                         } else if (b == LF) {
-                            // Fin des headers
+                            // End of headers
                             state = State.COMPLETE;
                             return ParseResult.COMPLETE;
                         } else if (b == SP || b == HTAB) {
@@ -179,9 +179,9 @@ public final class HttpRequestParser {
                         if (b == SP || b == HTAB) {
                             // Skip OWS
                         } else if (b == CR) {
-                            // Valeur vide
+                            // Empty value
                         } else if (b == LF) {
-                            // Header avec valeur vide
+                            // Header with empty value
                             addHeader(target, currentHeaderName, "");
                             state = State.HEADER_LINE_START;
                         } else {
@@ -193,7 +193,7 @@ public final class HttpRequestParser {
 
                     case HEADER_VALUE -> {
                         if (b == CR) {
-                            // Fin de la valeur, attend LF
+                            // End of value, waiting for LF
                         } else if (b == LF) {
                             // Trim trailing OWS
                             var value = trimTrailingOws(token);
@@ -205,7 +205,7 @@ public final class HttpRequestParser {
                     }
 
                     case COMPLETE -> {
-                        // Ne devrait pas arriver ici
+                        // Should not happen here
                         return ParseResult.COMPLETE;
                     }
                 }
@@ -216,7 +216,7 @@ public final class HttpRequestParser {
     // --- Helpers ---
 
     private static HttpMethod resolveMethod(StringBuilder sb) throws ParseException {
-        // Fast path pour les méthodes courantes
+        // Fast path for common methods
         return switch (sb.length()) {
             case 3 -> {
                 if (matches(sb, "GET")) yield HttpMethod.GET;
@@ -269,7 +269,7 @@ public final class HttpRequestParser {
     }
 
     private static String internHeaderName(StringBuilder sb) {
-        // Interning des noms courants pour éviter les allocations
+        // Intern common names to avoid allocations
         if (matchesIgnoreCase(sb, H_HOST)) return H_HOST;
         if (matchesIgnoreCase(sb, H_CONTENT_LENGTH)) return H_CONTENT_LENGTH;
         if (matchesIgnoreCase(sb, H_CONTENT_TYPE)) return H_CONTENT_TYPE;
@@ -290,7 +290,7 @@ public final class HttpRequestParser {
         return true;
     }
 
-    // Valeurs de headers courantes internées
+    // Common interned header values
     private static final String V_KEEP_ALIVE = "keep-alive";
     private static final String V_CLOSE = "close";
     private static final String V_CHUNKED = "chunked";
@@ -306,11 +306,11 @@ public final class HttpRequestParser {
         while (end > 0 && (sb.charAt(end - 1) == ' ' || sb.charAt(end - 1) == '\t')) {
             end--;
         }
-        // Fast path : pas de trimming nécessaire
+        // Fast path: no trimming needed
         if (end == sb.length()) {
             return internValue(sb);
         }
-        // Slow path : crée une substring
+        // Slow path: creates a substring
         sb.setLength(end);
         return internValue(sb);
     }
@@ -323,7 +323,7 @@ public final class HttpRequestParser {
         return sb.toString();
     }
 
-    /** Intern des valeurs de headers courantes pour éviter les allocations. */
+    /** Interns common header values to avoid allocations. */
     private static String internValue(StringBuilder sb) {
         return switch (sb.length()) {
             case 1 -> {

@@ -4,13 +4,13 @@ import java.util.LinkedHashMap;
 import java.util.Optional;
 
 /**
- * Arbre YAML résultant du parsing — sealed sur trois variantes.
- * Subset supporté : maps imbriquées, listes (bloc et inline), scalaires
- * (string, int, bool). Pas d'anchors, pas de tags, pas de multilines.
+ * YAML tree resulting from parsing — sealed across three variants.
+ * Supported subset: nested maps, lists (block and inline), scalars
+ * (string, int, bool). No anchors, no tags, no multiline values.
  */
 public sealed interface YamlNode {
 
-    /** Map ordonnée préservant l'ordre d'insertion. */
+    /** Ordered map preserving insertion order. */
     record Map(LinkedHashMap<String, YamlNode> entries) implements YamlNode {
         public Optional<YamlNode> get(String key) {
             return Optional.ofNullable(entries.get(key));
@@ -48,7 +48,7 @@ public sealed interface YamlNode {
         }
     }
 
-    /** Séquence ordonnée (liste). */
+    /** Ordered sequence (list). */
     record Seq(java.util.List<YamlNode> items) implements YamlNode {
         public java.util.List<String> asStringList() {
             return items.stream()
@@ -57,6 +57,6 @@ public sealed interface YamlNode {
         }
     }
 
-    /** Scalaire textuel (les conversions int/bool se font via accesseurs typés). */
+    /** Text scalar (int/bool conversions are done through typed accessors). */
     record Scalar(String value) implements YamlNode {}
 }

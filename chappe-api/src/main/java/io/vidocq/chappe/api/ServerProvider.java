@@ -1,13 +1,13 @@
 package io.vidocq.chappe.api;
 
 /**
- * SPI pour fournir une implémentation de {@link Server.Builder}.
+ * SPI for providing a {@link Server.Builder} implementation.
  * <p>
- * Découvert via {@link java.util.ServiceLoader} par {@link Server#builder()}.
- * L'implémentation est fournie par {@code chappe-core}.
+ * Discovered via {@link java.util.ServiceLoader} by {@link Server#builder()}.
+ * The implementation is provided by {@code chappe-core}.
  */
 public interface ServerProvider {
 
-    /** Crée un nouveau builder de serveur. */
+    /** Creates a new server builder. */
     Server.Builder newBuilder();
 }

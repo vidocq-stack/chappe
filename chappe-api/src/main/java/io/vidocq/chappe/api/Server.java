@@ -7,9 +7,9 @@ import java.util.ServiceLoader;
 import javax.net.ssl.SSLContext;
 
 /**
- * Serveur HTTP — point d'entrée pour démarrer et arrêter le serveur.
+ * HTTP server — entry point for starting and stopping the server.
  * <p>
- * Implémente {@link AutoCloseable} pour supporter {@code try-with-resources}.
+ * Implements {@link AutoCloseable} to support {@code try-with-resources}.
  *
  * <pre>{@code
  * try (var server = Server.builder()
@@ -17,37 +17,37 @@ import javax.net.ssl.SSLContext;
  *         .handler(myRouter)
  *         .build()) {
  *     server.start();
- *     // Le serveur traite les requêtes...
- * } // stop() appelé automatiquement
+ *     // The server handles requests...
+ * } // stop() called automatically
  * }</pre>
  */
 public interface Server extends AutoCloseable {
 
-    /** Démarre le serveur (bind + accept). Non-bloquant. */
+    /** Starts the server (bind + accept). Non-blocking. */
     void start();
 
-    /** Arrête le serveur proprement (drain des connexions actives). */
+    /** Gracefully stops the server (drains active connections). */
     void stop();
 
-    /** Équivalent à {@link #stop()}. */
+    /** Equivalent to {@link #stop()}. */
     @Override
     default void close() {
         stop();
     }
 
-    /** {@code true} si le serveur est en cours d'exécution. */
+    /** {@code true} if the server is running. */
     boolean isRunning();
 
-    /** Port réel sur lequel le serveur écoute (utile avec port 0). */
+    /** Actual port the server is listening on (useful with port 0). */
     int port();
 
-    /** Adresse locale complète du serveur. */
+    /** Full local address of the server. */
     InetSocketAddress localAddress();
 
-    /** Configuration du serveur. */
+    /** Server configuration. */
     ServerConfig config();
 
-    /** Crée un nouveau builder via {@link ServiceLoader} ({@link ServerProvider}). */
+    /** Creates a new builder via {@link ServiceLoader} ({@link ServerProvider}). */
     static Builder builder() {
         return ServiceLoader.load(ServerProvider.class)
                 .findFirst()
@@ -56,7 +56,7 @@ public interface Server extends AutoCloseable {
                 .newBuilder();
     }
 
-    /** Builder fluide pour configurer et construire un {@link Server}. */
+    /** Fluent builder for configuring and constructing a {@link Server}. */
     interface Builder {
 
         Builder port(int port);
@@ -77,13 +77,13 @@ public interface Server extends AutoCloseable {
 
         Builder maxHeaderSize(int bytes);
 
-        /** Configure TLS avec le {@link SSLContext} donné. */
+        /** Configures TLS with the given {@link SSLContext}. */
         Builder tls(SSLContext sslContext);
 
-        /** Protocoles ALPN à négocier (défaut : {@code ["h2", "http/1.1"]}). */
+        /** ALPN protocols to negotiate (default: {@code ["h2", "http/1.1"]}). */
         Builder alpnProtocols(String... protocols);
 
-        /** Délai de drain avant fermeture forcée lors du stop (défaut : 30s). */
+        /** Drain delay before forced closure on stop (default: 30s). */
         Builder shutdownGracePeriod(Duration duration);
 
         Server build();

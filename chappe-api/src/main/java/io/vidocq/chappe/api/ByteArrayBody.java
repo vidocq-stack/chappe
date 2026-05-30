@@ -6,7 +6,7 @@ import java.nio.ByteBuffer;
 import java.util.concurrent.Flow;
 
 /**
- * Corps basé sur un tableau d'octets en mémoire.
+ * Body backed by an in-memory byte array.
  */
 final class ByteArrayBody implements Body {
 

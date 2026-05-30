@@ -14,7 +14,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * Tests de conformite HTTP/1.1 pour les connexions persistantes (keep-alive).
+ * HTTP/1.1 conformance tests for persistent connections (keep-alive).
  * RFC 9112, Section 9.3.
  */
 class Http11KeepAliveTest {

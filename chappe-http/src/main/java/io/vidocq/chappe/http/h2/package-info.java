@@ -1,6 +1,6 @@
 /**
- * Implémentation du protocole HTTP/2 (RFC 9113).
+ * HTTP/2 protocol implementation (RFC 9113).
  * <p>
- * Placeholder pour la Phase 2 — actuellement vide.
+ * Placeholder for Phase 2 — currently empty.
  */
 package io.vidocq.chappe.http.h2;

@@ -16,10 +16,10 @@ import org.openjdk.jmh.runner.RunnerException;
 import org.openjdk.jmh.runner.options.OptionsBuilder;
 
 /**
- * Benchmark avec client raw socket — mesure le throughput pur du serveur
- * sans l'overhead de HttpClient (async framework, connection pool, TLS negotiation).
+ * Benchmark with a raw-socket client — measures the server's pure throughput
+ * without HttpClient overhead (async framework, connection pool, TLS negotiation).
  * <p>
- * Connexion TCP keep-alive réutilisée, envoi/réception de bytes bruts.
+ * Reused keep-alive TCP connection, sending/receiving raw bytes.
  */
 @State(Scope.Thread)
 @Warmup(iterations = 3, time = 2)
@@ -87,21 +87,21 @@ public class RawSocketBench {
     }
 
     /**
-     * Lit la réponse HTTP complète sur la socket keep-alive.
-     * Parse le Content-Length pour savoir combien lire.
+     * Reads the full HTTP response from the keep-alive socket.
+     * Parses Content-Length to know how much to read.
      */
     private int drainResponse() throws IOException {
         int totalRead = 0;
         int headerEnd = -1;
         int contentLength = -1;
 
-        // Lire les headers
+        // Read headers
         while (headerEnd < 0) {
             int n = in.read(readBuf, totalRead, readBuf.length - totalRead);
             if (n < 0) throw new IOException("Connection closed");
             totalRead += n;
 
-            // Chercher \r\n\r\n
+            // Look for \r\n\r\n
             for (int i = Math.max(0, totalRead - n - 3); i <= totalRead - 4; i++) {
                 if (readBuf[i] == '\r' && readBuf[i + 1] == '\n' && readBuf[i + 2] == '\r' && readBuf[i + 3] == '\n') {
                     headerEnd = i + 4;
@@ -118,7 +118,7 @@ public class RawSocketBench {
             contentLength = Integer.parseInt(headers.substring(clIdx + 16, clEnd));
         }
 
-        // Lire le body restant
+        // Read remaining body
         if (contentLength > 0) {
             int bodyRead = totalRead - headerEnd;
             while (bodyRead < contentLength) {

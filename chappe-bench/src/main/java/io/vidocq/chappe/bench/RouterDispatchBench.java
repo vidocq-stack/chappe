@@ -12,14 +12,14 @@ import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.infra.Blackhole;
 
 /**
- * Compare le dispatch du Router :
- *   - Ancien : scan linéaire sur toutes les routes, avec {@code String.split("/")}
- *     par tentative de match.
- *   - Nouveau : fast-path {@code HashMap<path, Route>} pour les routes statiques,
- *     scan linéaire uniquement sur les patterns paramétriques.
+ * Compares Router dispatch:
+ *   - Old: linear scan over all routes, with {@code String.split("/")}
+ *     for each match attempt.
+ *   - New: {@code HashMap<path, Route>} fast path for static routes,
+ *     linear scan only for parameterized patterns.
  *
- * <p>Scénario : 20 routes statiques + 3 patterns paramétriques. On dispatche une requête
- * dont le path cible soit la première, soit la dernière route statique, soit un miss.
+ * <p>Scenario: 20 static routes + 3 parameterized patterns. A request is dispatched
+ * whose target path is either the first route, the last static route, or a miss.
  */
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
@@ -36,10 +36,10 @@ public class RouterDispatchBench {
     private List<Route> dynamicRoutes;
 
     @Param({
-        "/users", // première route — scan trouve vite
-        "/internal/status", // dernière statique — scan parcourt toutes les autres
+        "/users", // first route — scan finds it quickly
+        "/internal/status", // last static route — scan traverses all others
         "/api/v1/404"
-    }) // miss — scan parcourt tout
+    }) // miss — scan traverses everything
     public String requestPath;
 
     @Setup
@@ -68,7 +68,7 @@ public class RouterDispatchBench {
         }
     }
 
-    // ── Ancien : scan linéaire complet sur allRoutes ──
+    // -- Old: full linear scan over allRoutes --
     @Benchmark
     public void old_linearScan(Blackhole bh) {
         for (Route r : allRoutes) {
@@ -80,7 +80,7 @@ public class RouterDispatchBench {
         bh.consume(0);
     }
 
-    // ── Nouveau : fast-path map + scan dynamique seulement ──
+    // -- New: fast-path map + dynamic scan only --
     @Benchmark
     public void current_fastPath(Blackhole bh) {
         Route r = staticIndex.get(requestPath);
@@ -97,7 +97,7 @@ public class RouterDispatchBench {
         bh.consume(0);
     }
 
-    // Copie minimale de DefaultRouterBuilder.matchPath — équivalence fonctionnelle.
+    // Minimal copy of DefaultRouterBuilder.matchPath — functionally equivalent.
     private static Map<String, String> matchPath(String pattern, String path) {
         String np =
                 (pattern.length() > 1 && pattern.endsWith("/")) ? pattern.substring(0, pattern.length() - 1) : pattern;

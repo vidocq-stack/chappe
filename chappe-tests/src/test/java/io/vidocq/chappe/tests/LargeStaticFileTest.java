@@ -24,16 +24,16 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * Régression : un client qui drain lentement ne doit pas recevoir une réponse
- * tronquée. Le passage zero-copy {@code FileChannel.transferTo(SocketChannel)}
- * peut renvoyer 0 quand le {@code SO_SNDBUF} kernel sature (cf. JDK-8264762,
- * sendfile(2) sur Linux/macOS) — un break silencieux sur ce retour 0 truncate
- * la réponse alors que {@code Content-Length} annonce la taille complète, ce
- * qui fait bloquer le browser indéfiniment.
+ * Regression: a client that drains slowly must not receive a truncated
+ * response. The zero-copy path {@code FileChannel.transferTo(SocketChannel)}
+ * can return 0 when the kernel {@code SO_SNDBUF} is saturated (see JDK-8264762,
+ * sendfile(2) on Linux/macOS) — a silent break on that 0 return truncates
+ * the response while {@code Content-Length} advertises the full size, which
+ * makes the browser hang indefinitely.
  */
 class LargeStaticFileTest {
 
-    private static final int FILE_SIZE = 8 * 1024 * 1024; // 8 MiB > SO_SNDBUF typique
+    private static final int FILE_SIZE = 8 * 1024 * 1024; // 8 MiB > typical SO_SNDBUF
     private static final int CLIENT_RCVBUF = 16 * 1024;
     private static final int CHUNK = 4096;
 
@@ -55,8 +55,8 @@ class LargeStaticFileTest {
 
         byte[] received = drainSlowly(server.port(), "/big.bin", payload.length);
 
-        assertEquals(payload.length, received.length, "réponse tronquée — vraisemblablement transferTo==0 silencieux");
-        assertEquals(sha256(payload), sha256(received), "intégrité du fichier compromise");
+        assertEquals(payload.length, received.length, "truncated response — likely silent transferTo==0");
+        assertEquals(sha256(payload), sha256(received), "file integrity compromised");
         assertArrayEquals(payload, received);
     }
 
@@ -75,7 +75,7 @@ class LargeStaticFileTest {
             String headers = readHeaders(in);
             assertTrue(headers.startsWith("HTTP/1.1 200"), "expected 200, got headers:\n" + headers);
             long contentLength = parseContentLength(headers);
-            assertEquals(expectedBodyLen, contentLength, "Content-Length divergent du fichier");
+            assertEquals(expectedBodyLen, contentLength, "Content-Length diverges from file size");
 
             byte[] body = new byte[(int) contentLength];
             int total = 0;
@@ -90,8 +90,8 @@ class LargeStaticFileTest {
                 if (n < 0) break;
                 System.arraycopy(buf, 0, body, total, n);
                 total += n;
-                // Drain ralenti — sature le SO_SNDBUF côté serveur et force
-                // sendfile(2) à observer EAGAIN-like → transferTo peut renvoyer 0.
+                // Slow drain — saturates server-side SO_SNDBUF and forces
+                // sendfile(2) into EAGAIN-like behavior where transferTo may return 0.
                 try {
                     Thread.sleep(2);
                 } catch (InterruptedException ie) {
@@ -111,7 +111,7 @@ class LargeStaticFileTest {
         int crlfRun = 0;
         while (true) {
             int c = in.read();
-            if (c < 0) throw new IOException("connexion fermée pendant lecture des headers");
+            if (c < 0) throw new IOException("connection closed while reading headers");
             sb.append((char) c);
             if (c == '\n' && prev == '\r') {
                 crlfRun++;

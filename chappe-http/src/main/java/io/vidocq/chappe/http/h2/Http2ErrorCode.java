@@ -1,7 +1,7 @@
 package io.vidocq.chappe.http.h2;
 
 /**
- * Codes d'erreur HTTP/2 (RFC 9113, Section 7).
+ * HTTP/2 error codes (RFC 9113, Section 7).
  */
 public enum Http2ErrorCode {
     NO_ERROR(0x0),
@@ -35,7 +35,7 @@ public enum Http2ErrorCode {
         for (var e : values()) BY_CODE[e.code] = e;
     }
 
-    /** Résout un code d'erreur, ou {@code null} si inconnu. */
+    /** Resolves an error code, or {@code null} if unknown. */
     public static Http2ErrorCode of(int code) {
         return (code >= 0 && code < BY_CODE.length) ? BY_CODE[code] : null;
     }

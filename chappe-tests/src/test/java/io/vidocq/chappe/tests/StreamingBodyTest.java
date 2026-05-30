@@ -23,8 +23,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * Tests d'intégration pour Body.streaming(InputStream).
- * Vérifie le chunked transfer HTTP/1.1 et le streaming HTTP/2 via PipedInputStream.
+ * Integration tests for Body.streaming(InputStream).
+ * Verifies HTTP/1.1 chunked transfer and HTTP/2 streaming via PipedInputStream.
  */
 class StreamingBodyTest {
 
@@ -38,13 +38,13 @@ class StreamingBodyTest {
     @Test
     void streamingContentLengthIsMinusOne() throws IOException {
         var pis = new PipedInputStream();
-        new PipedOutputStream(pis); // évite BrokenPipeException si on appelle contentLength
+        new PipedOutputStream(pis); // avoids BrokenPipeException if contentLength is called
         assertEquals(-1, Body.streaming(pis).contentLength());
     }
 
     /**
      * HTTP/1.1 keep-alive → Transfer-Encoding: chunked
-     * On vérifie le header et le contenu décodé.
+     * Verifies the header and the decoded content.
      */
     @Test
     void streamingBodySentAsChunkedHttp11() throws IOException {
@@ -76,7 +76,7 @@ class StreamingBodyTest {
                 .build();
         server.start();
 
-        // HTTP/1.1 keep-alive par défaut → chunked transfer encoding
+        // HTTP/1.1 keep-alive by default -> chunked transfer encoding
         try (var socket = new Socket("127.0.0.1", server.port())) {
             socket.setSoTimeout(5000);
             var out = socket.getOutputStream();
@@ -88,16 +88,16 @@ class StreamingBodyTest {
             String headers = readHeaders(in);
             assertTrue(
                     headers.contains("Transfer-Encoding: chunked"),
-                    "Doit utiliser Transfer-Encoding: chunked, headers reçus:\n" + headers);
-            assertTrue(headers.contains("text/event-stream"), "Doit avoir Content-Type: text/event-stream");
+                    "Must use Transfer-Encoding: chunked, received headers:\n" + headers);
+            assertTrue(headers.contains("text/event-stream"), "Must have Content-Type: text/event-stream");
 
             String body = readChunkedBody(in);
-            assertEquals(String.join("", events), body, "Corps décodé doit contenir tous les events SSE");
+            assertEquals(String.join("", events), body, "Decoded body must contain all SSE events");
         }
     }
 
     /**
-     * HTTP/2 : le body streamé arrive en DATA frames successives.
+     * HTTP/2: the streamed body arrives in successive DATA frames.
      */
     @Test
     void streamingBodyHttp2() throws IOException, InterruptedException {
@@ -140,9 +140,9 @@ class StreamingBodyTest {
         assertEquals(String.join("", events), response.body());
     }
 
-    // --- Helpers de parsing HTTP brut ---
+    // --- Raw HTTP parsing helpers ---
 
-    /** Lit les headers HTTP/1.1 jusqu'au double CRLF. */
+    /** Reads HTTP/1.1 headers until the double CRLF. */
     private String readHeaders(InputStream in) throws IOException {
         var sb = new StringBuilder();
         while (true) {
@@ -161,11 +161,11 @@ class StreamingBodyTest {
         return sb.toString();
     }
 
-    /** Lit et décode un body en chunked transfer depuis un InputStream. */
+    /** Reads and decodes a chunked-transfer body from an InputStream. */
     private String readChunkedBody(InputStream in) throws IOException {
         var result = new StringBuilder();
         while (true) {
-            // Lire la ligne de taille du chunk (hex)
+            // Read chunk size line (hex)
             var sizeLine = new StringBuilder();
             int b;
             while ((b = in.read()) != -1) {
@@ -175,15 +175,15 @@ class StreamingBodyTest {
             }
             String sizeStr = sizeLine.toString().trim();
             if (sizeStr.isEmpty()) continue;
-            // Ignorer les extensions de chunk (";ext=val")
+            // Ignore chunk extensions (";ext=val")
             int semicolon = sizeStr.indexOf(';');
             if (semicolon >= 0) sizeStr = sizeStr.substring(0, semicolon);
             int chunkSize = Integer.parseInt(sizeStr.trim(), 16);
             if (chunkSize == 0) break;
-            // Lire exactement chunkSize octets
+            // Read exactly chunkSize bytes
             byte[] data = in.readNBytes(chunkSize);
             result.append(new String(data, StandardCharsets.UTF_8));
-            // Consommer le CRLF après les données
+            // Consume CRLF after data
             in.read(); // \r
             in.read(); // \n
         }

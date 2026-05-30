@@ -10,8 +10,8 @@ import io.vidocq.chappe.api.Server;
 import io.vidocq.chappe.api.ServerConfig;
 
 /**
- * Implémentation de {@link Server.Builder} — accumule la configuration
- * et produit un {@link ChappeServer}.
+ * Implementation of {@link Server.Builder} — accumulates configuration
+ * and produces a {@link ChappeServer}.
  */
 final class ChappeServerBuilder implements Server.Builder {
 

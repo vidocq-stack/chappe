@@ -1,10 +1,10 @@
 /**
- * API publique du serveur HTTP Chappe.
+ * Public API of the Chappe HTTP server.
  * <p>
- * Ce package définit le contrat que les modules d'implémentation
- * ({@code chappe-http}, {@code chappe-core}) réalisent.
- * Il ne contient aucune implémentation — uniquement des interfaces,
- * des enums et des records.
+ * This package defines the contract implemented by the implementation modules
+ * ({@code chappe-http}, {@code chappe-core}).
+ * It contains no implementation — only interfaces,
+ * enums, and records.
  *
  * @see io.vidocq.chappe.api.Server
  * @see io.vidocq.chappe.api.Handler

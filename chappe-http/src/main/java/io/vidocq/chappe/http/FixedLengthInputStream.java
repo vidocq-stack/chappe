@@ -6,10 +6,10 @@ import java.nio.ByteBuffer;
 import java.nio.channels.ReadableByteChannel;
 
 /**
- * InputStream bornée par Content-Length.
+ * InputStream bounded by Content-Length.
  * <p>
- * Lit d'abord les octets restants dans le {@link ByteBuffer} partagé,
- * puis directement depuis le channel.
+ * First reads the remaining bytes from the shared {@link ByteBuffer},
+ * then directly from the channel.
  */
 final class FixedLengthInputStream extends InputStream {
 
@@ -56,7 +56,7 @@ final class FixedLengthInputStream extends InputStream {
         return (int) Math.min(buffer.remaining(), remaining);
     }
 
-    /** Nombre d'octets restants à lire. */
+    /** Number of bytes remaining to read. */
     long remaining() {
         return remaining;
     }

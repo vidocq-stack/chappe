@@ -18,14 +18,14 @@ import io.vidocq.chappe.api.Response;
 import io.vidocq.chappe.api.StatusCode;
 
 /**
- * Sérialisation d'une {@link Response} HTTP/1.1 vers un channel.
+ * Serialisation of an HTTP/1.1 {@link Response} to a channel.
  * <p>
- * Optimisé pour minimiser les allocations et les syscalls :
+ * Optimised to minimise allocations and syscalls:
  * <ul>
- *   <li>Headers écrits directement char-par-char (pas de byte[] intermédiaire)</li>
- *   <li>Headers + body coalescés dans un seul write quand possible</li>
- *   <li>Buffer de lecture du body réutilisé (pas d'allocation par réponse)</li>
- *   <li>Content-Length écrit directement dans le buffer (pas de byte[20])</li>
+ *   <li>Headers written directly char-by-char (no intermediate byte[])</li>
+ *   <li>Headers + body coalesced into a single write when possible</li>
+ *   <li>Body read buffer reused (no per-response allocation)</li>
+ *   <li>Content-Length written directly into the buffer (no byte[20])</li>
  * </ul>
  */
 public final class HttpResponseWriter {
@@ -45,21 +45,21 @@ public final class HttpResponseWriter {
             "Content-Type: text/plain; charset=utf-8\r\n".getBytes(StandardCharsets.US_ASCII);
     private static final byte[] SERVER_HEADER_LINE =
             ("Server: " + BuildInfo.serverHeader() + "\r\n").getBytes(StandardCharsets.US_ASCII);
-    // X-Chappe-Build : doublon du Server header avec un nom non standard que
-    // les reverse proxies (NPM/openresty) ne réécrivent généralement pas.
-    // Permet d'identifier le binaire derrière un proxy qui set son propre Server.
+    // X-Chappe-Build: duplicate of the Server header under a non-standard name that
+    // reverse proxies (NPM/openresty) usually do not rewrite.
+    // Helps identify the binary behind a proxy that sets its own Server header.
     private static final byte[] X_CHAPPE_BUILD_LINE =
             ("X-Chappe-Build: " + BuildInfo.serverHeader() + "\r\n").getBytes(StandardCharsets.US_ASCII);
 
     private static final DateTimeFormatter IMF_FIXDATE =
             DateTimeFormatter.ofPattern("EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.US);
 
-    // Cache Date header (1 seconde) — array publié en bloc via volatile reference,
-    // jamais muté après assignation : pattern thread-safe d'objet immuable
+    // Date header cache (1 second) — array published atomically via volatile reference,
+    // never mutated after assignment: thread-safe immutable-object pattern.
     private static volatile long lastDateSecond;
     private static volatile byte[] cachedDateValue;
 
-    // Status lines pré-encodées
+    // Pre-encoded status lines
     private static final byte[] STATUS_200 = statusLine(200, "OK");
     private static final byte[] STATUS_201 = statusLine(201, "Created");
     private static final byte[] STATUS_204 = statusLine(204, "No Content");
@@ -75,13 +75,13 @@ public final class HttpResponseWriter {
     private static final byte[] STATUS_502 = statusLine(502, "Bad Gateway");
     private static final byte[] STATUS_503 = statusLine(503, "Service Unavailable");
 
-    // Buffer réutilisé pour la lecture du body (évite new byte[8192] par réponse)
+    // Reused buffer for body reads (avoids new byte[8192] per response)
     private final byte[] bodyChunk = new byte[8192];
 
-    // Buffer pour putAsciiLong (évite new byte[20] par Content-Length)
+    // Buffer for putAsciiLong (avoids new byte[20] per Content-Length)
     private final byte[] digitsBuf = new byte[20];
 
-    // Fast-path : headers pré-encodés pour 200 OK keep-alive (sans Date, sans body)
+    // Fast path: pre-encoded headers for 200 OK keep-alive (without Date, without body)
     private static final byte[] FAST_200_KA_PREFIX = ("HTTP/1.1 200 OK\r\n"
                     + "Connection: keep-alive\r\n"
                     + "Content-Type: text/plain; charset=utf-8\r\n"
@@ -97,10 +97,10 @@ public final class HttpResponseWriter {
         int statusCode = response.status().code();
         boolean suppressBody = (method == HttpMethod.HEAD) || statusCode == 204 || statusCode == 304;
 
-        // ═══ FAST PATH : 200 OK, keep-alive, body connu, Content-Type text/plain ═══
-        // Le préfixe pré-encodé inclut Content-Type: text/plain; charset=utf-8 — on ne l'active
-        // donc que si la réponse a exactement ce header (cas typique Response.ok(String)).
-        // Refuser headerCount==0 évite de mentir au client avec un Content-Type bidon.
+        // ═══ FAST PATH: 200 OK, keep-alive, known body, text/plain Content-Type ═══
+        // The pre-encoded prefix includes Content-Type: text/plain; charset=utf-8 — enable it
+        // only if the response has exactly that header (typical Response.ok(String) case).
+        // Rejecting headerCount==0 avoids lying to clients with a fake Content-Type.
         Body body = response.body();
         long contentLength = body.contentLength();
         if (statusCode == 200
@@ -117,7 +117,7 @@ public final class HttpResponseWriter {
         // Status line
         putStatusLine(response.status(), buffer, channel);
 
-        // Headers — écriture directe sans allocation byte[]
+        // Headers — direct write without allocating byte[]
         for (var entry : response.headers()) {
             putAsciiString(entry.name(), buffer, channel);
             putByte(COLON, buffer, channel);
@@ -133,12 +133,12 @@ public final class HttpResponseWriter {
             putBytes(CRLF, buffer, channel);
         }
 
-        // Server header (build info) — sauf si l'app a fixé sa propre identité
+        // Server header (build info) — unless the app set its own identity
         if (!response.headers().contains("Server")) {
             putBytes(SERVER_HEADER_LINE, buffer, channel);
         }
-        // X-Chappe-Build : header non-standard, survit derrière les reverse proxies
-        // qui réécrivent le Server header (NPM, openresty, oauth2-proxy).
+        // X-Chappe-Build: non-standard header that survives behind reverse proxies
+        // that rewrite the Server header (NPM, openresty, oauth2-proxy).
         if (!response.headers().contains("X-Chappe-Build")) {
             putBytes(X_CHAPPE_BUILD_LINE, buffer, channel);
         }
@@ -159,10 +159,10 @@ public final class HttpResponseWriter {
         // Connection header
         putBytes(keepAlive ? CONNECTION_KEEP_ALIVE : CONNECTION_CLOSE, buffer, channel);
 
-        // Fin des headers
+        // End of headers
         putBytes(CRLF, buffer, channel);
 
-        // *** PAS de flush intermédiaire ici — on coalesce headers + body ***
+        // *** NO intermediate flush here — coalesce headers + body ***
 
         // Body
         if (!suppressBody) {
@@ -173,15 +173,15 @@ public final class HttpResponseWriter {
             }
         }
 
-        // Flush final unique (headers + body en un seul write si tout tient dans le buffer)
+        // Single final flush (headers + body in one write if everything fits in the buffer)
         if (buffer.position() > 0) {
             flush(buffer, channel);
         }
     }
 
     /**
-     * Fast path pour 200 OK keep-alive avec petit body sans headers custom.
-     * Tout est écrit en un seul channel.write() — 1 syscall.
+     * Fast path for 200 OK keep-alive with a small body and no custom headers.
+     * Everything is written in a single channel.write() — 1 syscall.
      */
     private void writeFastPath(Body body, long contentLength, ByteBuffer buffer, WritableByteChannel channel)
             throws IOException {
@@ -197,7 +197,7 @@ public final class HttpResponseWriter {
         putBytes(CRLF, buffer, channel);
         // End of headers
         putBytes(CRLF, buffer, channel);
-        // Body inline (tout tient dans le buffer de 16K)
+        // Inline body (everything fits in the 16K buffer)
         if (contentLength > 0) {
             try (InputStream in = body.asInputStream()) {
                 int read;
@@ -275,7 +275,7 @@ public final class HttpResponseWriter {
                 putBytes(CRLF, buffer, channel);
                 putBytes(bodyChunk, 0, read, buffer, channel);
                 putBytes(CRLF, buffer, channel);
-                // Flush après chaque chunk pour que les events SSE arrivent sans délai
+                // Flush after each chunk so SSE events arrive without delay
                 flush(buffer, channel);
             }
         }
@@ -300,9 +300,9 @@ public final class HttpResponseWriter {
                         long transferred = fc.transferTo(position, remaining, channel);
                         if (transferred < 0) break;
                         if (transferred == 0) {
-                            // SO_SNDBUF kernel saturé : sendfile(2) peut renvoyer 0
+                            // Kernel SO_SNDBUF saturated: sendfile(2) can return 0
                             // sur un SocketChannel blocking (cf. JDK-8264762). Yield
-                            // et retry — ne PAS break, sinon réponse tronquée.
+                            // and retry — do NOT break, or the response is truncated.
                             Thread.yield();
                             continue;
                         }
@@ -324,9 +324,9 @@ public final class HttpResponseWriter {
         }
     }
 
-    // --- Primitives d'écriture optimisées ---
+    // --- Optimized write primitives ---
 
-    /** Écrit une String ASCII directement dans le buffer, char par char — zéro allocation. */
+    /** Writes an ASCII String directly into the buffer, char by char — zero allocation. */
     private void putAsciiString(String s, ByteBuffer buffer, WritableByteChannel channel) throws IOException {
         for (int i = 0, len = s.length(); i < len; i++) {
             if (!buffer.hasRemaining()) flush(buffer, channel);
@@ -334,13 +334,13 @@ public final class HttpResponseWriter {
         }
     }
 
-    /** Écrit un seul byte. */
+    /** Writes a single byte. */
     private void putByte(byte b, ByteBuffer buffer, WritableByteChannel channel) throws IOException {
         if (!buffer.hasRemaining()) flush(buffer, channel);
         buffer.put(b);
     }
 
-    /** Écrit un long en ASCII décimal directement dans le buffer — zéro allocation. */
+    /** Writes a long as decimal ASCII directly into the buffer — zero allocation. */
     private void putAsciiLong(long value, ByteBuffer buffer, WritableByteChannel channel) throws IOException {
         if (value == 0) {
             putByte((byte) '0', buffer, channel);
@@ -355,7 +355,7 @@ public final class HttpResponseWriter {
         putBytes(digitsBuf, pos, digitsBuf.length - pos, buffer, channel);
     }
 
-    /** Écrit un int en hex ASCII — pour chunked transfer. */
+    /** Writes an int in ASCII hex — for chunked transfer. */
     private void putAsciiHex(int value, ByteBuffer buffer, WritableByteChannel channel) throws IOException {
         if (value == 0) {
             putByte((byte) '0', buffer, channel);
@@ -412,8 +412,8 @@ public final class HttpResponseWriter {
         long nowSecond = System.currentTimeMillis() / 1000;
         if (nowSecond != lastDateSecond || cachedDateValue == null) {
             lastDateSecond = nowSecond;
-            // ZonedDateTime.format + getBytes reste le goulot d'étranglement ici.
-            // On cache le résultat final.
+            // ZonedDateTime.format + getBytes remains the bottleneck here.
+            // Cache the final value.
             cachedDateValue =
                     ZonedDateTime.now(ZoneOffset.UTC).format(IMF_FIXDATE).getBytes(StandardCharsets.US_ASCII);
         }

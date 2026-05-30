@@ -5,34 +5,34 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * En-têtes HTTP — liste ordonnée de paires nom/valeur.
+ * HTTP headers — ordered list of name/value pairs.
  * <p>
- * La recherche par nom est insensible à la casse (RFC 9110, Section 5.1).
- * Les noms dupliqués sont autorisés.
+ * Name lookup is case-insensitive (RFC 9110, Section 5.1).
+ * Duplicate names are allowed.
  */
 public interface Headers extends Iterable<Headers.Entry> {
 
-    /** Paire nom/valeur d'un en-tête HTTP. */
+    /** Name/value pair of an HTTP header. */
     record Entry(String name, String value) {}
 
-    /** Retourne la première valeur pour le nom donné, ou vide. */
+    /** Returns the first value for the given name, or empty. */
     Optional<String> first(String name);
 
-    /** Retourne toutes les valeurs pour le nom donné. */
+    /** Returns all values for the given name. */
     List<String> all(String name);
 
-    /** Première valeur ou {@code null} — évite l'allocation Optional. */
+    /** First value or {@code null} — avoids Optional allocation. */
     default String firstOrNull(String name) {
         return first(name).orElse(null);
     }
 
-    /** Vérifie la présence d'un en-tête avec ce nom. */
+    /** Checks whether a header with this name is present. */
     boolean contains(String name);
 
-    /** Nombre total d'entrées (incluant les duplicats). */
+    /** Total number of entries (including duplicates). */
     int size();
 
-    /** {@code true} si aucune entrée. */
+    /** {@code true} if there are no entries. */
     default boolean isEmpty() {
         return size() == 0;
     }
@@ -40,31 +40,31 @@ public interface Headers extends Iterable<Headers.Entry> {
     @Override
     Iterator<Entry> iterator();
 
-    /** Crée un builder pour construire des {@code Headers}. */
+    /** Creates a builder for constructing {@code Headers}. */
     static Builder builder() {
         return new DefaultHeadersBuilder();
     }
 
-    /** Retourne des headers vides (singleton). */
+    /** Returns empty headers (singleton). */
     static Headers empty() {
         return DefaultHeaders.EMPTY;
     }
 
-    /** Raccourci pour un seul en-tête. */
+    /** Shortcut for a single header. */
     static Headers of(String name, String value) {
         return builder().add(name, value).build();
     }
 
-    /** Builder pour construire des {@code Headers} de manière fluide. */
+    /** Builder for constructing {@code Headers} fluently. */
     interface Builder {
 
-        /** Ajoute une entrée (les duplicats sont conservés). */
+        /** Adds an entry (duplicates are preserved). */
         Builder add(String name, String value);
 
-        /** Remplace toutes les entrées portant ce nom par une seule valeur. */
+        /** Replaces all entries with this name with a single value. */
         Builder set(String name, String value);
 
-        /** Construit les {@code Headers} immutables. */
+        /** Builds the immutable {@code Headers}. */
         Headers build();
     }
 }

@@ -3,12 +3,12 @@ package io.vidocq.chappe.api;
 import java.util.Objects;
 
 /**
- * Réponse marqueur signalant au transport HTTP qu'une connexion doit être upgradée
- * en WebSocket (RFC 6455 §1.3) après l'envoi de la réponse {@code 101 Switching Protocols}.
+ * Marker response telling the HTTP transport that a connection must be upgraded
+ * to WebSocket (RFC 6455 §1.3) after sending the {@code 101 Switching Protocols} response.
  * <p>
- * Construite par {@link Router.Builder#webSocket(String, WebSocketHandler)} et reconnue
- * par {@code chappe-http} via {@code instanceof}. Une application normale n'a pas besoin
- * de l'instancier directement.
+ * Built by {@link Router.Builder#webSocket(String, WebSocketHandler)} and recognized
+ * by {@code chappe-http} via {@code instanceof}. A normal application does not need
+ * to instantiate it directly.
  */
 public final class WebSocketUpgrade implements Response {
 
@@ -24,12 +24,12 @@ public final class WebSocketUpgrade implements Response {
         this(handler, null);
     }
 
-    /** Handler à invoquer une fois le handshake confirmé. */
+    /** Handler to invoke once the handshake is confirmed. */
     public WebSocketHandler handler() {
         return handler;
     }
 
-    /** Sous-protocole accepté (envoyé dans {@code Sec-WebSocket-Protocol}), ou {@code null}. */
+    /** Accepted subprotocol (sent in {@code Sec-WebSocket-Protocol}), or {@code null}. */
     public String subprotocol() {
         return subprotocol;
     }

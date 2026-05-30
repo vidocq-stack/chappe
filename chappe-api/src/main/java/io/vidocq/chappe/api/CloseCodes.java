@@ -1,69 +1,69 @@
 package io.vidocq.chappe.api;
 
 /**
- * Codes de fermeture WebSocket — RFC 6455 §7.4.
+ * WebSocket close codes — RFC 6455 §7.4.
  * <p>
- * Plage 0–999 réservée, 1000–2999 spécifiée par RFC, 3000–3999 réservée aux registres
- * de librairies et frameworks, 4000–4999 disponible pour les applications.
+ * Range 0–999 is reserved, 1000–2999 is specified by the RFC, 3000–3999 is reserved for
+ * library and framework registries, and 4000–4999 is available to applications.
  */
 public final class CloseCodes {
 
-    /** Fermeture normale — le but pour lequel la connexion a été établie est atteint. */
+    /** Normal closure — the purpose for which the connection was established has been fulfilled. */
     public static final int NORMAL_CLOSURE = 1000;
 
-    /** L'endpoint s'en va (serveur qui s'arrête, onglet navigateur qui se ferme). */
+    /** The endpoint is going away (server shutting down, browser tab closing). */
     public static final int GOING_AWAY = 1001;
 
-    /** Erreur de protocole. */
+    /** Protocol error. */
     public static final int PROTOCOL_ERROR = 1002;
 
-    /** Type de données non supporté (ex. endpoint texte recevant du binaire). */
+    /** Unsupported data type (for example, a text endpoint receiving binary data). */
     public static final int UNSUPPORTED_DATA = 1003;
 
-    /** Aucun code reçu — réservé, NE DOIT PAS être envoyé dans une frame Close. */
+    /** No code received — reserved, MUST NOT be sent in a Close frame. */
     public static final int NO_STATUS_RCVD = 1005;
 
-    /** Fermeture anormale — réservé, NE DOIT PAS être envoyé dans une frame Close. */
+    /** Abnormal closure — reserved, MUST NOT be sent in a Close frame. */
     public static final int ABNORMAL_CLOSURE = 1006;
 
-    /** Payload non conforme au type (ex. UTF-8 invalide dans une frame TEXT). */
+    /** Payload invalid for its type (for example invalid UTF-8 in a TEXT frame). */
     public static final int INVALID_PAYLOAD_DATA = 1007;
 
-    /** Violation de politique générique. */
+    /** Generic policy violation. */
     public static final int POLICY_VIOLATION = 1008;
 
-    /** Message trop volumineux pour être traité. */
+    /** Message too large to be processed. */
     public static final int MESSAGE_TOO_BIG = 1009;
 
-    /** Extension(s) attendue(s) absente(s) côté serveur. */
+    /** Expected extension(s) missing on the server side. */
     public static final int MANDATORY_EXTENSION = 1010;
 
-    /** Condition inattendue empêchant le serveur de répondre. */
+    /** Unexpected condition preventing the server from responding. */
     public static final int INTERNAL_ERROR = 1011;
 
-    /** Service redémarre. */
+    /** Service is restarting. */
     public static final int SERVICE_RESTART = 1012;
 
-    /** Service surchargé, ré-essayer plus tard. */
+    /** Service overloaded, try again later. */
     public static final int TRY_AGAIN_LATER = 1013;
 
-    /** Passerelle invalide. */
+    /** Invalid gateway. */
     public static final int BAD_GATEWAY = 1014;
 
-    /** Échec du handshake TLS — réservé, NE DOIT PAS être envoyé dans une frame Close. */
+    /** TLS handshake failure — reserved, MUST NOT be sent in a Close frame. */
     public static final int TLS_HANDSHAKE = 1015;
 
     private CloseCodes() {}
 
     /**
-     * Indique si le code est valide en tant que status de frame Close envoyée sur le fil.
-     * Les codes 1005, 1006 et 1015 sont réservés pour usage local et NE DOIVENT PAS apparaître
-     * sur le réseau (RFC 6455 §7.4.1).
+     * Indicates whether the code is valid as a Close frame status sent on the wire.
+     * Codes 1005, 1006, and 1015 are reserved for local use and MUST NOT appear
+     * on the network (RFC 6455 §7.4.1).
      */
     public static boolean isValidOnWire(int code) {
         if (code < 1000 || code > 4999) return false;
         if (code == NO_STATUS_RCVD || code == ABNORMAL_CLOSURE || code == TLS_HANDSHAKE) return false;
-        // 1016-2999 réservés mais pas utilisés
+        // 1016-2999 reserved but not used
         if (code >= 1016 && code <= 2999) return false;
         return true;
     }

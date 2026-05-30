@@ -5,10 +5,10 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Représentation parsée des flags de la sous-commande {@code chappe serve}.
+ * Parsed representation of the flags for the {@code chappe serve} subcommand.
  *
- * <p>Les flags renseignés ont priorité sur les valeurs lues dans le fichier
- * YAML pointé par {@code --config}.</p>
+ * <p>Specified flags take precedence over values read from the
+ * YAML file pointed to by {@code --config}.</p>
  */
 public record CliArgs(
         Path configPath,
@@ -23,11 +23,11 @@ public record CliArgs(
         Map<String, String> extraHeaders,
         boolean help) {
 
-    /** Sentinelle indiquant l'affichage de l'aide. */
+    /** Sentinel indicating that help should be displayed. */
     public static final CliArgs HELP =
             new CliArgs(null, null, null, null, null, null, null, null, null, Map.of(), true);
 
-    /** Parse les arguments. {@code argv[0]} doit valoir {@code "serve"} (sinon {@code --help}). */
+    /** Parses arguments. {@code argv[0]} must be {@code "serve"} (otherwise {@code --help}). */
     public static CliArgs parse(String[] argv) {
         if (argv.length == 0) return HELP;
         String first = argv[0];
@@ -134,7 +134,7 @@ public record CliArgs(
         return argv[idx];
     }
 
-    /** Texte d'aide (multi-lignes). */
+    /** Help text (multi-line). */
     public static String helpText() {
         return """
                 chappe serve — sert un répertoire statique en HTTP/1.1+H2

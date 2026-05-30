@@ -8,8 +8,8 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 
 /**
- * Utilitaire pour envoyer des requetes HTTP brutes via Socket
- * et parser les reponses. Utilise pour les tests de conformite RFC.
+ * Utility for sending raw HTTP requests via Socket
+ * and parsing responses. Used for RFC conformance tests.
  */
 final class RawHttp {
 
@@ -18,19 +18,19 @@ final class RawHttp {
     private RawHttp() {}
 
     /**
-     * Ouvre un socket, envoie la requete brute, lit la reponse complete et ferme.
+     * Opens a socket, sends the raw request, reads the complete response, and closes it.
      */
     static String sendAndReceive(int port, String rawRequest) {
         return sendAndReceive(port, rawRequest, DEFAULT_TIMEOUT_MS);
     }
 
     /**
-     * Ouvre un socket, envoie la requete brute, lit la reponse complete et ferme.
+     * Opens a socket, sends the raw request, reads the complete response, and closes it.
      *
-     * @param port       port du serveur
-     * @param rawRequest requete HTTP brute (avec \r\n)
-     * @param timeoutMs  SO_TIMEOUT en millisecondes
-     * @return la reponse HTTP brute
+     * @param port       server port
+     * @param rawRequest raw HTTP request (with \r\n)
+     * @param timeoutMs  SO_TIMEOUT in milliseconds
+     * @return the raw HTTP response
      */
     static String sendAndReceive(int port, String rawRequest, int timeoutMs) {
         try (var socket = new Socket("127.0.0.1", port)) {
@@ -44,7 +44,7 @@ final class RawHttp {
     }
 
     /**
-     * Ouvre un socket persistant (keep-alive). Le caller est responsable de le fermer.
+     * Opens a persistent socket (keep-alive). The caller is responsible for closing it.
      */
     static Socket openConnection(int port, int timeoutMs) {
         try {
@@ -57,7 +57,7 @@ final class RawHttp {
     }
 
     /**
-     * Envoie une requete sur un socket deja ouvert et lit une reponse.
+     * Sends a request on an already open socket and reads a response.
      */
     static String sendAndReceiveOnSocket(Socket socket, String rawRequest) {
         try {
@@ -69,8 +69,8 @@ final class RawHttp {
     }
 
     /**
-     * Extrait le code de statut HTTP depuis la ligne de statut.
-     * Ex: "HTTP/1.1 200 OK" -> 200
+     * Extracts the HTTP status code from the status line.
+     * Example: "HTTP/1.1 200 OK" -> 200
      */
     static int extractStatusCode(String response) {
         if (response == null || response.isEmpty()) {
@@ -92,7 +92,7 @@ final class RawHttp {
     }
 
     /**
-     * Extrait le corps de la reponse (tout apres le premier \r\n\r\n).
+     * Extracts the response body (everything after the first \r\n\r\n).
      */
     static String extractBody(String response) {
         int separator = response.indexOf("\r\n\r\n");
@@ -103,9 +103,9 @@ final class RawHttp {
     }
 
     /**
-     * Recherche case-insensitive d'un header dans la reponse.
+     * Case-insensitive lookup of a header in the response.
      *
-     * @return la valeur du header, ou null si absent
+     * @return the header value, or null if absent
      */
     static String extractHeader(String response, String name) {
         String lowerName = name.toLowerCase();
@@ -129,7 +129,7 @@ final class RawHttp {
     }
 
     /**
-     * Ecrit une chaine sur un OutputStream en UTF-8.
+     * Writes a UTF-8 string to an OutputStream.
      */
     static void write(OutputStream out, String data) throws IOException {
         out.write(data.getBytes(StandardCharsets.UTF_8));
@@ -137,7 +137,7 @@ final class RawHttp {
     }
 
     /**
-     * Lit tout le contenu disponible d'un InputStream jusqu'a EOF ou timeout.
+     * Reads all available data from an InputStream until EOF or timeout.
      */
     static String readAll(InputStream in, int timeoutMs) {
         try {
@@ -157,8 +157,8 @@ final class RawHttp {
     }
 
     /**
-     * Lit une seule reponse HTTP depuis le stream (headers + body basee sur Content-Length).
-     * Utile pour les connexions keep-alive ou l'on ne peut pas lire jusqu'a EOF.
+     * Reads a single HTTP response from the stream (headers + Content-Length-based body).
+     * Useful for keep-alive connections where reading until EOF is not possible.
      */
     static String readResponse(InputStream in) {
         try {

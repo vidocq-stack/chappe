@@ -31,14 +31,14 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * Tests de transport <b>gRPC-Web</b> sur HTTP/2 :
+ * <b>gRPC-Web</b> transport tests over HTTP/2:
  * <ul>
- *   <li>Mode BINARY ({@code application/grpc-web}) : trailers inline (préfixe 0x80)</li>
- *   <li>Mode TEXT ({@code application/grpc-web-text}) : tout le corps en Base64</li>
+ *   <li>BINARY mode ({@code application/grpc-web}): inline trailers (0x80 prefix)</li>
+ *   <li>TEXT mode ({@code application/grpc-web-text}): entire body in Base64</li>
  * </ul>
- * Le client raw HTTP/2 reproduit exactement ce que ferait grpc-web (Improbable, grpc-js
- * en mode web, etc.) : POST + content-type spécifique, payload framé 5 octets, et lit
- * la frame DATA spéciale 0x80 en fin de stream pour reconstituer les trailers.
+ * The raw HTTP/2 client reproduces exactly what grpc-web would do (Improbable, grpc-js
+ * in web mode, etc.): POST + specific content-type, 5-byte-framed payload, and reads
+ * the special 0x80 DATA frame at end of stream to reconstruct the trailers.
  */
 class Http2GrpcWebTransportTest {
 
@@ -60,7 +60,7 @@ class Http2GrpcWebTransportTest {
     }
 
     // ------------------------------------------------------------------
-    // 1. BINARY unary echo : trailers inline 0x80 + grpc-status:0
+    // 1. BINARY unary echo: inline 0x80 trailers + grpc-status:0
     // ------------------------------------------------------------------
     @Test
     void binaryUnaryEcho() throws Exception {
@@ -90,14 +90,14 @@ class Http2GrpcWebTransportTest {
             byte[] body = seq.body.toByteArray();
             // Body = [message frame] + [trailer frame 0x80]
             var parsed = parseGrpcWebFrames(body);
-            assertEquals(1, parsed.messages.size(), "1 message reçu");
+            assertEquals(1, parsed.messages.size(), "1 message received");
             assertArrayEquals("hello".getBytes(StandardCharsets.UTF_8), parsed.messages.get(0));
             assertEquals("0", parsed.trailers.get("grpc-status"));
         }
     }
 
     // ------------------------------------------------------------------
-    // 2. BINARY server-streaming : N messages puis trailer 0x80
+    // 2. BINARY server-streaming: N messages then 0x80 trailer
     // ------------------------------------------------------------------
     @Test
     void binaryServerStreaming() throws Exception {
@@ -128,7 +128,7 @@ class Http2GrpcWebTransportTest {
     }
 
     // ------------------------------------------------------------------
-    // 3. TEXT unary : tout le corps request/response est Base64
+    // 3. TEXT unary: full request/response body is Base64
     // ------------------------------------------------------------------
     @Test
     void textUnaryEcho() throws Exception {
@@ -150,7 +150,7 @@ class Http2GrpcWebTransportTest {
             var seq = readUntilEndStream(in, 1);
 
             assertEquals("application/grpc-web-text", seq.initialHeaders().get("content-type"));
-            // Body est intégralement Base64 : on décode puis on parse comme du gRPC-Web binaire
+            // Body is entirely Base64: decode it, then parse as binary gRPC-Web
             byte[] decodedBody = Base64.getDecoder().decode(seq.body.toByteArray());
             var parsed = parseGrpcWebFrames(decodedBody);
             assertEquals(1, parsed.messages.size());
@@ -160,7 +160,7 @@ class Http2GrpcWebTransportTest {
     }
 
     // ------------------------------------------------------------------
-    // 4. Erreur handler : trailers contiennent grpc-status: 13 + grpc-message
+    // 4. Handler error: trailers contain grpc-status: 13 + grpc-message
     // ------------------------------------------------------------------
     @Test
     void binaryHandlerErrorEmitsStatusInTrailer() throws Exception {
@@ -178,14 +178,14 @@ class Http2GrpcWebTransportTest {
             var seq = readUntilEndStream(in, 1);
             var parsed = parseGrpcWebFrames(seq.body.toByteArray());
 
-            assertEquals(0, parsed.messages.size(), "aucun message en cas d'erreur immédiate");
+            assertEquals(0, parsed.messages.size(), "no messages on immediate error");
             assertEquals("13", parsed.trailers.get("grpc-status"));
             assertEquals("kaboom", parsed.trailers.get("grpc-message"));
         }
     }
 
     // ------------------------------------------------------------------
-    // 5. content-type non grpc-web -> 415 (route grpcWeb ne matche pas application/json)
+    // 5. Non grpc-web content-type -> 415 (grpcWeb route does not match application/json)
     // ------------------------------------------------------------------
     @Test
     void unknownContentTypeReturns415() throws Exception {
@@ -204,10 +204,10 @@ class Http2GrpcWebTransportTest {
     }
 
     // ------------------------------------------------------------------
-    // 6. HTTP/1.1 supporté : gRPC-Web tourne sur H1 via Body.ofOutputStream
-    //    + chunked transfer encoding (les trailers étant déjà inline 0x80,
-    //    pas besoin de trailers HTTP/2). Couvre le cas navigateur fetch/XHR
-    //    sans HTTP/2 et HttpClient JDK en cleartext.
+    // 6. HTTP/1.1 supported: gRPC-Web runs on H1 via Body.ofOutputStream
+    //    + chunked transfer encoding (trailers are already inline 0x80,
+    //    so no HTTP/2 trailers are needed). Covers browser fetch/XHR use cases
+    //    without HTTP/2 and cleartext JDK HttpClient.
     // ------------------------------------------------------------------
     @Test
     void http11BinaryUnaryEchoWorks() throws Exception {
@@ -276,12 +276,12 @@ class Http2GrpcWebTransportTest {
         out.flush();
     }
 
-    /** Résultat parsé d'un body gRPC-Web : messages + trailers. */
+    /** Parsed result of a gRPC-Web body: messages + trailers. */
     private record ParsedGrpcWeb(List<byte[]> messages, Map<String, String> trailers) {}
 
     /**
-     * Parse un body gRPC-Web binaire : suite de frames de 5 octets de préfixe + payload.
-     * Le préfixe {@code 0x80} marque le trailer frame final (payload = headers texte).
+     * Parses a binary gRPC-Web body: sequence of frames with a 5-byte prefix + payload.
+     * The {@code 0x80} prefix marks the final trailer frame (payload = text headers).
      */
     private static ParsedGrpcWeb parseGrpcWebFrames(byte[] body) {
         var msgs = new java.util.ArrayList<byte[]>();
@@ -359,7 +359,7 @@ class Http2GrpcWebTransportTest {
         return new StreamSequence(headers, body);
     }
 
-    /** HPACK littéral sans indexation (huffman=0). */
+    /** Literal HPACK without indexing (huffman=0). */
     private static void writeLiteral(ByteArrayOutputStream out, String name, String value) {
         out.write(0x00);
         byte[] nb = name.getBytes(StandardCharsets.US_ASCII);

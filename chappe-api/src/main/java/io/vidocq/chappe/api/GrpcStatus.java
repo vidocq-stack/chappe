@@ -1,10 +1,10 @@
 package io.vidocq.chappe.api;
 
 /**
- * Codes de statut gRPC standardisés.
+ * Standardized gRPC status codes.
  * <p>
- * Référence : <a href="https://grpc.io/docs/guides/status-codes/">grpc.io status codes</a>
- * et <a href="https://github.com/grpc/grpc/blob/master/doc/statuscodes.md">grpc/grpc status codes</a>.
+ * Reference: <a href="https://grpc.io/docs/guides/status-codes/">grpc.io status codes</a>
+ * and <a href="https://github.com/grpc/grpc/blob/master/doc/statuscodes.md">grpc/grpc status codes</a>.
  */
 public final class GrpcStatus {
 

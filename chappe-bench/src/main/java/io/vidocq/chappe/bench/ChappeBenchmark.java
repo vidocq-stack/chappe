@@ -19,10 +19,10 @@ import io.vidocq.chappe.api.Response;
 import io.vidocq.chappe.api.Server;
 
 /**
- * Benchmark complet du serveur Chappe — exécutable directement via {@code main()}.
+ * Full benchmark of the Chappe server — directly executable via {@code main()}.
  * <p>
- * Mesure throughput et latence en utilisant des raw sockets (zéro overhead client)
- * et HttpClient (mesure réaliste).
+ * Measures throughput and latency using raw sockets (zero client overhead)
+ * and HttpClient (realistic measurement).
  */
 @SuppressWarnings({"EmptyCatch", "AddressSelection"}) // Code de benchmark, pas runtime
 // NOSONAR

@@ -4,17 +4,17 @@ import io.vidocq.chappe.api.Response;
 import io.vidocq.chappe.api.Server;
 
 /**
- * Variante de {@link ChappeMain} qui sert une {@link Response} pré-construite
- * partagée entre toutes les requêtes (zero-alloc côté response).
+ * Variant of {@link ChappeMain} that serves a prebuilt {@link Response}
+ * shared across all requests (zero-allocation on the response side).
  *
- * <p>Permet de mesurer l'impact des allocations
+ * <p>Lets you measure the impact of the per-request allocations
  * {@code Builder → Headers$Entry → DefaultHeaders → DefaultResponse}
- * par requête identifié dans le profil JFR.
+ * identified in the JFR profile.
  */
 public final class ChappeMainCached {
     private ChappeMainCached() {}
 
-    /** Pré-construit une fois — Response est documentée immutable. */
+    /** Prebuilt once — Response is documented as immutable. */
     private static final Response CACHED_OK = Response.ok("ok");
 
     public static void main(String[] args) throws Exception {

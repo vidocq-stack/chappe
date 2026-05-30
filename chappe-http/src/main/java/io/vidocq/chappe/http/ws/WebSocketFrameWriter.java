@@ -5,21 +5,21 @@ import java.nio.ByteBuffer;
 import java.nio.channels.WritableByteChannel;
 
 /**
- * Écriture de frames WebSocket sortantes (côté serveur) — RFC 6455 §5.2.
+ * Writes outgoing WebSocket frames (server side) — RFC 6455 §5.2.
  * <p>
- * Les frames serveur ne sont jamais masquées (§5.1). Les méthodes sont
- * <em>non thread-safe</em> : la sérialisation est assurée par {@code WebSocketConnection}
- * via un {@code ReentrantLock} pour éviter l'entrelacement des frames (§5.4).
+ * Server frames are never masked (§5.1). The methods are
+ * <em>not thread-safe</em>: serialization is ensured by {@code WebSocketConnection}
+ * via a {@code ReentrantLock} to avoid frame interleaving (§5.4).
  */
 public final class WebSocketFrameWriter {
 
-    /** Frame complète : FIN=1, opcode donné, payload non masqué. */
+    /** Complete frame: FIN=1, given opcode, unmasked payload. */
     public static void writeFrame(WritableByteChannel channel, int opcode, ByteBuffer payload) throws IOException {
         writeHeader(channel, true, opcode, payload.remaining());
         flush(channel, payload);
     }
 
-    /** Frame complète avec FIN explicite (pour fragmentation). */
+    /** Complete frame with explicit FIN (for fragmentation). */
     public static void writeFrame(WritableByteChannel channel, boolean fin, int opcode, ByteBuffer payload)
             throws IOException {
         writeHeader(channel, fin, opcode, payload.remaining());
@@ -28,7 +28,7 @@ public final class WebSocketFrameWriter {
 
     private static void writeHeader(WritableByteChannel channel, boolean fin, int opcode, long payloadLen)
             throws IOException {
-        // Header max = 2 (base) + 8 (ext payload) = 10 octets, pas de masking côté serveur.
+        // Max header = 2 (base) + 8 (extended payload) = 10 bytes, no masking on server side.
         var hdr = ByteBuffer.allocate(10);
         int b0 = (fin ? 0x80 : 0) | (opcode & 0x0F);
         hdr.put((byte) b0);

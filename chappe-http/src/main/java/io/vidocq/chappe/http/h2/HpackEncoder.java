@@ -7,16 +7,16 @@ import java.util.Locale;
 import io.vidocq.chappe.api.Headers;
 
 /**
- * Encodeur HPACK optimisé — RFC 7541.
+ * Optimized HPACK encoder — RFC 7541.
  *
- * <p>Stratégie d'encodage par ordre de priorité :
+ * <p>Encoding strategy in priority order:
  * <ol>
- *   <li>Indexed Header Field (§6.1, prefix 0x80) — correspondance exacte nom+valeur dans la
- *       table statique ou dynamique.</li>
- *   <li>Literal with Incremental Indexing (§6.2.1, prefix 0x40) — nom indexé ou nouveau nom,
- *       la paire est ajoutée à la table dynamique.</li>
+ *   <li>Indexed Header Field (§6.1, prefix 0x80) — exact name+value match in the
+ *       static or dynamic table.</li>
+ *   <li>Literal with Incremental Indexing (§6.2.1, prefix 0x40) — indexed name or new name,
+ *       the pair is added to the dynamic table.</li>
  * </ol>
- * Les valeurs de chaînes sont encodées en Huffman si cela produit un résultat plus court.
+ * String values are Huffman-encoded if that produces a shorter result.
  */
 public final class HpackEncoder {
 
@@ -30,11 +30,11 @@ public final class HpackEncoder {
     }
 
     /**
-     * Encode les headers de réponse en un header block HPACK.
+     * Encodes response headers into an HPACK header block.
      *
-     * @param statusCode le code de statut HTTP
-     * @param headers    les headers de la réponse
-     * @return le header block encodé
+     * @param statusCode the HTTP status code
+     * @param headers    the response headers
+     * @return the encoded header block
      */
     public byte[] encode(int statusCode, Headers headers) {
         var out = new ByteArrayOutputStream(256);
@@ -52,10 +52,10 @@ public final class HpackEncoder {
     }
 
     /**
-     * Encode des trailers HTTP/2 (HEADERS frame envoyée après le corps).
+     * Encodes HTTP/2 trailers (HEADERS frame sent after the body).
      * <p>
-     * Contrairement à {@link #encode(int, Headers)}, n'émet pas de pseudo-header :
-     * RFC 9113 §8.1 interdit les pseudo-headers dans les trailers.
+     * Unlike {@link #encode(int, Headers)}, does not emit pseudo-headers:
+     * RFC 9113 §8.1 forbids pseudo-headers in trailers.
      */
     public byte[] encodeTrailers(Headers trailers) {
         var out = new ByteArrayOutputStream(64);
@@ -133,7 +133,7 @@ public final class HpackEncoder {
         return 0;
     }
 
-    /** Encode un entier HPACK (RFC 7541 §5.1). */
+    /** Encodes an HPACK integer (RFC 7541 §5.1). */
     static void encodeInteger(ByteArrayOutputStream out, int value, int prefix, int pattern) {
         int mask = (1 << prefix) - 1;
         if (value < mask) {
@@ -150,7 +150,7 @@ public final class HpackEncoder {
     }
 
     /**
-     * Encode une chaîne HPACK avec Huffman si plus court, sinon en littéral (RFC 7541 §5.2).
+     * Encodes an HPACK string with Huffman if shorter, otherwise as a literal (RFC 7541 §5.2).
      */
     static void encodeStringHuffman(ByteArrayOutputStream out, String s) {
         byte[] huffman = HpackHuffman.encode(s);
@@ -164,7 +164,7 @@ public final class HpackEncoder {
         }
     }
 
-    /** Encode une chaîne HPACK sans Huffman (RFC 7541 §5.2). Conservé pour compatibilité. */
+    /** Encodes an HPACK string without Huffman (RFC 7541 §5.2). Kept for compatibility. */
     static void encodeString(ByteArrayOutputStream out, String s) {
         byte[] bytes = s.getBytes(StandardCharsets.ISO_8859_1);
         encodeInteger(out, bytes.length, 7, 0x00); // H=0 (no Huffman)

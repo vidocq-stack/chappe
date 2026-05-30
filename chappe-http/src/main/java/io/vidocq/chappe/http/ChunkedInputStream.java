@@ -6,9 +6,9 @@ import java.nio.ByteBuffer;
 import java.nio.channels.ReadableByteChannel;
 
 /**
- * InputStream décodant le chunked transfer encoding (RFC 9112, Section 7.1).
+ * InputStream decoding chunked transfer encoding (RFC 9112, Section 7.1).
  * <p>
- * Format : {@code chunk-size(hex) CRLF chunk-data CRLF}, terminé par un chunk de taille 0.
+ * Format: {@code chunk-size(hex) CRLF chunk-data CRLF}, terminated by a chunk of size 0.
  */
 final class ChunkedInputStream extends InputStream {
 
@@ -125,7 +125,7 @@ final class ChunkedInputStream extends InputStream {
                 }
                 chunkRemaining = size;
                 if (size == 0) {
-                    // Terminal chunk — consommer le CRLF final des trailers
+                    // Terminal chunk — consume final trailer CRLF
                     consumeTrailers();
                     chunkState = ChunkState.DONE;
                 } else {
@@ -134,7 +134,7 @@ final class ChunkedInputStream extends InputStream {
                 return;
             }
             if (b == ';') {
-                // Chunk extension — ignorer jusqu'au CRLF
+                // Chunk extension — ignore until CRLF
                 skipUntilLf();
                 chunkRemaining = size;
                 if (size == 0) {
@@ -159,26 +159,26 @@ final class ChunkedInputStream extends InputStream {
     }
 
     private void consumeCrlf() throws IOException {
-        // Consomme le CRLF après les données du chunk
+        // Consume CRLF after chunk data
         while (true) {
             if (!ensureData()) return;
             int b = buffer.get() & 0xFF;
             if (b == '\r') continue;
             if (b == '\n') return;
-            // Octet inattendu — tolérer (certains serveurs n'envoient que LF)
+            // Unexpected byte — tolerate it (some servers only send LF)
             return;
         }
     }
 
     private void consumeTrailers() throws IOException {
-        // Les trailers sont des lignes de headers terminées par une ligne vide
+        // Trailers are header lines terminated by an empty line
         boolean lineStart = true;
         while (true) {
             if (!ensureData()) return;
             int b = buffer.get() & 0xFF;
             if (b == '\r') continue;
             if (b == '\n') {
-                if (lineStart) return; // Ligne vide = fin des trailers
+                if (lineStart) return; // Empty line = end of trailers
                 lineStart = true;
             } else {
                 lineStart = false;

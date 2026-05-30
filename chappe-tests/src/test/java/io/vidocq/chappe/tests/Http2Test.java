@@ -19,10 +19,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * Tests d'intégration HTTP/2 (h2c cleartext).
+ * HTTP/2 integration tests (cleartext h2c).
  * <p>
- * Utilise {@code HttpClient} avec {@code HTTP_2} qui fait un upgrade h2c
- * automatique, ou envoie le preface HTTP/2 directement.
+ * Uses {@code HttpClient} with {@code HTTP_2}, which performs automatic h2c
+ * upgrade, or sends the HTTP/2 preface directly.
  */
 class Http2Test {
 
@@ -46,7 +46,7 @@ class Http2Test {
                         .body("{\"protocol\":\"h2c\"}")
                         .build())
                 .get("/large", _ -> {
-                    // Réponse de 100 Ko pour tester le flow control
+                    // 100 KB response to test flow control
                     var data = "x".repeat(100_000);
                     return Response.ok(data);
                 })
@@ -57,7 +57,7 @@ class Http2Test {
         port = server.port();
         baseUrl = "http://127.0.0.1:" + port;
 
-        // HttpClient avec HTTP/2 — fera un prior-knowledge h2c
+        // HttpClient with HTTP/2 — performs h2c prior knowledge
         client = HttpClient.newBuilder().version(HttpClient.Version.HTTP_2).build();
     }
 
@@ -107,7 +107,7 @@ class Http2Test {
 
     @Test
     void http2MultipleRequests() throws IOException, InterruptedException {
-        // HTTP/2 multiplexe sur la même connexion
+        // HTTP/2 multiplexes over the same connection
         for (int i = 0; i < 5; i++) {
             var response = get("/");
             assertEquals(200, response.statusCode());

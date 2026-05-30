@@ -3,7 +3,7 @@ package io.vidocq.chappe.bench.oop;
 import io.vidocq.chappe.api.Response;
 import io.vidocq.chappe.api.Server;
 
-/** Mini main qui démarre Chappe sur le port donné et répond {@code "ok"} sur toutes les routes. */
+/** Mini main that starts Chappe on the given port and replies {@code "ok"} on every route. */
 public final class ChappeMain {
     private ChappeMain() {}
 

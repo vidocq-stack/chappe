@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Implémentation par défaut de {@link Headers.Builder}.
+ * Default implementation of {@link Headers.Builder}.
  */
 final class DefaultHeadersBuilder implements Headers.Builder {
 

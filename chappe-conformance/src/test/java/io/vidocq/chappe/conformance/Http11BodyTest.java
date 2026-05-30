@@ -13,7 +13,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * Tests de conformite HTTP/1.1 pour le corps des messages (message body).
+ * HTTP/1.1 conformance tests for message bodies.
  * RFC 9112, Sections 6-7.
  */
 class Http11BodyTest {

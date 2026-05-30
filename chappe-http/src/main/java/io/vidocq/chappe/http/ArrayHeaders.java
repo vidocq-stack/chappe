@@ -10,10 +10,10 @@ import java.util.Optional;
 import io.vidocq.chappe.api.Headers;
 
 /**
- * Implémentation de {@link Headers} sur tableaux parallèles — zero-copy.
+ * {@link Headers} implementation backed by parallel arrays — zero-copy.
  * <p>
- * Enveloppe directement les tableaux internes de {@link HttpRequestImpl}
- * sans copie ni allocation d'objets {@link Entry} (sauf lors de l'itération).
+ * Directly wraps the internal arrays of {@link HttpRequestImpl}
+ * without copying or allocating {@link Entry} objects (except during iteration).
  */
 final class ArrayHeaders implements Headers {
 

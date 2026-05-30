@@ -22,12 +22,12 @@ final class OutputStreamBody implements Body {
         try {
             var pis = new PipedInputStream(8192);
             var pos = new PipedOutputStream(pis);
-            // pos est transféré au virtual thread qui le ferme via try-with-resources
+            // pos is handed to the virtual thread, which closes it via try-with-resources
             Thread.startVirtualThread(() -> {
                 try (pos) {
                     writer.accept(pos);
                 } catch (IOException _) {
-                    // Le consumer du PipedInputStream a fermé : on arrête simplement le writer
+                    // PipedInputStream consumer closed early: just stop writer
                 }
             });
             return pis;

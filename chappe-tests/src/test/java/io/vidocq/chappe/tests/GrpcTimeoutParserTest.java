@@ -8,9 +8,9 @@ import io.vidocq.chappe.http.grpc.GrpcCallImpl;
 import org.junit.jupiter.api.Test;
 
 /**
- * Tests unitaires du parser de {@code grpc-timeout} (RFC gRPC §"Requests" — Timeout grammar).
+ * Unit tests for the {@code grpc-timeout} parser (gRPC RFC "Requests" section, timeout grammar).
  * <p>
- * Grammaire : {@code TimeoutValue (1-8 digits) TimeoutUnit (H|M|S|m|u|n)}.
+ * Grammar: {@code TimeoutValue (1-8 digits) TimeoutUnit (H|M|S|m|u|n)}.
  */
 class GrpcTimeoutParserTest {
 
@@ -52,7 +52,7 @@ class GrpcTimeoutParserTest {
 
     @Test
     void parsesMaxEightDigits() {
-        // Spec : up to 8 digits. 99999999u = ~99 secondes
+        // Spec: up to 8 digits. 99999999u = ~99 seconds.
         long v = GrpcCallImpl.parseTimeoutNanos("99999999u");
         assertEquals(99_999_999L * 1_000L, v);
     }
@@ -92,8 +92,8 @@ class GrpcTimeoutParserTest {
 
     @Test
     void saturatesOnOverflow() {
-        // 99999999H * 3600 * 1e9 > Long.MAX_VALUE -> saturé à MAX_VALUE
+        // 99999999H * 3600 * 1e9 > Long.MAX_VALUE -> saturates to MAX_VALUE
         long v = GrpcCallImpl.parseTimeoutNanos("99999999H");
-        assertTrue(v == Long.MAX_VALUE, "overflow doit saturer à MAX_VALUE, got " + v);
+        assertTrue(v == Long.MAX_VALUE, "overflow must saturate to MAX_VALUE, got " + v);
     }
 }

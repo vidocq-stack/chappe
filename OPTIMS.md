@@ -1,107 +1,108 @@
-# Chappe — Étude : optimisations compile-time (APT / BuildCompatibleExtension / Plugin Maven)
+# Chappe — Study: Compile-time Optimizations (APT / BuildCompatibleExtension / Maven Plugin)
 
 ## Verdict
 
-Non, ce n'est **pas** peine perdue — mais le gain sera plus modeste que pour Vidocq/Vauban,
-et pour des raisons structurellement différentes.
+No, it is **not** a lost cause — but the gain will be more modest than for Vidocq/Vauban,
+and for structurally different reasons.
 
-## Pourquoi Vidocq/Vauban y gagnent beaucoup
+## Why Vidocq/Vauban benefit so much
 
-Chez Vidocq (JAX-RS) et Vauban (CDI), APT remplace de la **réflexion runtime** (scan de
-classpath, introspection de beans, résolution d'injection). C'est là qu'il y a 10× à gagner,
-parce que la réflexion est intrinsèquement lente.
+In Vidocq (JAX-RS) and Vauban (CDI), APT replaces **runtime reflection** (classpath
+scanning, bean introspection, injection resolution). That is where the 10× gain comes from,
+because reflection is intrinsically slow.
 
-## Chez Chappe, la situation est différente
+## In Chappe, the situation is different
 
-Chappe n'a **déjà aucune réflexion** sur le hot path :
+Chappe already has **no reflection at all** on the hot path:
 
-- `ServiceLoader` est utilisé 1× au boot (`ServerProvider`), pas par requête
-- Les handlers sont des lambdas/instances passées programmatiquement
-- Pas d'annotations `@Route` à scanner — l'API est fluent (`router.get(...)`)
-- Le parser HTTP est déjà une state machine avec `StringBuilder` réutilisé (zero-alloc)
+- `ServiceLoader` is used once at boot (`ServerProvider`), not per request
+- Handlers are lambdas/instances passed programmatically
+- No `@Route` annotations to scan — the API is fluent (`router.get(...)`)
+- The HTTP parser is already a state machine with a reused `StringBuilder` (zero-alloc)
 
-Donc APT ne peut pas **remplacer** du code lent, seulement **spécialiser** des structures
-déjà correctes.
+So APT cannot **replace** slow code, only **specialize** structures that are
+already correct.
 
-## Opportunités réelles (par ROI décroissant)
+## Real opportunities (by decreasing ROI)
 
-| Cible | Runtime actuel | Précalcul possible | Gain réaliste |
+| Target | Current runtime | Possible precomputation | Realistic gain |
 |---|---|---|---|
-| **HPACK static table** (`HpackStaticTable:110-130`) | scan linéaire O(61) par header | switch parfait-hash généré | hot path H/2 — **mesurable** |
-| **MimeTypes.detect()** | `lastIndexOf + substring + toLowerCase + map` | switch compilé sur extension | -40 % alloc, mais pas sur hot path sauf statics |
-| **StaticFileHandler classpath** | `loader.getResource()` + `URLConnection` par requête | index build-time `META-INF/chappe-resources` | -90 % latence fichier classpath |
-| **Router trie/DFA** | scan linéaire des routes | trie pré-compilé | utile seulement au-delà de ~50 routes |
-| **Mount registry** | assemblage `LinkedHashMap` au `onStart` | registry généré | -20 % startup, pas runtime |
+| **HPACK static table** (`HpackStaticTable:110-130`) | O(61) linear scan per header | generated perfect-hash switch | H/2 hot path — **measurable** |
+| **MimeTypes.detect()** | `lastIndexOf + substring + toLowerCase + map` | compiled extension switch | -40% allocations, but not on the hot path except statics |
+| **StaticFileHandler classpath** | `loader.getResource()` + `URLConnection` per request | build-time `META-INF/chappe-resources` index | -90% classpath file latency |
+| **Router trie/DFA** | linear route scan | precompiled trie | useful only above ~50 routes |
+| **Mount registry** | `LinkedHashMap` assembly in `onStart` | generated registry | -20% startup, not runtime |
 
-## Ce qui ne gagnera rien
+## What will not gain anything
 
-- **Parser HTTP/1.1** — déjà optimal, APT ne fait pas mieux qu'une state machine manuelle
-- **`RequestContext` ScopedValue** — déjà quasi-gratuit (JEP 506)
-- **Virtual threads, buffer pool, write coalescing** — orthogonaux à APT
+- **HTTP/1.1 parser** — already optimal, APT will not beat a manual state machine
+- **`RequestContext` ScopedValue** — already almost free (JEP 506)
+- **Virtual threads, buffer pool, write coalescing** — orthogonal to APT
 
-## Recommandation
+## Recommendation
 
-**Ne pas copier le modèle Vidocq/Vauban tel quel.** Là où ils génèrent des *proxies d'injection*
-(remplacement de réflexion), Chappe devrait plutôt aller vers un **plugin Maven** qui :
+**Do not copy the Vidocq/Vauban model as-is.** Where they generate *injection proxies*
+(reflection replacement), Chappe should instead move toward a **Maven plugin** that:
 
-1. **Indexe les resources classpath** au build → `META-INF/chappe-static-index` (gain clair, pattern Quarkus)
-2. **Génère les tables HPACK/MIME** en switch parfait-hash (micro-opti, mais hot path H/2)
-3. **Éventuellement** un `@ChappeApp` qui compile les `router.mount(...)` en trie — *seulement si*
-   un profil d'usage avec beaucoup de routes émerge
+1. **Indexes classpath resources** at build time → `META-INF/chappe-static-index` (clear gain, Quarkus pattern)
+2. **Generates HPACK/MIME tables** as perfect-hash switches (micro-opt, but H/2 hot path)
+3. **Possibly** provides a `@ChappeApp` that compiles `router.mount(...)` into a trie — *only if*
+   a usage profile with many routes emerges
 
-Le **tradeoff principal** : la simplicité actuelle (zéro build step, API fluent) est une feature.
-Un plugin APT obligatoire casserait ça. Le garder **optionnel** (`chappe-codegen` opt-in)
-préserve l'expérience dev.
+The **main tradeoff**: the current simplicity (zero build step, fluent API) is a feature.
+A mandatory APT plugin would break that. Keeping it **optional** (`chappe-codegen` opt-in)
+preserves the dev experience.
 
 ---
 
-## POC retenu : plugin Maven d'indexation des resources statiques
+## Chosen POC: Maven plugin for static resource indexing
 
-### Problème actuel
+### Current problem
 
-`StaticFileHandler` avec fallback classpath fait, **par requête** :
+`StaticFileHandler` with classpath fallback does, **per request**:
 
-- `loader.getResource(resourcePath)` — scan de tous les ClassLoader parents
-- `URLConnection.openConnection()` — ouverture de flux pour obtenir `contentLength`, `lastModified`
+- `loader.getResource(resourcePath)` — scans all parent ClassLoaders
+- `URLConnection.openConnection()` — opens a stream to obtain `contentLength`, `lastModified`
 - `MimeTypes.detect()` — `lastIndexOf + substring + toLowerCase + map lookup`
-- Allocation d'un `ResolvedResource` wrapper
+- Allocation of a `ResolvedResource` wrapper
 
-Sur un JAR de quelques milliers de resources, le `getResource()` traverse toute la hiérarchie de
-ClassLoaders à chaque hit. Sur classpath imbriqué (Spring Boot, fat JAR, uber JAR), c'est pire.
+On a JAR with a few thousand resources, `getResource()` traverses the entire
+ClassLoader hierarchy on every hit. On nested classpaths (Spring Boot, fat JAR,
+uber JAR), it is worse.
 
-### Solution : index pré-généré au build
+### Solution: build-time pre-generated index
 
-Un plugin Maven `chappe-static-index-maven-plugin` qui :
+A `chappe-static-index-maven-plugin` Maven plugin that:
 
-1. Scanne les répertoires de resources configurés (`src/main/resources/static/**` par défaut)
-2. Pour chaque fichier, pré-calcule : `path`, `size`, `lastModified`, `mimeType`, `etag` (SHA-256 tronqué)
-3. Écrit `META-INF/chappe-static-index.properties` (format simple, loadable 1× au boot)
-4. Runtime : `StaticFileHandler` détecte l'index, fait un lookup O(1) en `Map` statique
+1. Scans configured resource directories (`src/main/resources/static/**` by default)
+2. For each file, precomputes: `path`, `size`, `lastModified`, `mimeType`, `etag` (truncated SHA-256)
+3. Writes `META-INF/chappe-static-index.properties` (simple format, loadable once at boot)
+4. At runtime: `StaticFileHandler` detects the index and performs an O(1) lookup in a static `Map`
 
-Le hot path devient : `map.get(path)` → `Body.ofClasspath(path, size, mime)` — zéro URLConnection,
-zéro introspection.
+The hot path becomes: `map.get(path)` → `Body.ofClasspath(path, size, mime)` — zero URLConnection,
+zero introspection.
 
-### Gain mesurable attendu
+### Expected measurable gain
 
-| Métrique | Avant | Après | Gain |
+| Metric | Before | After | Gain |
 |---|---|---|---|
-| Latence p50 fichier statique classpath | ~15 µs | ~2 µs | **-85 %** |
-| Allocations par requête | 3-4 objets (URLConnection, streams…) | 1 (Body) | **-75 %** |
-| Boot | 0 ms | +5-20 ms (chargement index) | négligeable |
+| p50 classpath static file latency | ~15 µs | ~2 µs | **-85 %** |
+| Allocations per request | 3-4 objects (URLConnection, streams…) | 1 (Body) | **-75 %** |
+| Boot | 0 ms | +5-20 ms (index loading) | negligible |
 
 ---
 
-### Structure du plugin
+### Plugin structure
 
 ```
 chappe-static-index-maven-plugin/
 ├── pom.xml
 └── src/main/java/fr/vidocq/chappe/maven/
-    ├── IndexMojo.java                 # @Mojo("index") — scanne et génère
-    └── StaticIndexWriter.java         # écriture properties
+    ├── IndexMojo.java                 # @Mojo("index") — scans and generates
+    └── StaticIndexWriter.java         # properties writing
 ```
 
-### `IndexMojo.java` — squelette
+### `IndexMojo.java` — skeleton
 
 ```java
 package io.vidocq.chappe.maven;
@@ -166,12 +167,12 @@ public final class IndexMojo extends AbstractMojo {
         }
     }
 
-    private String detectMime(String path) { /* réutiliser MimeTypes.detect */ return "application/octet-stream"; }
+    private String detectMime(String path) { /* reuse MimeTypes.detect */ return "application/octet-stream"; }
     private String sha256Hex(Path p) throws IOException { /* MessageDigest SHA-256 */ return ""; }
 }
 ```
 
-### Utilisation dans un projet downstream
+### Usage in a downstream project
 
 ```xml
 <build>
@@ -193,10 +194,10 @@ public final class IndexMojo extends AbstractMojo {
 </build>
 ```
 
-### Lecture runtime dans `StaticFileHandler`
+### Runtime reading in `StaticFileHandler`
 
 ```java
-// au boot du handler, 1× :
+// at handler boot, once:
 private static final Map<String, IndexedResource> INDEX = loadIndex();
 
 private static Map<String, IndexedResource> loadIndex() {
@@ -222,7 +223,7 @@ private static Map<String, IndexedResource> loadIndex() {
 
 record IndexedResource(long size, long lastModified, String mime, String etag) {}
 
-// hot path :
+// hot path:
 public Response handle(Request req) {
     String path = req.path();
     IndexedResource idx = INDEX.get(path);
@@ -233,89 +234,89 @@ public Response handle(Request req) {
             .header("ETag", '"' + idx.etag() + '"')
             .body(Body.ofClasspath("/static/" + path, idx.size()));
     }
-    // fallback : ancien chemin (filesystem, dev mode)
+    // fallback: old path (filesystem, dev mode)
     return fallbackLookup(req);
 }
 ```
 
-### Mode dev (sans plugin)
+### Dev mode (without plugin)
 
-Si `META-INF/chappe-static-index.properties` est absent → `INDEX.isEmpty()` → on retombe sur
-l'ancien comportement `loader.getResource()`. **Zéro régression**, **zéro config obligatoire**.
+If `META-INF/chappe-static-index.properties` is missing → `INDEX.isEmpty()` → it falls back to
+the old `loader.getResource()` behavior. **Zero regression**, **zero mandatory config**.
 
-### Étapes de livraison
+### Delivery steps
 
-1. Créer le module `chappe-static-index-maven-plugin` (packaging `maven-plugin`)
-2. Implémenter `IndexMojo` + tests unitaires (répertoire fixture → vérifier index produit)
-3. Brancher la lecture dans `StaticFileHandler` (fallback transparent)
-4. Ajouter un exemple dans `chappe-examples` (`static-indexed-example`)
-5. Bench JMH : avant/après sur fichier classpath → valider le -85 %
-6. Documenter dans `README.md` (section « Production builds »)
+1. Create the `chappe-static-index-maven-plugin` module (`maven-plugin` packaging)
+2. Implement `IndexMojo` + unit tests (fixture directory → verify generated index)
+3. Wire index loading into `StaticFileHandler` (transparent fallback)
+4. Add an example in `chappe-examples` (`static-indexed-example`)
+5. JMH bench: before/after on classpath file → validate the -85%
+6. Document in `README.md` ("Production builds" section)
 
-### Points d'attention
+### Points of attention
 
-- **Stabilité des ETags** : utiliser SHA-256 pas `lastModified` pour être reproductible CI/CD
-- **Hot reload dev** : désactiver l'index si système de propriété `chappe.dev=true` (ou absence détectée)
-- **Classpath multiple** : si plusieurs JARs contiennent `META-INF/chappe-static-index.properties`,
-  fusionner via `getResources()` au boot (ordre : premier gagnant ou dernier gagnant, à trancher)
-- **Taille de l'index** : 10k fichiers ≈ ~1 MB properties — acceptable. Au-delà, envisager un format
-  binaire compact (varint + table de strings dédupliquée)
+- **ETag stability**: use SHA-256, not `lastModified`, for CI/CD reproducibility
+- **Dev hot reload**: disable the index if system property `chappe.dev=true` is set (or if absence is detected)
+- **Multiple classpaths**: if multiple JARs contain `META-INF/chappe-static-index.properties`,
+  merge them via `getResources()` at boot (order: first-wins or last-wins, to be decided)
+- **Index size**: 10k files ≈ ~1 MB properties — acceptable. Beyond that, consider a compact
+  binary format (varint + deduplicated string table)
 
 ---
 
-## Implémentation livrée (2026-04-23)
+## Delivered implementation (2026-04-23)
 
-Les optimisations du tableau ROI ont été implémentées sur la branche `working/compiletime` :
+The optimizations from the ROI table were implemented on branch `working/compiletime`:
 
 ### 1. HPACK static table — `O(61)` → `O(1)`
-`chappe-http/.../h2/HpackStaticTable.java` : `findExact` et `findByName` utilisent deux maps
-immuables pré-construites (`Map.copyOf`) dans un bloc statique. Scan linéaire éliminé du hot path HTTP/2.
+`chappe-http/.../h2/HpackStaticTable.java`: `findExact` and `findByName` use two
+prebuilt immutable maps (`Map.copyOf`) in a static block. Linear scan eliminated from the HTTP/2 hot path.
 
-### 2. MimeTypes.detect() — zéro-alloc
-`chappe-api/.../MimeTypes.java` : plus de `substring` ni de `toLowerCase()`. Comparaison
-case-insensitive via `String.regionMatches(true, …)` sur un tableau ordonné par fréquence web
-(html → css → js → png → jpg → svg → json → …). Lookup O(n) mais avec hit rapide sur le cas fréquent
-et **zéro allocation**.
+### 2. MimeTypes.detect() — zero-alloc
+`chappe-api/.../MimeTypes.java`: no more `substring` or `toLowerCase()`. Case-insensitive
+comparison via `String.regionMatches(true, …)` over an array ordered by web frequency
+(html → css → js → png → jpg → svg → json → …). O(n) lookup but with a fast hit on the common case
+and **zero allocation**.
 
-### 3. Plugin Maven `chappe-static-index-maven-plugin`
-- Nouveau module `chappe-static-index-maven-plugin` (packaging `maven-plugin`, cible Java 21 pour
-  compat avec `maven-plugin-plugin:descriptor`).
-- `IndexMojo` (phase `process-resources`) scanne `${project.build.outputDirectory}/${rootPrefix}`,
-  calcule `size|mtime|mime|etag` (SHA-256 tronqué 16 hex) et écrit
-  `META-INF/chappe-static-index.properties` avec clés classpath complètes (`static/index.html`).
-- 3 tests unitaires verts (indexation nominale, skip root absent, flag `skip`).
-- `StaticFileHandler` (chappe-api) : nouveau fast-path dans `ClasspathSource.resolve()` qui consulte
-  l'index avant `URLConnection.openConnection()`. Chargement de l'index 1× par ClassLoader via
-  `ClassLoader.getResources()` (merge multi-JAR, premier gagnant). **Absence d'index = fallback
-  transparent** sur le chemin legacy ⇒ zéro régression.
-- Exemple `chappe-examples/StaticIndexedExample` + resources sous `static/` + plugin activé dans le
-  POM ; l'index généré au package contient bien `static/index.html`, `static/app.css`,
+### 3. `chappe-static-index-maven-plugin` Maven plugin
+- New `chappe-static-index-maven-plugin` module (`maven-plugin` packaging, Java 21 target for
+  compatibility with `maven-plugin-plugin:descriptor`).
+- `IndexMojo` (`process-resources` phase) scans `${project.build.outputDirectory}/${rootPrefix}`,
+  computes `size|mtime|mime|etag` (16-hex truncated SHA-256), and writes
+  `META-INF/chappe-static-index.properties` with full classpath keys (`static/index.html`).
+- 3 green unit tests (nominal indexing, missing-root skip, `skip` flag).
+- `StaticFileHandler` (chappe-api): new fast path in `ClasspathSource.resolve()` that consults
+  the index before `URLConnection.openConnection()`. Index loaded once per ClassLoader via
+  `ClassLoader.getResources()` (multi-JAR merge, first wins). **No index = transparent
+  fallback** to the legacy path ⇒ zero regression.
+- Example `chappe-examples/StaticIndexedExample` + resources under `static/` + plugin enabled in the
+  POM; the generated package index contains `static/index.html`, `static/app.css`,
   `static/app.js`.
 
-### 4. Router — fast-path routes statiques
-`chappe-api/.../DefaultRouterBuilder.java` : à `build()`, les routes sans `{param}` ni `/*` sont
-indexées dans `Map<String, EnumMap<HttpMethod, Route>>`. Le dispatch fait un lookup O(1)
-(`staticIndex.get(path)`) avant le scan linéaire sur les seules routes dynamiques. Sémantique
-préservée intégralement : 405 Method Not Allowed, Auto-HEAD, mounts, filtres globaux/locaux. Les
-wrappers `withPathParams` et la construction de la `List<Filter>` ne sont plus alloués pour les
-routes statiques (params = `Collections.emptyMap()`).
+### 4. Router — static-route fast path
+`chappe-api/.../DefaultRouterBuilder.java`: at `build()`, routes without `{param}` or `/*` are
+indexed in `Map<String, EnumMap<HttpMethod, Route>>`. Dispatch performs an O(1) lookup
+(`staticIndex.get(path)`) before the linear scan over dynamic routes only. Semantics are
+fully preserved: 405 Method Not Allowed, Auto-HEAD, mounts, global/local filters. The
+`withPathParams` wrappers and `List<Filter>` construction are no longer allocated for
+static routes (`params = Collections.emptyMap()`).
 
-### 5. Mount registry — non requis
-`DefaultRouterBuilder.build()` faisait déjà `List.copyOf(mounts)` (snapshot immuable au build). Scan
-linéaire sur 1–3 mounts typiques reste la meilleure option. **Aucune action requise.**
+### 5. Mount registry — not required
+`DefaultRouterBuilder.build()` already used `List.copyOf(mounts)` (immutable snapshot at build time). A
+linear scan over the typical 1–3 mounts remains the best option. **No action required.**
 
 ### Validation
 
-- `mvn -pl '!chappe-conformance' test` → BUILD SUCCESS, **65/65 tests verts**
+- `mvn -pl '!chappe-conformance' test` → BUILD SUCCESS, **65/65 tests green**
   (RouterTest 7, ExtensionSpiTest 25, HttpGetTest 7, Http2Test 7, TlsTest 3, etc.).
-- `chappe-static-index-maven-plugin` → **3/3 tests verts**.
-- Un test préexistant échoue dans `chappe-conformance` (`Http11HeadersTest#obsFoldRejected` :
-  attendu 400, reçoit 301) — reproduit sur HEAD sans les optimisations, lié à une modification
-  antérieure de `HttpRequestImpl.buildUri()`. **Hors périmètre de cette série.**
+- `chappe-static-index-maven-plugin` → **3/3 tests green**.
+- One pre-existing test fails in `chappe-conformance` (`Http11HeadersTest#obsFoldRejected`:
+  expected 400, got 301) — reproduced on HEAD without the optimizations, tied to an
+  earlier change in `HttpRequestImpl.buildUri()`. **Out of scope for this series.**
 
-### Restant
+### Remaining
 
-- Bench JMH comparatif avant/après sur `StaticFileHandler` classpath pour valider le gain annoncé
-  (-85 % latence, -75 % allocations).
-- `chappe-static-index-maven-plugin` : packaging Maven 4 vs 3 — aujourd'hui on dépend de
-  `maven-plugin-api:3.9.9`. À retester quand Maven 4 GA sera publié.
+- Comparative before/after JMH bench on `StaticFileHandler` classpath to validate the announced gain
+  (-85% latency, -75% allocations).
+- `chappe-static-index-maven-plugin`: Maven 4 vs 3 packaging — today it depends on
+  `maven-plugin-api:3.9.9`. To be retested when Maven 4 GA is released.

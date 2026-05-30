@@ -23,7 +23,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * Tests d'intégration WebSocket via {@link java.net.http.WebSocket} (client JDK).
+ * WebSocket integration tests via {@link java.net.http.WebSocket} (JDK client).
  */
 class WebSocketEchoTest {
 

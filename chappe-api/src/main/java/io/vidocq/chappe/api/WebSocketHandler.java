@@ -3,14 +3,14 @@ package io.vidocq.chappe.api;
 import java.nio.ByteBuffer;
 
 /**
- * Gestionnaire d'une connexion WebSocket — RFC 6455.
+ * Handler for a WebSocket connection — RFC 6455.
  * <p>
- * Toutes les méthodes ont une implémentation par défaut vide :
- * une application n'a qu'à surcharger les événements qu'elle traite.
+ * All methods have an empty default implementation:
+ * an application only needs to override the events it handles.
  * <p>
- * Tous les callbacks pour une même connexion sont invoqués séquentiellement
- * sur le virtual thread de la connexion : pas de synchronisation nécessaire
- * pour accéder à un état attaché via {@link WebSocket#attribute(String, Object)}.
+ * All callbacks for the same connection are invoked sequentially
+ * on the connection's virtual thread: no synchronization is needed
+ * to access state attached via {@link WebSocket#attribute(String, Object)}.
  *
  * <pre>{@code
  * var router = Router.builder()
@@ -24,41 +24,41 @@ import java.nio.ByteBuffer;
  */
 public interface WebSocketHandler {
 
-    /** Appelé une fois après un handshake réussi, avant la première frame. */
+    /** Called once after a successful handshake, before the first frame. */
     default void onOpen(WebSocket ws, Request handshake) throws Exception {}
 
-    /** Message texte complet (frames TEXT + CONTINUATION ré-assemblées, UTF-8 validé). */
+    /** Complete text message (TEXT + CONTINUATION frames reassembled, UTF-8 validated). */
     default void onText(WebSocket ws, String message) throws Exception {}
 
     /**
-     * Message binaire complet (frames BINARY + CONTINUATION ré-assemblées).
+     * Complete binary message (BINARY + CONTINUATION frames reassembled).
      * <p>
-     * Le {@link ByteBuffer} est en mode lecture (position = 0, limit = taille) ;
-     * il ne doit pas être conservé au-delà du callback — son contenu peut être recyclé.
+     * The {@link ByteBuffer} is in read mode (position = 0, limit = size);
+     * it must not be retained beyond the callback — its content may be recycled.
      */
     default void onBinary(WebSocket ws, ByteBuffer data) throws Exception {}
 
     /**
-     * Frame PING reçue. Par défaut, le serveur répond automatiquement par un PONG
-     * avec le même payload <em>avant</em> que ce callback soit invoqué (RFC 6455 §5.5.2).
-     * Surcharger uniquement pour de l'observabilité.
+     * Received PING frame. By default, the server automatically replies with a PONG
+     * carrying the same payload <em>before</em> this callback is invoked (RFC 6455 §5.5.2).
+     * Override only for observability.
      */
     default void onPing(WebSocket ws, ByteBuffer payload) throws Exception {}
 
-    /** Frame PONG reçue (réponse à un précédent PING). */
+    /** Received PONG frame (response to a previous PING). */
     default void onPong(WebSocket ws, ByteBuffer payload) throws Exception {}
 
     /**
-     * Frame Close reçue ou déduite (close handshake terminé / connexion perdue).
+     * Received or inferred Close frame (close handshake completed / connection lost).
      * <p>
-     * {@code code} vaut {@link CloseCodes#NO_STATUS_RCVD} si le pair n'a pas envoyé de code,
-     * {@link CloseCodes#ABNORMAL_CLOSURE} si la connexion TCP a été coupée sans Close.
+     * {@code code} is {@link CloseCodes#NO_STATUS_RCVD} if the peer did not send a code,
+     * and {@link CloseCodes#ABNORMAL_CLOSURE} if the TCP connection was cut without a Close.
      */
     default void onClose(WebSocket ws, int code, String reason) throws Exception {}
 
     /**
-     * Erreur lors du traitement de la connexion (lecture/écriture, callback applicatif).
-     * Invoqué juste avant {@link #onClose} avec un code adapté.
+     * Error while processing the connection (read/write, application callback).
+     * Invoked just before {@link #onClose} with an appropriate code.
      */
     default void onError(WebSocket ws, Throwable error) {}
 }

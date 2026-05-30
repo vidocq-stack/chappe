@@ -37,7 +37,9 @@ Tests use JUnit Jupiter from JUnit 6 and Surefire with `--enable-preview`. Name 
 
 ## Commit & Pull Request Guidelines
 
-History uses short French descriptions and Conventional Commit-style prefixes, for example `docs: ...`, `ci(pr): ...`, and `fix(pr): ...`. Prefer `<type>(scope): summary` when practical. Pull requests should explain the behavioral change, list tests run, link issues, and include CLI output or screenshots only when user-visible behavior changes.
+Commit messages, Javadoc, and the content of all `.md` files must be written in **English**.
+
+History uses short English descriptions and Conventional Commit-style prefixes, for example `docs: ...`, `ci(pr): ...`, and `fix(pr): ...`. Prefer `<type>(scope): summary` when practical. Pull requests should explain the behavioral change, list tests run, link issues, and include CLI output or screenshots only when user-visible behavior changes.
 
 ## Agent-Specific Instructions
 

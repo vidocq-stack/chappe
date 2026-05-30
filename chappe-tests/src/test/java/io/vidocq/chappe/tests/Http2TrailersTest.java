@@ -24,10 +24,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * Tests trailers HTTP/2 (RFC 9113 §8.1) — envoi et réception.
+ * HTTP/2 trailers tests (RFC 9113 §8.1) — sending and receiving.
  * <p>
- * Client H2 raw : preface + SETTINGS + HEADERS + DATA + HEADERS (trailers).
- * Encodage HPACK littéral sans indexation pour rester minimal côté client.
+ * Raw H2 client: preface + SETTINGS + HEADERS + DATA + HEADERS (trailers).
+ * Literal HPACK encoding without indexing to keep the client side minimal.
  */
 class Http2TrailersTest {
 
@@ -74,10 +74,10 @@ class Http2TrailersTest {
             writeFrame(out, TYPE_HEADERS, FLAG_END_HEADERS | FLAG_END_STREAM, 1, headerBlock);
             out.flush();
 
-            // Lit la réponse jusqu'au trailers (HEADERS frame avec END_STREAM)
+            // Read response until trailers (HEADERS frame with END_STREAM)
             var seq = readUntilEndStream(in, 1);
 
-            // Doit y avoir au moins : HEADERS (status), DATA (hello), HEADERS (trailers)
+            // Must include at least: HEADERS (status), DATA (hello), HEADERS (trailers)
             assertTrue(
                     seq.headers.size() >= 2, "expected initial HEADERS + trailers HEADERS, got " + seq.headers.size());
 
@@ -97,7 +97,7 @@ class Http2TrailersTest {
     void serverReceivesClientTrailers() throws Exception {
         var receivedTrailers = new AtomicReference<Map<String, String>>();
         startServer(req -> {
-            // Consomme entièrement le body AVANT de lire les trailers (contrat documenté).
+            // Consume body fully BEFORE reading trailers (documented contract).
             try {
                 req.body().asInputStream().readAllBytes();
             } catch (IOException e) {
@@ -119,7 +119,7 @@ class Http2TrailersTest {
 
             sendPrefaceAndSettings(in, out);
 
-            // POST / avec body et trailers
+            // POST / with body and trailers
             byte[] headerBlock = encodeRequestHeaders("POST", "/", "5");
             writeFrame(out, TYPE_HEADERS, FLAG_END_HEADERS, 1, headerBlock);
 
@@ -131,11 +131,11 @@ class Http2TrailersTest {
             writeFrame(out, TYPE_HEADERS, FLAG_END_HEADERS | FLAG_END_STREAM, 1, trailerBlock);
             out.flush();
 
-            // Lit la réponse jusqu'au END_STREAM
+            // Read response until END_STREAM
             readUntilEndStream(in, 1);
 
             var trailers = receivedTrailers.get();
-            assertNotNull(trailers, "handler n'a pas vu les trailers");
+            assertNotNull(trailers, "handler did not observe trailers");
             assertEquals("42", trailers.get("x-client-status"));
             assertEquals("xyz", trailers.get("x-request-id"));
         }
@@ -154,17 +154,17 @@ class Http2TrailersTest {
 
     private static void sendPrefaceAndSettings(DataInputStream in, DataOutputStream out) throws IOException {
         out.write(H2_PREFACE);
-        // SETTINGS vide
+        // Empty SETTINGS
         writeFrame(out, TYPE_SETTINGS, 0, 0, new byte[0]);
         out.flush();
 
-        // Lit le SETTINGS initial + SETTINGS ACK jusqu'à recevoir un ACK
-        // (au plus quelques frames de contrôle, on filtre par stream 0).
-        // Pour rester simple : on lit 2 frames de contrôle et on continue.
+        // Read initial SETTINGS + SETTINGS ACK until ACK is received
+        // (at most a few control frames, filtered on stream 0).
+        // Keep it simple: read 2 control frames then continue.
         for (int i = 0; i < 2; i++) {
             readFrame(in);
         }
-        // Envoie notre SETTINGS ACK
+        // Send our SETTINGS ACK
         writeFrame(out, TYPE_SETTINGS, FLAG_ACK, 0, new byte[0]);
         out.flush();
     }
@@ -195,7 +195,7 @@ class Http2TrailersTest {
         return new Frame(len, type, flags, streamId, payload);
     }
 
-    /** Encode des trailers sans pseudo-header. */
+    /** Encodes trailers without pseudo-headers. */
     private static byte[] encodeTrailers(Map<String, String> trailers) {
         var out = new ByteArrayOutputStream();
         for (var e : trailers.entrySet()) {
@@ -204,7 +204,7 @@ class Http2TrailersTest {
         return out.toByteArray();
     }
 
-    /** Encode une requête HEADERS : pseudo-headers + Host + éventuel content-length. */
+    /** Encodes a HEADERS request: pseudo-headers + Host + optional content-length. */
     private static byte[] encodeRequestHeaders(String method, String path, String contentLength) {
         var out = new ByteArrayOutputStream();
         writeLiteralWithoutIndexing(out, ":method", method);
@@ -218,7 +218,7 @@ class Http2TrailersTest {
     }
 
     /**
-     * HPACK Literal without Indexing (§6.2.2), nouveau nom : 0000 0000 + name + value (sans Huffman).
+     * HPACK Literal without Indexing (§6.2.2), new name: 0000 0000 + name + value (without Huffman).
      */
     private static void writeLiteralWithoutIndexing(ByteArrayOutputStream out, String name, String value) {
         out.write(0x00); // 0000 0000 = literal without indexing, new name
@@ -228,7 +228,7 @@ class Http2TrailersTest {
 
     private static void writeRawString(ByteArrayOutputStream out, String s) {
         byte[] bytes = s.getBytes(StandardCharsets.ISO_8859_1);
-        // length sur 7 bits, H=0 (pas de Huffman)
+        // 7-bit length prefix, H=0 (no Huffman)
         encodeInteger(out, bytes.length, 7, 0x00);
         out.write(bytes, 0, bytes.length);
     }
@@ -248,10 +248,10 @@ class Http2TrailersTest {
         }
     }
 
-    /** Lecture d'une séquence de frames côté serveur sur un stream donné jusqu'à END_STREAM. */
+    /** Reads a sequence of server-side frames on a given stream until END_STREAM. */
     private static ResponseSequence readUntilEndStream(DataInputStream in, int streamId) throws IOException {
         var seq = new ResponseSequence();
-        // Décodeur HPACK partagé : table dynamique stateful entre HEADERS.
+        // Shared HPACK decoder: stateful dynamic table across HEADERS.
         var decoder = new HpackDecoder(4096, 64 * 1024);
         while (true) {
             var f = readFrame(in);

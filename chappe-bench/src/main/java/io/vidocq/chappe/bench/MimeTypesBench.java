@@ -9,8 +9,8 @@ import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.infra.Blackhole;
 
 /**
- * Compare la nouvelle implémentation zéro-alloc ({@code regionMatches(true, …)} sur tableau
- * ordonné par fréquence) à l'ancienne ({@code substring + toLowerCase + Map.getOrDefault}).
+ * Compares the new zero-allocation implementation ({@code regionMatches(true, …)} on a frequency-
+ * ordered array) with the previous one ({@code substring + toLowerCase + Map.getOrDefault}).
  */
 @BenchmarkMode({Mode.AverageTime})
 @OutputTimeUnit(TimeUnit.NANOSECONDS)

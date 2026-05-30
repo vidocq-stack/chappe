@@ -16,8 +16,8 @@ import org.openjdk.jmh.runner.RunnerException;
 import org.openjdk.jmh.runner.options.OptionsBuilder;
 
 /**
- * Benchmark concurrent — N threads envoient des requêtes en parallèle
- * via des sockets raw distinctes. Mesure le throughput total du serveur.
+ * Concurrent benchmark — N threads send requests in parallel
+ * through distinct raw sockets. Measures total server throughput.
  */
 @State(Scope.Benchmark)
 @Warmup(iterations = 3, time = 2)

@@ -3,8 +3,8 @@ package io.vidocq.chappe.http.ws;
 import java.io.IOException;
 
 /**
- * Violation du protocole WebSocket — la connexion sera fermée avec le code adapté.
- * Le {@link #closeCode()} sera renvoyé dans la frame Close avant la fermeture TCP.
+ * WebSocket protocol violation — the connection will be closed with the appropriate code.
+ * The {@link #closeCode()} will be sent in the Close frame before TCP shutdown.
  */
 public final class WebSocketProtocolException extends IOException {
 

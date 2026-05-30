@@ -1,7 +1,7 @@
 /**
- * API publique du serveur HTTP Chappe.
+ * Public API of the Chappe HTTP server.
  * <p>
- * Définit les interfaces principales : {@code Server}, {@code Handler},
+ * Defines the main interfaces: {@code Server}, {@code Handler},
  * {@code Request}, {@code Response}, {@code Router}.
  */
 module io.vidocq.chappe.api {

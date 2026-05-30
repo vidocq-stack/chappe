@@ -1,39 +1,39 @@
-# Chappe — Registre des bugs
+# Chappe — Bug Registry
 
-Format : un bug par section, datée, avec id court, symptôme, repro minimal,
-hypothèse de cause, statut.
+Format: one bug per dated section, with a short id, symptom, minimal repro,
+cause hypothesis, and status.
 
 ---
 
-## CHAPPE-001 — Réponses tronquées sur gros fichiers (SO_SNDBUF saturé)
+## CHAPPE-001 — Truncated Responses on Large Files (SO_SNDBUF Saturated)
 
-- **Date** : 2026-05-09
-- **Statut** : FIXED (commit en cours)
-- **Sévérité** : critique (corruption silencieuse de réponses)
+- **Date**: 2026-05-09
+- **Status**: FIXED (commit in progress)
+- **Severity**: critical (silent response corruption)
 
-### Symptôme
+### Symptom
 
-Sur `https://staging-doc.vidocq.dev/chappe-fr/index.html` (Antora derrière openresty
-qui proxy_pass vers Chappe en HTTP/1.1 cleartext), les images ne se chargent
-qu'en partie et le browser reste pendu en attente du reste — le serveur a
-arrêté d'envoyer mais a annoncé un `Content-Length` complet, donc le client
-attend indéfiniment.
+On `https://staging-doc.vidocq.dev/chappe-fr/index.html` (Antora behind openresty
+which `proxy_pass`es to Chappe over cleartext HTTP/1.1), images load only
+partially and the browser hangs waiting for the rest — the server has stopped
+sending but advertised a full `Content-Length`, so the client waits
+indefinitely.
 
-### Repro minimal
+### Minimal repro
 
 ```java
 // Tests/LargeStaticFileTest.java
-// 1. Sert un fichier de 8 MiB via StaticFileHandler
-// 2. Drain ralenti côté client (chunks de 4 KiB, sleep 2 ms)
-// 3. SO_RCVBUF client = 16 KiB pour saturer rapidement le SO_SNDBUF serveur
-// → reçoit 319 020 / 8 388 608 octets puis le serveur cesse d'envoyer
+// 1. Serves an 8 MiB file through StaticFileHandler
+// 2. Slow client-side drain (4 KiB chunks, 2 ms sleep)
+// 3. Client SO_RCVBUF = 16 KiB to quickly saturate the server SO_SNDBUF
+// → receives 319,020 / 8,388,608 bytes, then the server stops sending
 ```
 
-Sur macOS Sonoma + Java 25, reproduction systématique en ~250 ms.
+On macOS Sonoma + Java 25, reproduction is systematic in ~250 ms.
 
 ### Cause
 
-`HttpResponseWriter.writeBody()` ligne 261 (avant patch) :
+`HttpResponseWriter.writeBody()` line 261 (before patch):
 
 ```java
 while (remaining > 0) {
@@ -44,51 +44,51 @@ while (remaining > 0) {
 }
 ```
 
-`FileChannel.transferTo(SocketChannel)` peut renvoyer **0** sur un
-`SocketChannel` blocking quand le `SO_SNDBUF` kernel est saturé : `sendfile(2)`
-sous-jacent gère ce cas via EAGAIN-like sur certaines plateformes (macOS
-documenté, Linux sous certaines versions — cf. JDK-8264762, JDK-8230846).
+`FileChannel.transferTo(SocketChannel)` can return **0** on a blocking
+`SocketChannel` when the kernel `SO_SNDBUF` is saturated: the underlying
+`sendfile(2)` handles this case with EAGAIN-like behavior on some platforms
+(documented on macOS, Linux on some versions — see JDK-8264762, JDK-8230846).
 
-Le `break` sur `transferred <= 0` confond ce retour transitoire avec un EOF
-réel (`< 0`) et tronque la réponse silencieusement.
+The `break` on `transferred <= 0` confuses this transient return value with a
+real EOF (`< 0`) and silently truncates the response.
 
-### Correctif
+### Fix
 
-Distinguer EOF (`< 0`) de retry (`== 0`) :
+Distinguish EOF (`< 0`) from retry (`== 0`):
 
 ```java
-if (transferred < 0) break;        // EOF réel
+if (transferred < 0) break;        // real EOF
 if (transferred == 0) {
-    Thread.yield();                // SO_SNDBUF saturé, on retry
+    Thread.yield();                // SO_SNDBUF saturated, retry
     continue;
 }
 position += transferred;
 remaining -= transferred;
 ```
 
-### Régression couverte
+### Regression coverage
 
-`chappe-tests/.../LargeStaticFileTest.java` — drain ralenti 8 MiB, vérifie
-`Content-Length` consommé entièrement et SHA-256 octet-à-octet.
+`chappe-tests/.../LargeStaticFileTest.java` — slow-drain 8 MiB test, verifies
+that `Content-Length` is fully consumed and SHA-256 matches byte-for-byte.
 
-### Notes connexes (à investiguer séparément)
+### Related notes (to investigate separately)
 
-- `Http2Connection.waitForSendWindow` — race possible : plusieurs streams
-  concurrents lisent `connectionSendWindow.get()` en parallèle et peuvent
-  dépasser la fenêtre annoncée. Pas reproduit ici (chemin H2 inactif sur le
-  staging derrière openresty), mais à corriger côté HTTP/2.
+- `Http2Connection.waitForSendWindow` — possible race: multiple concurrent
+  streams read `connectionSendWindow.get()` in parallel and may exceed the
+  advertised window. Not reproduced here (H2 path inactive on staging behind
+  openresty), but should be fixed on the HTTP/2 side.
 
-### Validation production (post-fix)
+### Production validation (post-fix)
 
-Après déploiement de `8d670fb` (fix + observabilité X-Chappe-Build) sur
-staging-doc.vidocq.dev derrière oauth2-proxy + NPM :
+After deploying `8d670fb` (fix + X-Chappe-Build observability) on
+staging-doc.vidocq.dev behind oauth2-proxy + NPM:
 
-- 624 requêtes cumulées sur les 7 logos PNG (877 KB → 2.4 MB)
-- Profils : burst parallèle 84-way × 5 cycles, burst 200 random, drain
-  ralenti `--limit-rate 200K`
-- **0 fail, 0 timeout, 0 troncature** (vs 9/21 = 43% fail pré-fix)
+- 624 cumulative requests across the 7 PNG logos (877 KB → 2.4 MB)
+- Profiles: 84-way parallel burst × 5 cycles, 200-random burst, slow drain
+  `--limit-rate 200K`
+- **0 failures, 0 timeouts, 0 truncations** (vs 9/21 = 43% failures pre-fix)
 
-Une variante observée pré-fix (timeout à ~96 % du body, soupçonnée
-"2e bug") était en réalité le même bug `transferTo==0` qui se manifestait
-sous un profil différent (saturation tardive du SO_SNDBUF) — résolue
-par le même commit `ef864e8`.
+A pre-fix variant that was observed (timeout at ~96% of the body, suspected as
+"2nd bug") was actually the same `transferTo==0` bug manifesting under a
+different profile (late SO_SNDBUF saturation) — resolved by the same commit
+`ef864e8`.

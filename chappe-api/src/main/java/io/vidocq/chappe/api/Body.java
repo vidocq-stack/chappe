@@ -7,34 +7,34 @@ import java.nio.charset.StandardCharsets;
 import java.util.concurrent.Flow;
 
 /**
- * Corps d'un message HTTP (requête ou réponse).
+ * HTTP body (request or response).
  * <p>
- * Deux modes d'accès :
+ * Two access modes:
  * <ul>
- *   <li>{@link #asInputStream()} — lecture bloquante, naturelle avec les virtual threads</li>
- *   <li>{@link #asPublisher()} — streaming réactif pour HTTP/2 et les gros payloads</li>
+ *   <li>{@link #asInputStream()} — blocking read, natural with virtual threads</li>
+ *   <li>{@link #asPublisher()} — reactive streaming for HTTP/2 and large payloads</li>
  * </ul>
  */
 public interface Body {
 
     /**
-     * Longueur du contenu en octets, ou {@code -1} si inconnue
+     * Content length in bytes, or {@code -1} if unknown
      * (chunked transfer, streaming).
      */
     long contentLength();
 
-    /** Accès bloquant au corps sous forme d'InputStream. */
+    /** Blocking access to the body as an InputStream. */
     InputStream asInputStream();
 
-    /** Accès réactif au corps sous forme de Publisher de ByteBuffer. */
+    /** Reactive access to the body as a Publisher of ByteBuffers. */
     Flow.Publisher<ByteBuffer> asPublisher();
 
-    /** Corps vide (singleton). */
+    /** Empty body (singleton). */
     static Body empty() {
         return EmptyBody.INSTANCE;
     }
 
-    /** Corps à partir d'un tableau d'octets. */
+    /** Body from a byte array. */
     static Body of(byte[] bytes) {
         if (bytes.length == 0) {
             return empty();
@@ -42,22 +42,22 @@ public interface Body {
         return new ByteArrayBody(bytes);
     }
 
-    /** Corps à partir d'une chaîne avec l'encodage spécifié. */
+    /** Body from a string with the specified encoding. */
     static Body of(String text, Charset charset) {
         return of(text.getBytes(charset));
     }
 
-    /** Corps à partir d'une chaîne UTF-8. */
+    /** Body from a UTF-8 string. */
     static Body of(String text) {
         return of(text, StandardCharsets.UTF_8);
     }
 
-    /** Corps à partir d'un InputStream avec longueur connue. */
+    /** Body from an InputStream with a known length. */
     static Body of(InputStream stream, long contentLength) {
         return new InputStreamBody(stream, contentLength);
     }
 
-    /** Corps à partir d'un InputStream de longueur inconnue. */
+    /** Body from an InputStream of unknown length. */
     static Body of(InputStream stream) {
         return of(stream, -1);
     }
@@ -78,16 +78,16 @@ public interface Body {
     }
 
     /**
-     * Corps streamé depuis un InputStream de longueur inconnue.
+     * Body streamed from an InputStream of unknown length.
      * <p>
-     * Chappe envoie ce body en chunked transfer (HTTP/1.1) ou en DATA frames successives
-     * (HTTP/2), sans bufferiser l'intégralité. EOF sur le stream ferme la réponse.
+     * Chappe sends this body using chunked transfer (HTTP/1.1) or successive DATA frames
+     * (HTTP/2), without buffering the entire content. EOF on the stream closes the response.
      * <p>
-     * Usage SSE typique avec un PipedInputStream :
+     * Typical SSE usage with a PipedInputStream:
      * <pre>{@code
      *   var pis = new PipedInputStream(8192);
      *   var pos = new PipedOutputStream(pis);
-     *   Thread.startVirtualThread(() -> { /* écrire les events SSE dans pos *\/ });
+     *   Thread.startVirtualThread(() -> { /* write SSE events to pos *\/ });
      *   return Response.builder()
      *       .header("Content-Type", "text/event-stream")
      *       .body(Body.streaming(pis))

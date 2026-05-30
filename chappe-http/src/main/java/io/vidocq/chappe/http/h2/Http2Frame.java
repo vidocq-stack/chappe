@@ -5,11 +5,11 @@ import java.nio.ByteBuffer;
 /**
  * Frames HTTP/2 (RFC 9113, Section 4).
  * <p>
- * Sealed interface avec un record par type de frame.
+ * Sealed interface with one record per frame type.
  */
 public sealed interface Http2Frame {
 
-    // Types de frame (RFC 9113, Section 6)
+    // Frame types (RFC 9113, Section 6)
     int TYPE_DATA = 0x0;
     int TYPE_HEADERS = 0x1;
     int TYPE_PRIORITY = 0x2;
@@ -21,7 +21,7 @@ public sealed interface Http2Frame {
     int TYPE_WINDOW_UPDATE = 0x8;
     int TYPE_CONTINUATION = 0x9;
 
-    // Flags communs
+    // Common flags
     int FLAG_END_STREAM = 0x1;
     int FLAG_END_HEADERS = 0x4;
     int FLAG_PADDED = 0x8;

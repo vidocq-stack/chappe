@@ -1,6 +1,6 @@
 package io.vidocq.chappe.bench.oop;
 
-/** Parseur d'args minimaliste partagé par toutes les mini-mains du shootout OOP. */
+/** Minimal argument parser shared by all mini mains of the OOP shootout. */
 final class OopArgs {
     private OopArgs() {}
 

@@ -18,7 +18,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-/** Tests d'intégration end-to-end de la sous-commande {@code chappe serve}. */
+/** End-to-end integration tests for the {@code chappe serve} subcommand. */
 class ServeCommandTest {
 
     private Server server;

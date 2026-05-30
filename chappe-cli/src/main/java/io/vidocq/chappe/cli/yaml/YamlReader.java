@@ -6,24 +6,24 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Mini-parser YAML in-house pour la config {@code chappe-cli}.
+ * In-house mini YAML parser for {@code chappe-cli} configuration.
  *
- * <h2>Subset supporté</h2>
+ * <h2>Supported subset</h2>
  * <ul>
- *   <li>Maps imbriquées (indentation par espaces).</li>
- *   <li>Listes bloc ({@code - item}) et inline ({@code [a, b, c]}).</li>
- *   <li>Scalaires : strings (quoted {@code "…"} / {@code '…'} ou unquoted),
- *       entiers, booléens ({@code true|false|yes|no|on|off}).</li>
- *   <li>Commentaires {@code #} jusqu'à fin de ligne (hors quotes).</li>
+ *   <li>Nested maps (space indentation).</li>
+ *   <li>Block lists ({@code - item}) and inline lists ({@code [a, b, c]}).</li>
+ *   <li>Scalars: strings (quoted {@code "…"} / {@code '…'} or unquoted),
+ *       integers, booleans ({@code true|false|yes|no|on|off}).</li>
+ *   <li>{@code #} comments until end of line (outside quotes).</li>
  * </ul>
  *
- * <h2>Non supporté</h2>
+ * <h2>Not supported</h2>
  * <ul>
- *   <li>Tabulations dans l'indentation (rejet explicite avec line:col).</li>
- *   <li>Anchors {@code &}, alias {@code *}, tags {@code !!type}.</li>
- *   <li>Multilignes {@code |} / {@code >}.</li>
- *   <li>Maps inline {@code {a: 1}}.</li>
- *   <li>Documents multiples ({@code ---}).</li>
+ *   <li>Tabs in indentation (explicit rejection with line:col).</li>
+ *   <li>Anchors {@code &}, aliases {@code *}, tags {@code !!type}.</li>
+ *   <li>Multiline values {@code |} / {@code >}.</li>
+ *   <li>Inline maps {@code {a: 1}}.</li>
+ *   <li>Multiple documents ({@code ---}).</li>
  * </ul>
  */
 public final class YamlReader {
@@ -31,9 +31,9 @@ public final class YamlReader {
     private YamlReader() {}
 
     /**
-     * Parse le document YAML. Retourne {@link YamlNode.Map} (potentiellement vide).
+     * Parses the YAML document. Returns a {@link YamlNode.Map} (potentially empty).
      *
-     * @throws YamlParseException si le document n'est pas conforme au subset.
+     * @throws YamlParseException if the document does not conform to the supported subset.
      */
     public static YamlNode parse(String input) {
         List<Line> lines = tokenize(input);
@@ -42,7 +42,7 @@ public final class YamlReader {
         return parseMap(c, lines.getFirst().indent);
     }
 
-    // ── Tokenisation : ligne → (lineNo, indent, content) ──
+    // -- Tokenization: line -> (lineNo, indent, content) --
 
     private record Line(int lineNo, int indent, String content) {}
 
@@ -98,7 +98,7 @@ public final class YamlReader {
         return s;
     }
 
-    // ── Cursor sur la liste de lignes ──
+    // -- Cursor over the line list --
 
     private static final class Cursor {
         private final List<Line> lines;
@@ -121,12 +121,12 @@ public final class YamlReader {
         }
     }
 
-    // ── Parser récursif ──
+    // -- Recursive parser --
 
     private static YamlNode.Map parseMap(Cursor c, int indent) {
         LinkedHashMap<String, YamlNode> entries = new LinkedHashMap<>();
         while (c.hasMore()) {
-            Line line = Objects.requireNonNull(c.peek()); // garanti non-null par hasMore()
+            Line line = Objects.requireNonNull(c.peek()); // guaranteed non-null by hasMore()
             if (line.indent < indent) break;
             if (line.indent > indent) {
                 throw new YamlParseException(
@@ -152,7 +152,7 @@ public final class YamlReader {
 
             YamlNode value;
             if (rest.isEmpty()) {
-                // Block child : map ou list, à indentation supérieure.
+                // Block child: map or list, with greater indentation.
                 Line peek = c.peek();
                 if (peek == null || peek.indent <= indent) {
                     value = new YamlNode.Scalar("");
@@ -174,7 +174,7 @@ public final class YamlReader {
     private static YamlNode.Seq parseList(Cursor c, int indent) {
         List<YamlNode> items = new ArrayList<>();
         while (c.hasMore()) {
-            Line line = Objects.requireNonNull(c.peek()); // garanti non-null par hasMore()
+            Line line = Objects.requireNonNull(c.peek()); // guaranteed non-null by hasMore()
             if (line.indent < indent) break;
             if (line.indent > indent) {
                 throw new YamlParseException(

@@ -4,25 +4,25 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Résultat d'un appel {@link GrpcWebClient#unary} ou de la dernière itération d'un
+ * Result of a {@link GrpcWebClient#unary} call or of the last iteration of a
  * {@link GrpcWebClient#serverStream}.
  *
- * @param messages payloads décodés (déjà déframés du préfixe 5 octets et désérialisés
- *                 de Base64 si mode TEXT)
- * @param status   {@code grpc-status} extrait du trailer frame inline (0 = OK)
- * @param message  {@code grpc-message} extrait du trailer frame (peut être null/vide
- *                 si OK ou si le serveur ne l'a pas envoyé)
- * @param trailers tous les trailers parsés (noms en lowercase) pour accès aux
- *                 metadata custom — inclut {@code grpc-status}/{@code grpc-message}
+ * @param messages decoded payloads (already deframed from the 5-byte prefix and Base64-decoded
+ *                 in TEXT mode)
+ * @param status   {@code grpc-status} extracted from the inline trailer frame (0 = OK)
+ * @param message  {@code grpc-message} extracted from the trailer frame (may be null/empty
+ *                 if OK or if the server did not send it)
+ * @param trailers all parsed trailers (lowercase names) for access to custom
+ *                 metadata — includes {@code grpc-status}/{@code grpc-message}
  */
 public record GrpcWebResponse(List<byte[]> messages, int status, String message, Map<String, String> trailers) {
 
-    /** {@code true} si {@code grpc-status == 0}. */
+    /** {@code true} if {@code grpc-status == 0}. */
     public boolean isOk() {
         return status == 0;
     }
 
-    /** Premier message reçu ; pratique pour les unary calls. */
+    /** First message received; convenient for unary calls. */
     public byte[] firstMessage() {
         if (messages.isEmpty()) return null;
         return messages.get(0);

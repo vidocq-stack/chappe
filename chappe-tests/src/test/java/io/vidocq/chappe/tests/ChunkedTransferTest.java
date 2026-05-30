@@ -40,7 +40,7 @@ class ChunkedTransferTest {
 
     @Test
     void chunkedRequestBody() throws IOException {
-        // Envoi d'une requête avec Transfer-Encoding: chunked en raw socket
+        // Send a request with Transfer-Encoding: chunked over a raw socket
         try (var socket = new Socket("127.0.0.1", port)) {
             socket.setSoTimeout(5000);
             var out = socket.getOutputStream();
@@ -66,7 +66,7 @@ class ChunkedTransferTest {
             write(out, "\r\n");
             out.flush();
 
-            // Lire la réponse
+            // Read response
             var response = readResponse(in);
             assertTrue(response.contains("200"), "Should be 200 OK: " + response);
             assertTrue(
@@ -88,7 +88,7 @@ class ChunkedTransferTest {
             write(out, "Connection: close\r\n");
             write(out, "\r\n");
 
-            // Terminal chunk immédiat
+            // Immediate terminal chunk
             write(out, "0\r\n");
             write(out, "\r\n");
             out.flush();
@@ -109,13 +109,13 @@ class ChunkedTransferTest {
         int read;
         while ((read = in.read(buf)) != -1) {
             sb.append(new String(buf, 0, read, StandardCharsets.US_ASCII));
-            // Si on a reçu la fin du body HTTP, on peut arrêter
+            // If we reached the end of the HTTP body, we can stop
             if (sb.indexOf("\r\n\r\n") > 0) {
-                // Vérifier si on a tout le body (Content-Length based)
+                // Check whether the full body has been read (Content-Length based)
                 String s = sb.toString();
                 int headerEnd = s.indexOf("\r\n\r\n") + 4;
                 String headers = s.substring(0, headerEnd);
-                // Extraire Content-Length
+                // Extract Content-Length
                 var clIdx = headers.toLowerCase().indexOf("content-length: ");
                 if (clIdx >= 0) {
                     var clEnd = headers.indexOf("\r\n", clIdx);
@@ -124,7 +124,7 @@ class ChunkedTransferTest {
                     int bodyReceived = s.length() - headerEnd;
                     if (bodyReceived >= contentLength) break;
                 } else {
-                    // Pas de Content-Length, lire un peu plus et arrêter
+                    // No Content-Length, read a bit more and stop
                     try {
                         if (in.available() == 0) break;
                     } catch (IOException _) {

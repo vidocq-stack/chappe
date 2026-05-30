@@ -11,14 +11,14 @@ import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.infra.Blackhole;
 
 /**
- * Compare la résolution de métadonnées pour une ressource classpath :
- *   - Ancien chemin : {@code loader.getResource()} + {@code URLConnection.openConnection()}
- *     pour obtenir {@code size} et {@code lastModified}.
- *   - Nouveau chemin : lookup O(1) dans l'index {@link Map} pré-chargé depuis
+ * Compares metadata resolution for a classpath resource:
+ *   - Old path: {@code loader.getResource()} + {@code URLConnection.openConnection()}
+ *     to obtain {@code size} and {@code lastModified}.
+ *   - New path: O(1) lookup in the {@link Map} index preloaded from
  *     {@code META-INF/chappe-static-index.properties}.
  *
- * <p>Simule exactement la différence apportée par {@code chappe-static-index-maven-plugin}
- * au niveau de {@code StaticFileHandler.ClasspathSource.resolve()}.
+ * <p>Exactly simulates the difference introduced by {@code chappe-static-index-maven-plugin}
+ * at the {@code StaticFileHandler.ClasspathSource.resolve()} level.
  */
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)

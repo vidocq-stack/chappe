@@ -12,7 +12,7 @@ import io.vidocq.chappe.api.HttpVersion;
 import io.vidocq.chappe.http.HttpRequestImpl;
 
 /**
- * État d'un stream HTTP/2 — lifecycle, flow control, construction de la requête.
+ * HTTP/2 stream state — lifecycle, flow control, request construction.
  */
 public final class Http2Stream {
 
@@ -34,18 +34,18 @@ public final class Http2Stream {
     private final ReentrantLock sendLock = new ReentrantLock();
     private final Condition sendWindowAvailable = sendLock.newCondition();
 
-    // Accumulation du header block (HEADERS + CONTINUATION)
+    // Header-block accumulation (HEADERS + CONTINUATION)
     private ByteArrayOutputStream headerBlockAccumulator;
 
-    // END_STREAM flag du HEADERS frame (stocké pour completeHeaders après CONTINUATION)
+    // END_STREAM flag from HEADERS frame (stored for completeHeaders after CONTINUATION)
     private volatile boolean headersEndStream;
 
-    // Phase courante d'accumulation de headers : initial vs trailers.
-    // RFC 9113 §8.1 — un stream peut recevoir un second HEADERS frame après les DATA :
-    // ce sont les trailers et ils ne contiennent pas de pseudo-headers.
+    // Current header-accumulation phase: initial vs trailers.
+    // RFC 9113 §8.1 — a stream may receive a second HEADERS frame after DATA:
+    // those are trailers and must not contain pseudo-headers.
     private volatile boolean inTrailers;
 
-    // Queue de données pour le body
+    // Data queue for body
     private final LinkedBlockingQueue<ByteBuffer> dataQueue = new LinkedBlockingQueue<>();
     private volatile boolean endStreamReceived;
     private volatile boolean cancelled;
@@ -71,7 +71,7 @@ public final class Http2Stream {
         return request;
     }
 
-    // --- Transitions d'état ---
+    // --- State transitions ---
 
     public void open() {
         state = State.OPEN;
@@ -89,7 +89,7 @@ public final class Http2Stream {
         state = State.CLOSED;
     }
 
-    /** Marque le stream comme annulé par le peer (RST_STREAM). */
+    /** Marks the stream as cancelled by the peer (RST_STREAM). */
     public void cancel() {
         cancelled = true;
         signalEndStream();
@@ -140,7 +140,7 @@ public final class Http2Stream {
         return sendWindowAvailable;
     }
 
-    // --- Accumulation du header block ---
+    // --- Header-block accumulation ---
 
     public void beginHeaders(ByteBuffer fragment, boolean endStream) {
         this.headersEndStream = endStream;
@@ -148,7 +148,7 @@ public final class Http2Stream {
         appendHeaderFragment(fragment);
     }
 
-    /** Marque le prochain block comme étant des trailers (RFC 9113 §8.1). */
+    /** Marks the next block as trailers (RFC 9113 §8.1). */
     public void markTrailers() {
         this.inTrailers = true;
     }
@@ -173,17 +173,17 @@ public final class Http2Stream {
         return headersEndStream;
     }
 
-    // --- Données (body) ---
+    // --- Data (body) ---
 
     public void offerData(ByteBuffer data) {
-        // .add() au lieu de .offer() : la queue est non-bornée (LinkedBlockingQueue par défaut),
-        // un échec d'ajout signale un état impossible et doit lever IllegalStateException
+        // .add() instead of .offer(): queue is unbounded (LinkedBlockingQueue by default),
+        // an add failure indicates an impossible state and must throw IllegalStateException
         dataQueue.add(data);
     }
 
     public void signalEndStream() {
         endStreamReceived = true;
-        dataQueue.add(ByteBuffer.allocate(0)); // sentinelle pour débloquer take()
+        dataQueue.add(ByteBuffer.allocate(0)); // sentinel to unblock take()
     }
 
     ByteBuffer takeData() throws InterruptedException {
@@ -198,7 +198,7 @@ public final class Http2Stream {
         return dataQueue.isEmpty();
     }
 
-    /** Crée un Body alimenté par la queue de données. */
+    /** Creates a Body fed by the data queue. */
     public Body createBody() {
         return Body.of(new Http2BodyInputStream(this));
     }

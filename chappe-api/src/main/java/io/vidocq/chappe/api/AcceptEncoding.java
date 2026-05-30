@@ -5,9 +5,9 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Parsing et négociation du header {@code Accept-Encoding} (RFC 9110, §12.5.3).
+ * Parsing and negotiation of the {@code Accept-Encoding} header (RFC 9110, §12.5.3).
  *
- * <p>Subset géré : codings nommés (gzip, br, deflate, identity, …), q-values
+ * <p>Supported subset: named codings (gzip, br, deflate, identity, …), q-values
  * ({@code ;q=0}…{@code ;q=1}), wildcard {@code *}.</p>
  */
 @SuppressWarnings("StringSplitter") // Les empty strings sont filtrées explicitement plus bas
@@ -15,14 +15,14 @@ public final class AcceptEncoding {
 
     private AcceptEncoding() {}
 
-    /** Une entrée du header : nom du coding (lowercase) + q-value. */
+    /** A header entry: coding name (lowercase) + q-value. */
     public record Entry(String name, double qvalue) {}
 
     /**
-     * Parse un header {@code Accept-Encoding}. Retourne la liste des entrées
-     * dans l'ordre où elles apparaissent (pas de tri, le caller décide).
+     * Parses an {@code Accept-Encoding} header. Returns the list of entries
+     * in the order they appear (no sorting — the caller decides).
      *
-     * @param header valeur brute du header, ou {@code null} (retourne liste vide)
+     * @param header raw header value, or {@code null} (returns empty list)
      */
     public static List<Entry> parse(String header) {
         if (header == null || header.isBlank()) return List.of();
@@ -62,15 +62,15 @@ public final class AcceptEncoding {
     }
 
     /**
-     * Indique si un coding particulier est acceptable par le client.
+     * Indicates whether a particular coding is acceptable to the client.
      *
-     * <p>Règles :</p>
+     * <p>Rules:</p>
      * <ul>
-     *   <li>{@code header == null} : seul {@code identity} est acceptable.</li>
-     *   <li>Une entrée {@code name;q=0} interdit ce coding.</li>
-     *   <li>Une entrée explicite {@code name} (q&gt;0) l'autorise — prioritaire sur le wildcard.</li>
-     *   <li>Wildcard {@code *} : autorise les codings non listés (selon son q-value).</li>
-     *   <li>{@code identity} est implicitement acceptable sauf {@code identity;q=0} ou {@code *;q=0}.</li>
+     *   <li>{@code header == null}: only {@code identity} is acceptable.</li>
+     *   <li>An entry {@code name;q=0} forbids that coding.</li>
+     *   <li>An explicit entry {@code name} (q&gt;0) allows it — takes priority over the wildcard.</li>
+     *   <li>Wildcard {@code *}: allows codings not explicitly listed (according to its q-value).</li>
+     *   <li>{@code identity} is implicitly acceptable unless {@code identity;q=0} or {@code *;q=0}.</li>
      * </ul>
      */
     public static boolean accepts(String header, String coding) {

@@ -1,47 +1,48 @@
 # chappe-cli
 
-Launcher CLI standalone pour Chappe — sert un répertoire statique en HTTP/1.1+H2
-sans launcher Java applicatif. Configuration via mini-YAML in-house ou flags CLI.
+Standalone CLI launcher for Chappe — serves a static directory over HTTP/1.1+H2
+without an application Java launcher. Configuration is done through in-house
+mini-YAML or CLI flags.
 
-> Zéro dépendance hors JDK. Tout le parsing YAML, le merge config, la négociation
-> de compression et le packaging tient dans ~600 LOC du module `chappe-cli`.
+> Zero dependencies outside the JDK. All YAML parsing, config merging,
+> compression negotiation, and packaging fit in ~600 LOC in the `chappe-cli` module.
 
 ## Build
 
-Depuis la racine du sous-projet `chappe/` :
+From the root of the `chappe/` sub-project:
 
 ```bash
 sdk env                                # Java 25 + Maven 3.9.16
-mvn -ntp -pl chappe-cli -am package    # produit le fat jar
+mvn -ntp -pl chappe-cli -am package    # produces the fat jar
 ```
 
-Artefacts générés dans `chappe-cli/target/` :
+Artifacts generated in `chappe-cli/target/`:
 
-| Fichier | Description |
+| File | Description |
 |---|---|
-| `chappe-cli-{version}.jar` | jar simple (module-info, requiert chappe-api/core sur le module path) |
-| `chappe-cli-{version}-shaded.jar` | fat jar autonome (toutes deps fusionnées, Main-Class wirée) |
-| `scripts/chappe` | script shell qui exec `java -jar` le shaded jar |
+| `chappe-cli-{version}.jar` | plain jar (`module-info`, requires chappe-api/core on the module path) |
+| `chappe-cli-{version}-shaded.jar` | standalone fat jar (all deps merged, Main-Class wired) |
+| `scripts/chappe` | shell script that executes `java -jar` on the shaded jar |
 
-## Usage local
+## Local usage
 
 ```bash
 java --enable-preview -jar chappe-cli/target/chappe-cli-*-shaded.jar serve \
   --root /var/www/site --port 8080 --gzip
 ```
 
-Ou via le script wrapper :
+Or via the wrapper script:
 
 ```bash
 export CHAPPE_HOME=/opt/chappe
 chappe serve --config /etc/chappe/config.yml
 ```
 
-## Configuration YAML
+## YAML configuration
 
-Format aligné sur `vidocq-docs/chappe-config.yml`. Subset documenté (maps imbriquées,
-listes inline/bloc, scalaires string/int/bool, commentaires `#`). **Pas** d'anchors,
-de tags `!!`, de multilignes `|`/`>`.
+Format aligned with `vidocq-docs/chappe-config.yml`. Documented subset (nested
+maps, inline/block lists, string/int/bool scalars, `#` comments). **No**
+anchors, `!!` tags, or multiline `|`/`>`.
 
 ```yaml
 server:
@@ -50,17 +51,17 @@ server:
 
 static:
   root: /var/www/site
-  fallback: /404.html              # servi avec status 404
-  spa-fallback: /index.html        # mutuellement exclusif avec fallback (SPA mode, 200)
+  fallback: /404.html              # served with 404 status
+  spa-fallback: /index.html        # mutually exclusive with fallback (SPA mode, 200)
   index-files: [index.html]
   cache-control: "max-age=3600, public"
-  gzip: true                        # négocié via Accept-Encoding (sidecars + on-the-fly)
+  gzip: true                        # negotiated via Accept-Encoding (sidecars + on-the-fly)
 
 headers:
-  always:                           # injectés sur chaque réponse
+  always:                           # injected on every response
     X-Content-Type-Options: "nosniff"
     Referrer-Policy: "strict-origin-when-cross-origin"
-  staging:                          # actif si l'env var STAGING=true
+  staging:                          # active if env var STAGING=true
     X-Robots-Tag: "noindex, nofollow"
 
 logging:
@@ -68,71 +69,71 @@ logging:
   access-log: false
 ```
 
-## Flags CLI (override le YAML)
+## CLI flags (override YAML)
 
-| Flag | Effet |
+| Flag | Effect |
 |---|---|
-| `--config FILE` | charge un fichier YAML |
-| `--root DIR` | override `static.root` |
-| `--port N` | override `server.port` (défaut 8080) |
-| `--bind ADDR` | override `server.bind` (défaut 0.0.0.0) |
-| `--fallback PATH` | override `static.fallback` (404) |
-| `--spa-fallback PATH` | active le mode SPA (200 sur 404) |
-| `--cache-control STR` | override `static.cache-control` |
-| `--gzip` / `--no-gzip` | active/désactive la compression |
-| `--access-log` / `--no-access-log` | active/désactive l'access log Apache CLF sur stdout |
-| `--header KEY=VALUE` | ajoute un header (répétable, merge dans `headers.always`) |
-| `-h, --help` | affiche l'aide |
+| `--config FILE` | loads a YAML file |
+| `--root DIR` | overrides `static.root` |
+| `--port N` | overrides `server.port` (default 8080) |
+| `--bind ADDR` | overrides `server.bind` (default 0.0.0.0) |
+| `--fallback PATH` | overrides `static.fallback` (404) |
+| `--spa-fallback PATH` | enables SPA mode (200 on 404) |
+| `--cache-control STR` | overrides `static.cache-control` |
+| `--gzip` / `--no-gzip` | enables/disables compression |
+| `--access-log` / `--no-access-log` | enables/disables Apache CLF access log on stdout |
+| `--header KEY=VALUE` | adds a header (repeatable, merged into `headers.always`) |
+| `-h, --help` | displays help |
 
-Variables d'environnement reconnues par le launcher :
+Environment variables recognized by the launcher:
 
-| Variable | Effet |
+| Variable | Effect |
 |---|---|
-| `STAGING=true` | active le bloc `headers.staging` |
-| `CHAPPE_ACCESS_LOG=true` | active l'access log (équivalent à `--access-log`, override par CLI) |
+| `STAGING=true` | enables the `headers.staging` block |
+| `CHAPPE_ACCESS_LOG=true` | enables access logging (equivalent to `--access-log`, overridden by CLI) |
 
-## Observabilité
+## Observability
 
-### Headers de build
+### Build headers
 
-Toutes les réponses HTTP sortant de Chappe portent deux headers identifiant le binaire :
+All HTTP responses emitted by Chappe carry two headers identifying the binary:
 
 ```
 Server: Chappe/0.1.0-SNAPSHOT+8d670fb0 (2026-05-09T19:43:04Z)
 X-Chappe-Build: Chappe/0.1.0-SNAPSHOT+8d670fb0 (2026-05-09T19:43:04Z)
 ```
 
-Le contenu (version Maven, short hash du commit Git, build timestamp ISO-8601 UTC) est lu une fois au démarrage depuis `META-INF/chappe-build.properties` (généré par filtering Maven + `git-commit-id-maven-plugin`). Exposé aussi côté Java via `io.vidocq.chappe.api.BuildInfo`.
+The content (Maven version, short Git commit hash, ISO-8601 UTC build timestamp) is read once at startup from `META-INF/chappe-build.properties` (generated by Maven filtering + `git-commit-id-maven-plugin`). Also exposed on the Java side via `io.vidocq.chappe.api.BuildInfo`.
 
-`X-Chappe-Build` double l'info dans un header non-standard : utile derrière un reverse proxy qui réécrit le `Server` (NPM/openresty fixe son propre `Server: openresty`). Les `X-*` sont relayés tels quels par défaut.
+`X-Chappe-Build` duplicates the information in a non-standard header: useful behind a reverse proxy that rewrites `Server` (NPM/openresty sets its own `Server: openresty`). `X-*` headers are forwarded as-is by default.
 
 ### Access log
 
-`--access-log` (ou `CHAPPE_ACCESS_LOG=true`, ou `logging.access-log: true` dans le YAML) active un filtre qui logue chaque requête sur **stdout** au format Apache Combined Log Format étendu :
+`--access-log` (or `CHAPPE_ACCESS_LOG=true`, or `logging.access-log: true` in YAML) enables a filter that logs each request to **stdout** in extended Apache Combined Log Format:
 
 ```
 1.2.3.4 - yann.blazart@gmail.com [09/May/2026:18:50:54 +0000] "GET /a.png HTTP/1.1" 200 877719 12ms
 ```
 
-- IP cliente : `X-Forwarded-For` (premier hop) → `X-Real-IP` → `Request.remoteAddress()`
-- User : `X-Forwarded-User` → `Gap-Auth` (oauth2-proxy) → `-`
-- Size : `Response.body().contentLength()` (`-` si streamé/chunked)
-- Durée : nanosecondes mesurées en outermost wrapper (capture le status final même en cas d'exception)
+- Client IP: `X-Forwarded-For` (first hop) → `X-Real-IP` → `Request.remoteAddress()`
+- User: `X-Forwarded-User` → `Gap-Auth` (oauth2-proxy) → `-`
+- Size: `Response.body().contentLength()` (`-` if streamed/chunked)
+- Duration: nanoseconds measured in the outermost wrapper (captures final status even on exception)
 
-Pratique avec Docker/Portainer : la sortie stdout est captée et navigable dans l'UI sans configuration supplémentaire.
+Convenient with Docker/Portainer: stdout is captured and browsable in the UI without extra configuration.
 
 ## Compression
 
-`--gzip` (ou `static.gzip: true`) :
-- sert en priorité les sidecars `.br` ou `.gz` quand présents (zero-copy via `FileChannel.transferTo`),
-- sinon compresse à la volée pour les `Content-Type` text-like > 1 Ko, en émettant
-  `Content-Encoding: gzip` et `Vary: Accept-Encoding`,
-- skip automatique si `Cache-Control: no-transform` ou `Content-Encoding` déjà fixé.
+`--gzip` (or `static.gzip: true`):
+- serves `.br` or `.gz` sidecars first when present (zero-copy via `FileChannel.transferTo`),
+- otherwise compresses on the fly for text-like `Content-Type` values > 1 KiB, emitting
+  `Content-Encoding: gzip` and `Vary: Accept-Encoding`,
+- automatically skips if `Cache-Control: no-transform` or `Content-Encoding` is already set.
 
-Brotli n'est pas généré au runtime (le JDK 25 ne fournit pas d'encodeur brotli) mais
-les sidecars `.br` produits par un pipeline build (gulp/antora/…) sont servis si
-`Accept-Encoding: br`. Côté Maven, le plugin `chappe-static-index-maven-plugin`
-peut générer les sidecars `.gz` au build :
+Brotli is not generated at runtime (JDK 25 does not provide a Brotli encoder), but
+`.br` sidecars produced by a build pipeline (gulp/antora/…) are served when
+`Accept-Encoding: br`. On the Maven side, the `chappe-static-index-maven-plugin`
+can generate `.gz` sidecars at build time:
 
 ```xml
 <plugin>
@@ -149,7 +150,7 @@ peut générer les sidecars `.gz` au build :
 
 ## Docker
 
-### Image fat-jar (simple, ~250 Mo avec Temurin slim)
+### Fat-jar image (simple, ~250 MB with Temurin slim)
 
 ```dockerfile
 FROM eclipse-temurin:25-jre AS runtime
@@ -162,9 +163,9 @@ EXPOSE 8080
 ENTRYPOINT ["chappe", "serve", "--config", "/etc/chappe/config.yml"]
 ```
 
-### Image jlink (~50 Mo, runtime Java minimal)
+### jlink image (~50 MB, minimal Java runtime)
 
-Génération manuelle (à intégrer dans un script CI) :
+Manual generation (to integrate into a CI script):
 
 ```bash
 jlink \
@@ -176,7 +177,7 @@ jlink \
   --output target/chappe-runtime
 ```
 
-Puis :
+Then:
 
 ```dockerfile
 FROM debian:bookworm-slim
@@ -186,16 +187,16 @@ COPY site/ /var/www/site
 ENTRYPOINT ["chappe", "serve", "--root", "/var/www/site"]
 ```
 
-> **Note** : `jlink` requiert que les modules transitifs (chappe-api, chappe-core,
-> chappe-http) soient sur le `--module-path` aux côtés du jar `chappe-cli`.
-> Pour automatiser, utiliser `mvn dependency:copy-dependencies` puis pointer
-> `--module-path` sur le répertoire résultant.
+> **Note**: `jlink` requires transitive modules (`chappe-api`, `chappe-core`,
+> `chappe-http`) to be on the `--module-path` alongside the `chappe-cli` jar.
+> To automate this, use `mvn dependency:copy-dependencies` and then point
+> `--module-path` to the resulting directory.
 
-## Limitations connues
+## Known limitations
 
-- Mini-YAML : pas de multilignes, anchors, tags. Le format suffit pour les configs
-  type `chappe-config.yml`. Pour des configs plus complexes, écrire un launcher Java.
-- TLS : non géré par la CLI (la config `chappe serve` est cleartext). Pour HTTPS,
-  placer le serveur derrière un reverse proxy (nginx, Caddy) ou écrire un launcher.
-- Hot reload de la config : non supporté. Un changement nécessite un redémarrage.
-- Brotli runtime : non généré. Précompresser au build (sidecars `.br`).
+- Mini-YAML: no multiline values, anchors, or tags. The format is sufficient for
+  `chappe-config.yml`-style configs. For more complex configs, write a Java launcher.
+- TLS: not managed by the CLI (`chappe serve` config is cleartext). For HTTPS,
+  place the server behind a reverse proxy (nginx, Caddy) or write a launcher.
+- Config hot reload: not supported. A change requires a restart.
+- Runtime Brotli: not generated. Precompress at build time (`.br` sidecars).

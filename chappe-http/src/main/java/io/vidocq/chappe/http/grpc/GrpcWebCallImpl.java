@@ -16,24 +16,24 @@ import io.vidocq.chappe.http.h2.Http2Connection;
 import io.vidocq.chappe.http.h2.Http2Stream;
 
 /**
- * Variante {@link GrpcCall} pour gRPC-Web (PROTOCOL-WEB.md) adossée à un stream HTTP/2.
+ * {@link GrpcCall} variant for gRPC-Web (PROTOCOL-WEB.md) backed by an HTTP/2 stream.
  * <p>
- * Différences par rapport à {@link GrpcCallImpl} :
+ * Differences compared to {@link GrpcCallImpl}:
  * <ul>
- *   <li>content-type négocié : {@code application/grpc-web} ou {@code application/grpc-web-text}</li>
- *   <li>les "trailers" sont émis comme une frame DATA spéciale (préfixe {@code 0x80} via
- *       {@link GrpcWebFraming#encodeTrailerFrame(Headers)}), pas comme un HEADERS frame
- *       séparé — les navigateurs ne lisent pas les trailers HTTP/2</li>
- *   <li>mode {@link GrpcWebDispatch.Mode#TEXT} : tout le corps request/response est
- *       Base64-encodé (chunk par chunk)</li>
+ *   <li>negotiated content type: {@code application/grpc-web} or {@code application/grpc-web-text}</li>
+ *   <li>"trailers" are emitted as a special DATA frame ({@code 0x80} prefix via
+ *       {@link GrpcWebFraming#encodeTrailerFrame(Headers)}), not as a separate
+ *       HEADERS frame — browsers do not read HTTP/2 trailers</li>
+ *   <li>{@link GrpcWebDispatch.Mode#TEXT} mode: the entire request/response body is
+ *       Base64-encoded (chunk by chunk)</li>
  * </ul>
  * <p>
- * Le parser de {@code grpc-timeout} et la négociation {@code grpc-encoding} sont
- * réutilisés depuis {@link GrpcCallImpl} (méthodes statiques publiques).
+ * The {@code grpc-timeout} parser and {@code grpc-encoding} negotiation are
+ * reused from {@link GrpcCallImpl} (public static methods).
  */
 public final class GrpcWebCallImpl implements GrpcCall {
 
-    /** Codecs annoncés par le serveur dans {@code grpc-accept-encoding}. */
+    /** Codecs advertised by the server in {@code grpc-accept-encoding}. */
     private static final String SERVER_ACCEPT_ENCODING = "identity, gzip";
 
     private final Http2Stream stream;
@@ -73,7 +73,7 @@ public final class GrpcWebCallImpl implements GrpcCall {
         }
         this.deadlineNanoTime = deadlineNs;
 
-        // Négociation grpc-encoding entrant (même logique que GrpcCallImpl).
+        // Inbound grpc-encoding negotiation (same logic as GrpcCallImpl).
         var clientEncoding = request.headers().firstOrNull("grpc-encoding");
         String reqEnc = null;
         boolean unsupported = false;
@@ -88,10 +88,10 @@ public final class GrpcWebCallImpl implements GrpcCall {
         GrpcFrameReader.Decompressor decompressor = ("gzip".equals(reqEnc)) ? GrpcCallImpl::gunzip : null;
         this.frameReader = new GrpcFrameReader(GrpcFrameReader.DEFAULT_MAX_MESSAGE_SIZE, decompressor);
 
-        // Body en mode TEXT : on lit tout puis Base64-decode. V1 suppose une seule
-        // unary call (ou client-streaming court) — le streaming chunk-par-chunk est
-        // possible pour BINARY, en TEXT le client navigateur n'envoie qu'un seul
-        // chunk en pratique (XHR POST complet).
+        // TEXT mode body: read all then Base64-decode. V1 assumes a single
+        // unary call (or short client-streaming). Chunk-by-chunk streaming is
+        // possible for BINARY; in TEXT mode browser clients usually send a single
+        // full chunk (full XHR POST).
         if (mode == GrpcWebDispatch.Mode.TEXT) {
             byte[] raw = stream.createBody().asInputStream().readAllBytes();
             byte[] decoded = raw.length == 0 ? raw : GrpcWebFraming.base64Decode(raw);
@@ -133,9 +133,9 @@ public final class GrpcWebCallImpl implements GrpcCall {
                 responseTrailersBuilder.add("grpc-message", encodePercent(message));
             }
 
-            // gRPC-Web : pas de trailers-only HEADERS frame. Même en cas d'erreur
-            // immédiate, on émet :status 200 + content-type, puis une frame DATA
-            // qui contient SEULEMENT le trailer frame (préfixe 0x80).
+            // gRPC-Web: no trailers-only HEADERS frame. Even on immediate error,
+            // emit :status 200 + content-type, then a DATA frame
+            // containing ONLY the trailer frame (0x80 prefix).
             ensureInitialHeadersSent();
             byte[] trailerFrame = GrpcWebFraming.encodeTrailerFrame(responseTrailersBuilder.build());
             byte[] toWire =
@@ -199,7 +199,7 @@ public final class GrpcWebCallImpl implements GrpcCall {
         throw new UnsupportedOperationException("unsupported gRPC encoding: " + encoding);
     }
 
-    /** Headers initiaux : :status 200 + content-type gRPC-Web + grpc-accept-encoding (+ grpc-encoding si configuré). */
+    /** Initial headers: :status 200 + gRPC-Web content-type + grpc-accept-encoding (+ grpc-encoding if configured). */
     private void ensureInitialHeadersSent() throws IOException {
         if (initialHeadersSent) return;
         String responseContentType =
@@ -218,7 +218,7 @@ public final class GrpcWebCallImpl implements GrpcCall {
         initialHeadersSent = true;
     }
 
-    /** Identique à {@code GrpcCallImpl.encodePercent} — duplication mineure plutôt qu'un coupling cross-class. */
+    /** Same as {@code GrpcCallImpl.encodePercent} — minor duplication rather than cross-class coupling. */
     private static String encodePercent(String s) {
         var bytes = s.getBytes(java.nio.charset.StandardCharsets.UTF_8);
         var sb = new StringBuilder(bytes.length);
@@ -236,9 +236,9 @@ public final class GrpcWebCallImpl implements GrpcCall {
     }
 
     /**
-     * Boucle d'exécution du handler avec gestion d'erreur (parallèle à
-     * {@link GrpcCallImpl#run}). Gère codec request inconnu (→ UNIMPLEMENTED
-     * immédiat) et la deadline ({@code grpc-timeout}) via un watchdog virtual thread.
+     * Handler execution loop with error handling (parallel to
+     * {@link GrpcCallImpl#run}). Handles unknown request codec (→ immediate
+     * UNIMPLEMENTED) and deadline ({@code grpc-timeout}) through a watchdog virtual thread.
      */
     public static void run(GrpcWebCallImpl call, io.vidocq.chappe.api.GrpcHandler handler) {
         if (call.requestEncodingUnsupported) {
@@ -248,7 +248,7 @@ public final class GrpcWebCallImpl implements GrpcCall {
                         GrpcStatus.UNIMPLEMENTED,
                         "grpc-encoding '" + clientEnc + "' not supported (accepted: " + SERVER_ACCEPT_ENCODING + ")");
             } catch (IOException _) {
-                // connexion perdue
+                // lost connection
             }
             return;
         }
@@ -267,10 +267,10 @@ public final class GrpcWebCallImpl implements GrpcCall {
                             try {
                                 call.complete(GrpcStatus.DEADLINE_EXCEEDED, "deadline exceeded");
                             } catch (IOException _) {
-                                // connexion perdue
+                                // lost connection
                             }
                         } catch (InterruptedException _) {
-                            // watchdog arrêté car handler a fini avant deadline
+                            // watchdog stopped because handler finished before deadline
                         }
                     });
         }
@@ -284,7 +284,7 @@ public final class GrpcWebCallImpl implements GrpcCall {
                 try {
                     call.complete(GrpcStatus.INTERNAL, String.valueOf(e.getMessage()));
                 } catch (IOException _) {
-                    // connexion perdue
+                    // lost connection
                 }
             }
         } finally {

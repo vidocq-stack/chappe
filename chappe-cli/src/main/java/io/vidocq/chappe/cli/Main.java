@@ -1,6 +1,6 @@
 package io.vidocq.chappe.cli;
 
-/** Point d'entrée du CLI {@code chappe}. */
+/** Entry point of the {@code chappe} CLI. */
 public final class Main {
 
     private Main() {}

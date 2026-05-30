@@ -5,63 +5,63 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Requête HTTP — vue en lecture seule exposée aux {@link Handler handlers}.
+ * HTTP request — read-only view exposed to {@link Handler handlers}.
  * <p>
- * Les implémentations (dans {@code chappe-http}) peuvent réutiliser
- * et recycler les instances pour minimiser les allocations.
+ * Implementations (in {@code chappe-http}) may reuse and recycle instances
+ * to minimise allocations.
  */
 public interface Request {
 
-    /** Méthode HTTP (GET, POST, …). */
+    /** HTTP method (GET, POST, …). */
     HttpMethod method();
 
-    /** URI complète de la requête. */
+    /** Full request URI. */
     URI uri();
 
-    /** Chemin de la requête (sans query string). */
+    /** Request path (without query string). */
     String path();
 
-    /** Query string brute, ou {@code null} si absente. */
+    /** Raw query string, or {@code null} if absent. */
     String query();
 
-    /** Version du protocole HTTP. */
+    /** HTTP protocol version. */
     HttpVersion version();
 
-    /** En-têtes de la requête. */
+    /** Request headers. */
     Headers headers();
 
-    /** Corps de la requête. */
+    /** Request body. */
     Body body();
 
     /**
-     * Trailers HTTP envoyés par le client après le corps (HTTP/2 §8.1, chunked HTTP/1.1 §7.1.2).
+     * HTTP trailers sent by the client after the body (HTTP/2 §8.1, chunked HTTP/1.1 §7.1.2).
      * <p>
-     * Vide par défaut. En HTTP/2, les trailers arrivent dans une seconde HEADERS frame
-     * après les DATA frames. À appeler uniquement <b>après</b> avoir lu complètement
-     * {@link #body()}, sinon retourne potentiellement {@link Headers#empty()}.
+     * Empty by default. In HTTP/2, trailers arrive in a second HEADERS frame
+     * after the DATA frames. Call only <b>after</b> fully reading
+     * {@link #body()}, otherwise may return {@link Headers#empty()}.
      */
     default Headers trailers() {
         return Headers.empty();
     }
 
-    /** Raccourci : première valeur de l'en-tête {@code name}. */
+    /** Shortcut: first value of header {@code name}. */
     default Optional<String> header(String name) {
         return headers().first(name);
     }
 
     /**
-     * Paramètres de chemin capturés par le routeur (ex. {@code {id} → "42"}).
-     * Vide si le routeur n'a pas matché de paramètres.
+     * Path parameters captured by the router (e.g. {@code {id} → "42"}).
+     * Empty if the router matched no parameters.
      */
     Map<String, String> pathParams();
 
     /**
-     * Paramètres de la query string.
-     * En cas de clé dupliquée, seule la dernière valeur est conservée.
+     * Query string parameters.
+     * If a key is duplicated, only the last value is kept.
      */
     Map<String, String> queryParams();
 
-    /** Raccourci : valeur d'un paramètre de query string. */
+    /** Shortcut: value of a query-string parameter. */
     default Optional<String> queryParam(String name) {
         return Optional.ofNullable(queryParams().get(name));
     }

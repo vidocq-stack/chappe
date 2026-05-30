@@ -19,20 +19,20 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * Smoke de conformité gRPC cross-implémentation : on monte un serveur Chappe
- * avec un endpoint echo bytes-bruts, puis on invoque {@code grpcurl} en
- * sous-processus comme un vrai client externe. Si la sortie JSON renvoyée
- * correspond au payload envoyé, on valide le wire HTTP/2 + framing 5 octets
- * + trailers d'un point de vue 100% indépendant.
+ * Cross-implementation gRPC conformance smoke test: a Chappe server is started
+ * with a raw-bytes echo endpoint, then {@code grpcurl} is invoked in a
+ * subprocess as a real external client. If the returned JSON output
+ * matches the sent payload, the HTTP/2 wire protocol + 5-byte framing
+ * + trailers are validated from a 100% independent point of view.
  *
- * <p>Le proto {@code echo.proto} déclare un seul message {@code EchoMessage}
- * utilisé en request et en response (tag 1, type string). Côté serveur on
- * fait un echo des bytes bruts sans décoder protobuf — grpcurl re-décode la
- * réponse comme {@code EchoMessage}, donc tout payload-aller doit ressortir
- * à l'identique côté payload-retour.
+ * <p>The {@code echo.proto} proto declares a single {@code EchoMessage}
+ * used in request and response (tag 1, type string). On the server side,
+ * the raw bytes are echoed without decoding protobuf — grpcurl decodes the
+ * response again as {@code EchoMessage}, so every outbound payload must come back
+ * identically as the inbound payload.
  *
- * <p>Test skippé si {@code grpcurl} n'est pas dans le PATH (binaire externe
- * optionnel — installable via {@code brew install grpcurl}).
+ * <p>Test skipped if {@code grpcurl} is not in PATH (optional external
+ * binary — installable via {@code brew install grpcurl}).
  */
 class GrpcurlConformanceTest {
 
@@ -45,7 +45,7 @@ class GrpcurlConformanceTest {
 
     @Test
     void grpcurlUnaryEcho() throws Exception {
-        assumeTrue(grpcurlAvailable(), "grpcurl absent du PATH (skip — brew install grpcurl)");
+        assumeTrue(grpcurlAvailable(), "grpcurl missing from PATH (skip — brew install grpcurl)");
 
         var router = Router.builder()
                 .grpc("/echo.EchoService/Echo", call -> {
@@ -76,23 +76,23 @@ class GrpcurlConformanceTest {
         boolean exited = p.waitFor(15, TimeUnit.SECONDS);
         String output = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
 
-        assertTrue(exited, "grpcurl n'a pas terminé en 15s, output=" + output);
-        assertEquals(0, p.exitValue(), "grpcurl exit code non-zéro, output=\n" + output);
-        // grpcurl format de sortie par défaut : JSON pretty-printed sur stdout.
-        // On vérifie juste que le payload est intact (le serveur a echo).
-        assertTrue(output.contains("\"message\""), "réponse sans champ message, output=\n" + output);
-        assertTrue(output.contains("hello-from-grpcurl"), "réponse sans payload echo intact, output=\n" + output);
+        assertTrue(exited, "grpcurl did not finish within 15s, output=" + output);
+        assertEquals(0, p.exitValue(), "grpcurl non-zero exit code, output=\n" + output);
+        // Default grpcurl output format: pretty-printed JSON on stdout.
+        // We only verify the payload is intact (server echoed it).
+        assertTrue(output.contains("\"message\""), "response missing message field, output=\n" + output);
+        assertTrue(output.contains("hello-from-grpcurl"), "response missing intact echoed payload, output=\n" + output);
     }
 
     @Test
     void grpcurlStatusOnFailingHandler() throws Exception {
-        assumeTrue(grpcurlAvailable(), "grpcurl absent du PATH (skip)");
+        assumeTrue(grpcurlAvailable(), "grpcurl missing from PATH (skip)");
 
         var router = Router.builder()
                 .grpc("/echo.EchoService/Echo", call -> {
                     call.receive();
-                    // handler qui throw sans complete -> couche transport doit émettre
-                    // grpc-status: 13 (INTERNAL) dans les trailers
+                    // handler throws without complete() -> transport layer must emit
+                    // grpc-status: 13 (INTERNAL) in trailers
                     throw new RuntimeException("boom");
                 })
                 .build();
@@ -118,13 +118,13 @@ class GrpcurlConformanceTest {
         boolean exited = p.waitFor(15, TimeUnit.SECONDS);
         String output = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
 
-        assertTrue(exited, "grpcurl n'a pas terminé en 15s, output=" + output);
-        // grpcurl exit non-zéro quand grpc-status != 0 ; il affiche le statut
-        // canonique ("Internal" pour code 13).
-        assertTrue(p.exitValue() != 0, "grpcurl devrait sortir en erreur sur grpc-status=13, exit=" + p.exitValue());
+        assertTrue(exited, "grpcurl did not finish within 15s, output=" + output);
+        // grpcurl exits non-zero when grpc-status != 0 and prints the canonical
+        // status ("Internal" for code 13).
+        assertTrue(p.exitValue() != 0, "grpcurl should exit with error for grpc-status=13, exit=" + p.exitValue());
         assertTrue(
                 output.contains("Internal") || output.contains("INTERNAL") || output.contains("Code: Internal"),
-                "trailers grpc-status devraient indiquer INTERNAL, output=\n" + output);
+                "grpc-status trailers should indicate INTERNAL, output=\n" + output);
     }
 
     // ------------------------------------------------------------------
@@ -147,7 +147,7 @@ class GrpcurlConformanceTest {
         dir.toFile().deleteOnExit();
         Path proto = dir.resolve("echo.proto");
         try (InputStream in = GrpcurlConformanceTest.class.getResourceAsStream("/grpc/echo.proto")) {
-            if (in == null) throw new IOException("resource /grpc/echo.proto introuvable dans le classpath");
+            if (in == null) throw new IOException("resource /grpc/echo.proto not found on classpath");
             Files.write(proto, in.readAllBytes());
         }
         proto.toFile().deleteOnExit();

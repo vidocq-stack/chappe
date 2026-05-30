@@ -3,10 +3,10 @@ package io.vidocq.chappe.api;
 import java.util.function.Consumer;
 
 /**
- * Routeur HTTP — associe des patterns de chemin à des {@link Handler handlers}.
+ * HTTP router — maps path patterns to {@link Handler handlers}.
  * <p>
- * Le routeur est lui-même un {@link Handler} : il peut être utilisé partout
- * où un handler est attendu (composition, nesting, wrapping par des filtres).
+ * The router is itself a {@link Handler}: it can be used anywhere a handler
+ * is expected (composition, nesting, wrapping by filters).
  *
  * <pre>{@code
  * var router = Router.builder()
@@ -22,21 +22,21 @@ import java.util.function.Consumer;
  *     .build();
  * }</pre>
  *
- * <h2>Patterns de chemin</h2>
+ * <h2>Path patterns</h2>
  * <ul>
- *   <li>{@code /users} — littéral</li>
- *   <li>{@code /users/{id}} — paramètre nommé (capturé dans {@link Request#pathParams()})</li>
- *   <li>{@code /static/*} — wildcard (matche tout le reste du chemin)</li>
+ *   <li>{@code /users} — literal</li>
+ *   <li>{@code /users/{id}} — named parameter (captured in {@link Request#pathParams()})</li>
+ *   <li>{@code /static/*} — wildcard (matches the rest of the path)</li>
  * </ul>
  */
 public interface Router extends Handler {
 
-    /** Crée un nouveau builder de routeur. */
+    /** Creates a new router builder. */
     static Builder builder() {
         return new DefaultRouterBuilder();
     }
 
-    /** Builder fluide pour construire un {@link Router}. */
+    /** Fluent builder for constructing a {@link Router}. */
     interface Builder {
 
         Builder get(String pattern, Handler handler);
@@ -53,66 +53,66 @@ public interface Router extends Handler {
 
         Builder patch(String pattern, Handler handler);
 
-        /** Enregistre une route pour une méthode arbitraire. */
+        /** Registers a route for an arbitrary method. */
         Builder route(HttpMethod method, String pattern, Handler handler);
 
         /**
-         * Groupe de routes avec un préfixe commun.
-         * Les filtres ajoutés dans le groupe ne s'appliquent qu'à ses routes.
+         * Route group with a common prefix.
+         * Filters added within the group apply only to its routes.
          */
         Builder group(String prefix, Consumer<Builder> routes);
 
-        /** Ajoute un filtre à toutes les routes de ce builder. */
+        /** Adds a filter to all routes of this builder. */
         Builder filter(Filter filter);
 
         /** Mounts a sub-handler at the given path prefix (all methods, path stripping). */
         Builder mount(String prefix, Handler handler);
 
         /**
-         * Enregistre un endpoint WebSocket (RFC 6455).
+         * Registers a WebSocket endpoint (RFC 6455).
          * <p>
-         * Sur une requête HTTP/1.1 {@code GET} avec les headers de handshake corrects,
-         * la connexion est upgradée et {@code handler} reçoit les événements de la session.
-         * Sinon une {@code 400 Bad Request} est retournée.
+         * On an HTTP/1.1 {@code GET} request with the correct handshake headers,
+         * the connection is upgraded and {@code handler} receives the session events.
+         * Otherwise a {@code 400 Bad Request} is returned.
          */
         Builder webSocket(String pattern, WebSocketHandler handler);
 
         /**
-         * Enregistre un endpoint gRPC (transport HTTP/2 + framing core gRPC).
+         * Registers a gRPC endpoint (HTTP/2 transport + core gRPC framing).
          * <p>
-         * À une requête {@code POST} sur {@code pattern} en HTTP/2 avec
-         * {@code content-type: application/grpc[+xxx]}, la connexion bascule en mode
-         * streaming bidirectionnel et {@code handler} reçoit un {@link GrpcCall}.
+         * For a {@code POST} request on {@code pattern} over HTTP/2 with
+         * {@code content-type: application/grpc[+xxx]}, the connection switches to
+         * bidirectional streaming mode and {@code handler} receives a {@link GrpcCall}.
          * <p>
-         * Conditions de refus :
+         * Rejection conditions:
          * <ul>
-         *   <li>version HTTP &lt; 2 → {@code 505 HTTP Version Not Supported}</li>
-         *   <li>{@code content-type} absent ou ≠ {@code application/grpc...} → {@code 415}</li>
+         *   <li>HTTP version &lt; 2 → {@code 505 HTTP Version Not Supported}</li>
+         *   <li>{@code content-type} absent or ≠ {@code application/grpc...} → {@code 415}</li>
          * </ul>
-         * La sérialisation des messages (protobuf, json, …) est à la charge du handler.
+         * Message serialisation (protobuf, json, …) is the handler's responsibility.
          */
         Builder grpc(String pattern, GrpcHandler handler);
 
         /**
-         * Enregistre un endpoint <b>gRPC-Web</b> (PROTOCOL-WEB.md, navigateurs).
+         * Registers a <b>gRPC-Web</b> endpoint (PROTOCOL-WEB.md, browsers).
          * <p>
-         * Variante de gRPC où les trailers sont sérialisés inline dans le corps comme une
-         * frame DATA spéciale (préfixe {@code 0x80}), car les navigateurs n'exposent pas
-         * les trailers HTTP/2 à JavaScript. Le content-type du client choisit le mode :
+         * gRPC variant where trailers are serialised inline in the body as a special
+         * DATA frame (prefix {@code 0x80}), because browsers do not expose HTTP/2
+         * trailers to JavaScript. The client's content-type selects the mode:
          * <ul>
-         *   <li>{@code application/grpc-web} → binaire</li>
-         *   <li>{@code application/grpc-web-text} → Base64 (chaque chunk indépendamment)</li>
+         *   <li>{@code application/grpc-web} → binary</li>
+         *   <li>{@code application/grpc-web-text} → Base64 (each chunk independently)</li>
          * </ul>
-         * Toute autre valeur → {@code 415}. V1 chappe = HTTP/2 uniquement ({@code 505}
-         * sinon). Le même {@link GrpcHandler} que pour {@link #grpc} est utilisé —
-         * le handler reçoit les bytes décodés, ne se soucie pas de la variante.
+         * Any other value → {@code 415}. Chappe v1 = HTTP/2 only ({@code 505} otherwise).
+         * The same {@link GrpcHandler} as for {@link #grpc} is used —
+         * the handler receives decoded bytes and is unaware of the variant.
          */
         Builder grpcWeb(String pattern, GrpcHandler handler);
 
-        /** Handler pour les routes non trouvées (404 par défaut). */
+        /** Handler for unmatched routes (404 by default). */
         Builder notFound(Handler handler);
 
-        /** Construit le routeur immutable. */
+        /** Builds the immutable router. */
         Router build();
     }
 }

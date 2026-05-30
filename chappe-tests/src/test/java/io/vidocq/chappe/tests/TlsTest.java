@@ -26,10 +26,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * Tests d'intégration TLS — HTTPS avec certificat auto-signé.
+ * TLS integration tests — HTTPS with a self-signed certificate.
  * <p>
- * Couvre HTTP/1.1 over TLS, multiple requêtes keep-alive,
- * et HTTP/2 via ALPN negotiation.
+ * Covers HTTP/1.1 over TLS, multiple keep-alive requests,
+ * and HTTP/2 via ALPN negotiation.
  */
 class TlsTest {
 
@@ -43,9 +43,9 @@ class TlsTest {
 
     @BeforeAll
     static void generateKeystore() throws Exception {
-        // Générer un keystore auto-signé via keytool
+        // Generate a self-signed keystore via keytool
         keystorePath = Files.createTempFile("chappe-test-", ".p12");
-        Files.delete(keystorePath); // keytool refuse d'écraser un fichier existant
+        Files.delete(keystorePath); // keytool refuses to overwrite an existing file
         var process = new ProcessBuilder(
                         "keytool", "-genkeypair",
                         "-alias", "chappe",
@@ -63,7 +63,7 @@ class TlsTest {
         process.waitFor();
         assertEquals(0, process.exitValue(), "keytool failed");
 
-        // Charger le keystore côté serveur
+        // Load keystore on server side
         var keyStore = KeyStore.getInstance("PKCS12");
         try (var is = Files.newInputStream(keystorePath)) {
             keyStore.load(is, "changeit".toCharArray());
@@ -74,7 +74,7 @@ class TlsTest {
         serverSslContext = SSLContext.getInstance("TLS");
         serverSslContext.init(kmf.getKeyManagers(), null, null);
 
-        // SSLContext client qui fait confiance à tout
+        // Client SSLContext that trusts everything
         trustAllContext = SSLContext.getInstance("TLS");
         trustAllContext.init(
                 null,

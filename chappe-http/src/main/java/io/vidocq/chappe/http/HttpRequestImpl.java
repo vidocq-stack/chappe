@@ -11,17 +11,17 @@ import java.util.Optional;
 import io.vidocq.chappe.api.*;
 
 /**
- * Implémentation concrète mutable de {@link Request}.
+ * Mutable concrete implementation of {@link Request}.
  * <p>
- * Les champs sont écrits directement par {@link HttpRequestParser},
- * puis l'objet est exposé en lecture seule au {@link Handler}.
- * Recyclable via {@link #reset()} pour les connexions keep-alive.
+ * Fields are written directly by {@link HttpRequestParser},
+ * then the object is exposed read-only to the {@link Handler}.
+ * Reusable via {@link #reset()} for keep-alive connections.
  */
 public final class HttpRequestImpl implements Request, Headers {
 
     private static final int INITIAL_HEADER_CAPACITY = 16;
 
-    // --- Champs écrits par le parser ou Http2Connection ---
+    // --- Fields written by parser or Http2Connection ---
     HttpMethod method;
     String rawUri;
     HttpVersion version;
@@ -31,7 +31,7 @@ public final class HttpRequestImpl implements Request, Headers {
     Body body;
     Headers trailers = Headers.empty();
 
-    // --- Setters publics pour accès depuis io.vidocq.chappe.http.h2 ---
+    // --- Public setters for access from io.vidocq.chappe.http.h2 ---
     public void setMethod(HttpMethod method) {
         this.method = method;
     }
@@ -95,8 +95,8 @@ public final class HttpRequestImpl implements Request, Headers {
     }
 
     /**
-     * Initialise les informations de connexion à partir du canal socket.
-     * Appelé une seule fois à la création de la connexion.
+     * Initializes connection information from the socket channel.
+     * Called only once when the connection is created.
      */
     public void initConnectionInfo(java.nio.channels.SocketChannel channel, boolean secure) {
         if (channel != null) {
@@ -110,7 +110,7 @@ public final class HttpRequestImpl implements Request, Headers {
         setSecure(secure);
     }
 
-    // --- Champs d'enrichissement (connexion + requête) ---
+    // --- Enrichment fields (connection + request) ---
     private String contextPath = "";
     private String pathInfoCache;
     private final java.util.LinkedHashMap<String, Object> attributes = new java.util.LinkedHashMap<>();
@@ -119,7 +119,7 @@ public final class HttpRequestImpl implements Request, Headers {
     private boolean secure;
     private String scheme = "http";
 
-    // --- Champs calculés paresseusement ---
+    // --- Lazily computed fields ---
     private URI uri;
     private String path;
     private String query;
@@ -133,7 +133,7 @@ public final class HttpRequestImpl implements Request, Headers {
         this.body = Body.empty();
     }
 
-    // --- Écriture par le parser ---
+    // --- Written by parser ---
 
     public void addHeader(String name, String value) {
         if (headerCount == headerNames.length) {
@@ -144,12 +144,12 @@ public final class HttpRequestImpl implements Request, Headers {
         headerCount++;
     }
 
-    /** Injecté par le routeur après le matching. */
+    /** Injected by the router after matching. */
     public void setPathParams(Map<String, String> params) {
         this.pathParams = params;
     }
 
-    /** Réinitialise pour réutilisation sur la même connexion. */
+    /** Resets for reuse on the same connection. */
     void reset() {
         method = null;
         rawUri = null;
@@ -186,11 +186,11 @@ public final class HttpRequestImpl implements Request, Headers {
 
     private URI buildUri() {
         if (rawUri == null) return URI.create("/");
-        // Absolute-form (ex. proxy) : on prend la request-target telle quelle.
+        // Absolute-form (e.g. proxy): use request-target as-is.
         if (rawUri.regionMatches(true, 0, "http://", 0, 7) || rawUri.regionMatches(true, 0, "https://", 0, 8)) {
             return URI.create(rawUri);
         }
-        // Origin-form (RFC 9112 §3.2.1) ou :path HTTP/2 : reconstruire via Host.
+        // Origin-form (RFC 9112 §3.2.1) or HTTP/2 :path: rebuild through Host.
         String host = null;
         for (int i = 0; i < headerCount; i++) {
             if (headerNames[i] != null && headerNames[i].equalsIgnoreCase("Host")) {
@@ -368,7 +368,7 @@ public final class HttpRequestImpl implements Request, Headers {
         return scheme;
     }
 
-    // --- Helpers privés ---
+    // --- Private helpers ---
 
     private void ensurePathQueryParsed() {
         if (pathQueryParsed) return;

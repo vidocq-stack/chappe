@@ -11,9 +11,9 @@ import java.util.function.Consumer;
 import java.util.zip.GZIPOutputStream;
 
 /**
- * Filtre HTTP (middleware) — transforme un {@link Handler} en un autre.
+ * HTTP filter (middleware) — transforms a {@link Handler} into another.
  * <p>
- * Les filtres se composent naturellement :
+ * Filters compose naturally:
  * <pre>{@code
  * Filter logging = next -> request -> {
  *     System.out.println(request.method() + " " + request.path());
@@ -27,44 +27,44 @@ import java.util.zip.GZIPOutputStream;
  *     return next.handle(request);
  * };
  *
- * // Compose : logging s'exécute avant auth
+ * // Compose: logging runs before auth
  * Handler secured = logging.andThen(auth).apply(myHandler);
  * }</pre>
  *
  * <h2>Helpers</h2>
  * <ul>
- *   <li>{@link #addHeader(String, String)} — injecte un header sur toute réponse.</li>
- *   <li>{@link #addHeaderIf(BooleanSupplier, String, String)} — header conditionnel.</li>
- *   <li>{@link #addHeaderIfEnv(String, String, String, String)} — header selon variable d'environnement.</li>
+ *   <li>{@link #addHeader(String, String)} — injects a header on every response.</li>
+ *   <li>{@link #addHeaderIf(BooleanSupplier, String, String)} — conditional header.</li>
+ *   <li>{@link #addHeaderIfEnv(String, String, String, String)} — header based on environment variable.</li>
  * </ul>
  */
 @FunctionalInterface
 public interface Filter {
 
     /**
-     * Enveloppe le handler {@code next} avec un comportement additionnel.
+     * Wraps the handler {@code next} with additional behaviour.
      *
-     * @param next le handler suivant dans la chaîne
-     * @return un nouveau handler décoré
+     * @param next the next handler in the chain
+     * @return a new decorated handler
      */
     Handler apply(Handler next);
 
     /**
-     * Compose ce filtre avec un autre : {@code this} s'exécute avant {@code after}.
+     * Composes this filter with another: {@code this} runs before {@code after}.
      *
-     * @param after le filtre à appliquer après celui-ci
-     * @return un filtre composé
+     * @param after the filter to apply after this one
+     * @return a composed filter
      */
     default Filter andThen(Filter after) {
         return next -> this.apply(after.apply(next));
     }
 
     /**
-     * Filtre qui ajoute un header à chaque réponse, sans condition.
+     * Filter that adds a header to every response, unconditionally.
      *
-     * @param name  nom du header
-     * @param value valeur du header
-     * @return filtre injectant le header
+     * @param name  header name
+     * @param value header value
+     * @return filter that injects the header
      */
     static Filter addHeader(String name, String value) {
         Objects.requireNonNull(name, "name");
@@ -73,13 +73,13 @@ public interface Filter {
     }
 
     /**
-     * Filtre qui ajoute un header si {@code predicate} retourne {@code true}.
-     * Le prédicat est ré-évalué à chaque requête.
+     * Filter that adds a header if {@code predicate} returns {@code true}.
+     * The predicate is re-evaluated for every request.
      *
-     * @param predicate condition d'ajout (évaluée per-request)
-     * @param name      nom du header
-     * @param value     valeur du header
-     * @return filtre injectant conditionnellement le header
+     * @param predicate add condition (evaluated per-request)
+     * @param name      header name
+     * @param value     header value
+     * @return filter that conditionally injects the header
      */
     static Filter addHeaderIf(BooleanSupplier predicate, String name, String value) {
         Objects.requireNonNull(predicate, "predicate");
@@ -102,14 +102,14 @@ public interface Filter {
     }
 
     /**
-     * Filtre qui ajoute un header si la variable d'environnement {@code envVar}
-     * a la valeur {@code expectedValue} (comparaison stricte sensible à la casse).
+     * Filter that adds a header if the environment variable {@code envVar}
+     * has the value {@code expectedValue} (strict case-sensitive comparison).
      *
-     * @param envVar        nom de la variable d'environnement à inspecter
-     * @param expectedValue valeur attendue (la variable doit être strictement égale)
-     * @param name          nom du header à ajouter
-     * @param value         valeur du header à ajouter
-     * @return filtre conditionnel sur l'environnement
+     * @param envVar        name of the environment variable to inspect
+     * @param expectedValue expected value (the variable must be strictly equal)
+     * @param name          name of the header to add
+     * @param value         value of the header to add
+     * @return filter conditional on the environment
      */
     static Filter addHeaderIfEnv(String envVar, String expectedValue, String name, String value) {
         Objects.requireNonNull(envVar, "envVar");
@@ -117,21 +117,21 @@ public interface Filter {
         return addHeaderIf(() -> expectedValue.equals(System.getenv(envVar)), name, value);
     }
 
-    /** Seuil par défaut sous lequel on n'applique pas la compression à la volée. */
+    /** Default threshold below which on-the-fly compression is not applied. */
     int GZIP_DEFAULT_THRESHOLD = 1024;
 
     /**
-     * Filtre de compression {@code Content-Encoding: gzip} à la volée, négocié
-     * via {@code Accept-Encoding}. Seuil par défaut : {@value #GZIP_DEFAULT_THRESHOLD} octets.
+     * On-the-fly {@code Content-Encoding: gzip} compression filter, negotiated
+     * via {@code Accept-Encoding}. Default threshold: {@value #GZIP_DEFAULT_THRESHOLD} bytes.
      */
     static Filter gzip() {
         return gzip(GZIP_DEFAULT_THRESHOLD);
     }
 
     /**
-     * Variante de {@link #gzip()} avec seuil configurable.
-     * Les réponses dont la taille déclarée est strictement inférieure au seuil
-     * ne sont pas compressées (overhead non rentable).
+     * Variant of {@link #gzip()} with a configurable threshold.
+     * Responses whose declared size is strictly below the threshold
+     * are not compressed (overhead not worthwhile).
      */
     static Filter gzip(int threshold) {
         return next -> request -> {
@@ -170,30 +170,30 @@ public interface Filter {
         };
     }
 
-    /** Format de date Apache : {@code [day/Mon/yyyy:HH:mm:ss +0000]}. */
+    /** Apache date format: {@code [day/Mon/yyyy:HH:mm:ss +0000]}. */
     DateTimeFormatter ACCESS_LOG_DATE = DateTimeFormatter.ofPattern("dd/MMM/yyyy:HH:mm:ss xx", Locale.ROOT);
 
     /**
-     * Filtre d'access log au format Apache Combined Log Format (CLF) étendu.
+     * Access log filter in extended Apache Combined Log Format (CLF).
      * <p>
-     * Sortie sur {@code System.out} (capté par Docker/Portainer) :
+     * Output to {@code System.out} (captured by Docker/Portainer):
      * <pre>
      * 127.0.0.1 - yann.blazart@gmail.com [09/May/2026:18:50:54 +0000] "GET /a.png HTTP/1.1" 200 877719 12ms
      * </pre>
      * <ul>
-     *   <li>L'IP cliente est lue dans {@code X-Forwarded-For} (premier hop) ou
-     *       {@code X-Real-IP}, sinon {@code Request.remoteAddress()}.</li>
-     *   <li>L'utilisateur est lu dans {@code X-Forwarded-User}, {@code Gap-Auth}
-     *       (oauth2-proxy) ou {@code Authorization}, sinon {@code "-"}.</li>
-     *   <li>La taille du body est celle annoncée par {@code Response.body().contentLength()}
-     *       (peut être {@code -1} pour les corps streamés/chunked, indiquée alors par {@code "-"}).</li>
+     *   <li>The client IP is read from {@code X-Forwarded-For} (first hop) or
+     *       {@code X-Real-IP}, otherwise {@code Request.remoteAddress()}.</li>
+     *   <li>The user is read from {@code X-Forwarded-User}, {@code Gap-Auth}
+     *       (oauth2-proxy) or {@code Authorization}, otherwise {@code "-"}.</li>
+     *   <li>The body size is the one declared by {@code Response.body().contentLength()}
+     *       (may be {@code -1} for streamed/chunked bodies, indicated as {@code "-"}).</li>
      * </ul>
      */
     static Filter accessLog() {
         return accessLog(line -> System.out.println(line));
     }
 
-    /** Variante de {@link #accessLog()} avec un sink personnalisé. */
+    /** Variant of {@link #accessLog()} with a custom sink. */
     static Filter accessLog(Consumer<String> sink) {
         Objects.requireNonNull(sink, "sink");
         return next -> request -> {
@@ -247,13 +247,13 @@ public interface Filter {
         return "-";
     }
 
-    /** Heuristique « compressible » sur le {@code Content-Type}. */
+    /** "Compressible" heuristic based on {@code Content-Type}. */
     private static boolean isCompressible(String contentType) {
         if (contentType == null) return false;
         String ct = contentType.toLowerCase(Locale.ROOT);
         if (ct.startsWith("text/")) return true;
         if (ct.startsWith("image/svg+xml")) return true;
-        // Heuristique pour les sous-types text-like : json, xml, javascript, wasm, manifest+json…
+        // Heuristic for text-like subtypes: json, xml, javascript, wasm, manifest+json...
         return ct.startsWith("application/json")
                 || ct.startsWith("application/xml")
                 || ct.startsWith("application/javascript")

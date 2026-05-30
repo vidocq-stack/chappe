@@ -30,11 +30,11 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * Tests de transport gRPC : 4 modes (unary, server-stream, client-stream, bidi)
- * + cas d'erreur (handler error, trailers-only) + rejet HTTP/1.1.
+ * gRPC transport tests: 4 modes (unary, server-stream, client-stream, bidi)
+ * + error cases (handler error, trailers-only) + HTTP/1.1 rejection.
  * <p>
- * Client gRPC raw HTTP/2 : preface + SETTINGS + HEADERS + DATA (préfixe 5 octets)
- * + (optionnel) END_STREAM, et lecture des frames serveur.
+ * Raw HTTP/2 gRPC client: preface + SETTINGS + HEADERS + DATA (5-byte prefix)
+ * + optional END_STREAM, and reading of server frames.
  */
 class Http2GrpcTransportTest {
 
@@ -56,7 +56,7 @@ class Http2GrpcTransportTest {
     }
 
     // ------------------------------------------------------------------
-    // 1. Unary RPC : 1 msg in → 1 msg out → trailers OK
+    // 1. Unary RPC: 1 msg in -> 1 msg out -> trailers OK
     // ------------------------------------------------------------------
     @Test
     void unaryEcho() throws Exception {
@@ -83,7 +83,7 @@ class Http2GrpcTransportTest {
     }
 
     // ------------------------------------------------------------------
-    // 2. Server-streaming : 1 in → N out → trailers OK
+    // 2. Server-streaming: 1 in -> N out -> trailers OK
     // ------------------------------------------------------------------
     @Test
     void serverStreaming() throws Exception {
@@ -113,7 +113,7 @@ class Http2GrpcTransportTest {
     }
 
     // ------------------------------------------------------------------
-    // 3. Client-streaming : N in (END_STREAM) → 1 out → trailers OK
+    // 3. Client-streaming: N in (END_STREAM) -> 1 out -> trailers OK
     // ------------------------------------------------------------------
     @Test
     void clientStreaming() throws Exception {
@@ -132,9 +132,9 @@ class Http2GrpcTransportTest {
             var in = new DataInputStream(socket.getInputStream());
             var out = new DataOutputStream(socket.getOutputStream());
 
-            // HEADERS sans END_STREAM
+            // HEADERS without END_STREAM
             sendGrpcRequestHeaders(out, 1, "/collect", false);
-            // 3 DATA frames sans END_STREAM
+            // 3 DATA frames without END_STREAM
             writeFrame(out, TYPE_DATA, 0, 1, GrpcFrameWriter.encode("aaa".getBytes(StandardCharsets.UTF_8)));
             writeFrame(out, TYPE_DATA, 0, 1, GrpcFrameWriter.encode("bbbb".getBytes(StandardCharsets.UTF_8)));
             writeFrame(
@@ -150,8 +150,8 @@ class Http2GrpcTransportTest {
     }
 
     // ------------------------------------------------------------------
-    // 4. Bidi-streaming : 3 in / 3 out alternés
-    //    On envoie 3 DATA puis END_STREAM. Le handler echo chaque message.
+    // 4. Bidi-streaming: 3 in / 3 out alternating
+    //    Send 3 DATA frames then END_STREAM. Handler echoes each message.
     // ------------------------------------------------------------------
     @Test
     void bidiStreaming() throws Exception {
@@ -191,7 +191,7 @@ class Http2GrpcTransportTest {
     }
 
     // ------------------------------------------------------------------
-    // 5. Handler error : status != OK avec grpc-message
+    // 5. Handler error: status != OK with grpc-message
     // ------------------------------------------------------------------
     @Test
     void handlerReturnsError() throws Exception {
@@ -215,7 +215,7 @@ class Http2GrpcTransportTest {
     }
 
     // ------------------------------------------------------------------
-    // 6. Trailers-Only : erreur immédiate, un seul HEADERS frame avec END_STREAM
+    // 6. Trailers-Only: immediate error, a single HEADERS frame with END_STREAM
     // ------------------------------------------------------------------
     @Test
     void trailersOnlyResponse() throws Exception {
@@ -229,9 +229,9 @@ class Http2GrpcTransportTest {
             sendGrpcRequest(out, 1, "/deny", true, GrpcFrameWriter.encode(new byte[0]));
             var seq = readUntilEndStream(in, 1);
 
-            // Un seul HEADERS frame (initial = trailers), pas de DATA.
-            assertEquals(1, seq.headers.size(), "trailers-only doit produire UN HEADERS frame");
-            assertEquals(0, seq.body.size(), "aucun DATA frame attendu");
+            // Single HEADERS frame (initial = trailers), no DATA.
+            assertEquals(1, seq.headers.size(), "trailers-only must produce ONE HEADERS frame");
+            assertEquals(0, seq.body.size(), "no DATA frame expected");
             var h = seq.headers.get(0);
             assertEquals("200", h.get(":status"));
             assertEquals("application/grpc", h.get("content-type"));
@@ -241,19 +241,19 @@ class Http2GrpcTransportTest {
     }
 
     // ------------------------------------------------------------------
-    // 7a. grpc-timeout : handler dépasse la deadline → trailers DEADLINE_EXCEEDED (4)
-    //     Le watchdog doit interrompre receive() et émettre les trailers
-    //     bien avant que le handler ne finisse son sleep.
+    // 7a. grpc-timeout: handler exceeds deadline -> DEADLINE_EXCEEDED (4) trailers
+    //     Watchdog must interrupt receive() and emit trailers
+    //     well before the handler finishes sleeping.
     // ------------------------------------------------------------------
     @Test
     void deadlineExceededViaGrpcTimeout() throws Exception {
         startServer("/slow", call -> {
             try {
-                Thread.sleep(5_000); // bien plus long que la deadline de 200ms
+                Thread.sleep(5_000); // much longer than the 200ms deadline
             } catch (InterruptedException _) {
-                // cancel via watchdog → InterruptedException ignored, handler sort
+                // cancel via watchdog -> ignore InterruptedException, handler exits
             }
-            // Volontairement pas de complete : le watchdog l'a déjà fait.
+            // Intentionally no complete(): watchdog already did it.
         });
 
         try (var socket = new Socket()) {
@@ -269,16 +269,16 @@ class Http2GrpcTransportTest {
             var seq = readUntilEndStream(in, 1);
             long elapsedMs = (System.nanoTime() - t0) / 1_000_000;
 
-            assertEquals("4", seq.trailers().get("grpc-status"), "grpc-status doit être DEADLINE_EXCEEDED (4)");
+            assertEquals("4", seq.trailers().get("grpc-status"), "grpc-status must be DEADLINE_EXCEEDED (4)");
             assertEquals("deadline exceeded", seq.trailers().get("grpc-message"));
-            assertTrue(elapsedMs < 2_000, "trailers devraient arriver bien avant 2s (effectif=" + elapsedMs + "ms)");
+            assertTrue(elapsedMs < 2_000, "trailers should arrive well before 2s (actual=" + elapsedMs + "ms)");
         }
     }
 
     // ------------------------------------------------------------------
-    // 7b. grpc-timeout respectée : handler termine avant deadline → OK (0)
-    //     Vérifie que le watchdog est interrompu proprement et n'écrase
-    //     pas le statut OK du handler.
+    // 7b. grpc-timeout respected: handler finishes before deadline -> OK (0)
+    //     Verifies watchdog is interrupted cleanly and does not overwrite
+    //     the handler OK status.
     // ------------------------------------------------------------------
     @Test
     void deadlineRespectedReturnsOk() throws Exception {
@@ -303,18 +303,18 @@ class Http2GrpcTransportTest {
 
             assertEquals("0", seq.trailers().get("grpc-status"));
             assertArrayEquals("hi".getBytes(StandardCharsets.UTF_8), decodeOneGrpcMessage(seq.body.toByteArray()));
-            // Le handler doit avoir vu une deadline non-vide.
+            // Handler must have seen a non-empty deadline.
             assertNotNull(observedDeadline.get());
             assertNotEquals(
-                    "<none>", observedDeadline.get(), "le handler doit observer la deadline propagée par le client");
+                    "<none>", observedDeadline.get(), "handler must observe the deadline propagated by the client");
         }
     }
 
     // ------------------------------------------------------------------
-    // 7c. grpc-encoding: gzip — décompression auto en réception
-    //     Le client envoie un message gzippé avec compressed=1 dans le préfixe
-    //     et le header grpc-encoding: gzip. Le handler doit recevoir les
-    //     bytes décompressés sans rien faire.
+    // 7c. grpc-encoding: gzip — automatic request decompression
+    //     Client sends a gzipped message with compressed=1 in prefix
+    //     and grpc-encoding: gzip header. Handler must receive
+    //     decompressed bytes without extra work.
     // ------------------------------------------------------------------
     @Test
     void gzipRequestDecodedAutomatically() throws Exception {
@@ -340,14 +340,14 @@ class Http2GrpcTransportTest {
             out.flush();
             readUntilEndStream(in, 1);
 
-            assertArrayEquals(plaintext, observedPayload.get(), "le handler doit recevoir le payload décompressé");
+            assertArrayEquals(plaintext, observedPayload.get(), "handler must receive decompressed payload");
         }
     }
 
     // ------------------------------------------------------------------
-    // 7d. useResponseEncoding("gzip") — compression auto en émission
-    //     Le handler opte-in pour gzip, le client doit recevoir le préfixe
-    //     compressed=1 + header grpc-encoding: gzip et pouvoir décompresser.
+    // 7d. useResponseEncoding("gzip") — automatic response compression
+    //     Handler opts in to gzip, client must receive prefix
+    //     compressed=1 + grpc-encoding: gzip header and be able to decompress.
     // ------------------------------------------------------------------
     @Test
     void serverCompressesResponseWhenConfigured() throws Exception {
@@ -367,30 +367,29 @@ class Http2GrpcTransportTest {
             sendGrpcRequest(out, 1, "/gz-out", true, GrpcFrameWriter.encode(new byte[] {0}));
             var seq = readUntilEndStream(in, 1);
 
-            // Headers initiaux annoncent grpc-encoding: gzip
+            // Initial headers announce grpc-encoding: gzip
             assertEquals(
                     "gzip",
                     seq.initialHeaders().get("grpc-encoding"),
-                    "headers réponse doivent contenir grpc-encoding: gzip");
-            // Le préfixe doit avoir compressed=1, le payload est gzippé
+                    "response headers must contain grpc-encoding: gzip");
+            // Prefix must have compressed=1, payload is gzipped
             byte[] raw = seq.body.toByteArray();
-            assertEquals(1, raw[0], "préfixe doit avoir compressed=1");
+            assertEquals(1, raw[0], "prefix must have compressed=1");
             int len = ((raw[1] & 0xFF) << 24) | ((raw[2] & 0xFF) << 16) | ((raw[3] & 0xFF) << 8) | (raw[4] & 0xFF);
             byte[] gzipped = java.util.Arrays.copyOfRange(raw, 5, 5 + len);
-            assertArrayEquals(
-                    body, gunzipBytes(gzipped), "le payload doit être décompressable et identique au body envoyé");
+            assertArrayEquals(body, gunzipBytes(gzipped), "payload must be decompressible and equal to the sent body");
         }
     }
 
     // ------------------------------------------------------------------
-    // 7e. Codec request inconnu → trailers-only grpc-status: 12 UNIMPLEMENTED
-    //     RFC gRPC §"Compression" : si le serveur ne peut pas décoder le
-    //     grpc-encoding annoncé par le client, il DOIT répondre UNIMPLEMENTED.
+    // 7e. Unknown request codec -> trailers-only grpc-status: 12 UNIMPLEMENTED
+    //     gRPC RFC "Compression": if server cannot decode
+    //     grpc-encoding announced by client, it MUST return UNIMPLEMENTED.
     // ------------------------------------------------------------------
     @Test
     void unknownRequestEncodingReturnsUnimplemented() throws Exception {
         startServer("/no-snappy", call -> {
-            // Ne devrait jamais être appelé — la transport coupe avant.
+            // Should never be called — transport layer stops before handler.
             call.send(new byte[] {0});
             call.complete(GrpcStatus.OK, "");
         });
@@ -405,21 +404,21 @@ class Http2GrpcTransportTest {
             out.flush();
             var seq = readUntilEndStream(in, 1);
 
-            // Trailers-only : un seul HEADERS frame avec grpc-status=12
+            // Trailers-only: a single HEADERS frame with grpc-status=12
             assertEquals(
-                    1, seq.headers.size(), "UNIMPLEMENTED doit produire un trailers-only response (1 HEADERS frame)");
+                    1, seq.headers.size(), "UNIMPLEMENTED must produce a trailers-only response (1 HEADERS frame)");
             var h = seq.headers.get(0);
             assertEquals("12", h.get("grpc-status"));
             assertTrue(
                     h.get("grpc-message").contains("snappy"),
-                    "grpc-message doit citer le codec rejeté, got " + h.get("grpc-message"));
+                    "grpc-message must mention the rejected codec, got " + h.get("grpc-message"));
         }
     }
 
     // ------------------------------------------------------------------
-    // 7f. grpc-accept-encoding annoncé par défaut
-    //     Tout response normal (sans opt-in compression) doit annoncer que
-    //     le serveur sait décoder gzip en plus de identity.
+    // 7f. grpc-accept-encoding advertised by default
+    //     Any normal response (without opt-in compression) must advertise
+    //     that server can decode gzip in addition to identity.
     // ------------------------------------------------------------------
     @Test
     void acceptEncodingAdvertisedByDefault() throws Exception {
@@ -438,20 +437,20 @@ class Http2GrpcTransportTest {
             var seq = readUntilEndStream(in, 1);
 
             String accept = seq.initialHeaders().get("grpc-accept-encoding");
-            assertNotNull(accept, "grpc-accept-encoding doit être présent");
-            assertTrue(accept.contains("gzip"), "grpc-accept-encoding doit annoncer gzip, got " + accept);
-            assertTrue(accept.contains("identity"), "grpc-accept-encoding doit annoncer identity, got " + accept);
+            assertNotNull(accept, "grpc-accept-encoding must be present");
+            assertTrue(accept.contains("gzip"), "grpc-accept-encoding must advertise gzip, got " + accept);
+            assertTrue(accept.contains("identity"), "grpc-accept-encoding must advertise identity, got " + accept);
         }
     }
 
     // ------------------------------------------------------------------
-    // 8. Refus HTTP/1.1 → 505 HTTP Version Not Supported
+    // 8. HTTP/1.1 rejection -> 505 HTTP Version Not Supported
     // ------------------------------------------------------------------
     @Test
     void rejectHttp11With505() throws Exception {
         startServer("/svc", call -> call.complete(GrpcStatus.OK, ""));
 
-        // HttpClient HTTP/1.1 sur ce port
+        // HTTP/1.1 HttpClient on this port
         var client =
                 HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build();
         var req = HttpRequest.newBuilder()
@@ -464,7 +463,7 @@ class Http2GrpcTransportTest {
     }
 
     // ==================================================================
-    // Helpers : serveur + client H2 minimal
+    // Helpers: minimal server + H2 client
     // ==================================================================
 
     private void startServer(String path, GrpcHandler handler) {
@@ -482,7 +481,7 @@ class Http2GrpcTransportTest {
         out.write(H2_PREFACE);
         writeFrame(out, TYPE_SETTINGS, 0, 0, new byte[0]);
         out.flush();
-        // Lit SETTINGS serveur + SETTINGS ACK (2 frames de contrôle attendues)
+        // Read server SETTINGS + SETTINGS ACK (2 control frames expected)
         for (int i = 0; i < 2; i++) readFrame(in);
         writeFrame(out, TYPE_SETTINGS, FLAG_ACK, 0, new byte[0]);
         out.flush();
@@ -635,7 +634,7 @@ class Http2GrpcTransportTest {
         }
     }
 
-    /** Décodage du payload gRPC (préfixe 5 octets + payload, possiblement répété). */
+    /** Decoding of the gRPC payload (5-byte prefix + payload, possibly repeated). */
     private static java.util.List<byte[]> decodeGrpcMessages(byte[] data) {
         var out = new java.util.ArrayList<byte[]>();
         int i = 0;
@@ -658,7 +657,7 @@ class Http2GrpcTransportTest {
         return msgs.get(0);
     }
 
-    /** Variable inutilisée — la requête GET ne sert que dans rejectHttp11With505 et n'a pas de body. */
+    /** Unused variable — the GET request is only used in rejectHttp11With505 and has no body. */
     @SuppressWarnings("unused")
     private static Object _unused(AtomicReference<?> ignored) {
         return null;
