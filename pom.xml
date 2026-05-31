@@ -74,18 +74,6 @@
 
     <dependencyManagement>
         <dependencies>
-            <!-- Vauban CDI container -->
-            <dependency>
-                <groupId>fr.vidocq.vauban</groupId>
-                <artifactId>vauban-api</artifactId>
-                <version>${vauban.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>fr.vidocq.vauban</groupId>
-                <artifactId>vauban-core</artifactId>
-                <version>${vauban.version}</version>
-            </dependency>
-
             <!-- Inter-project dependencies -->
             <dependency>
                 <groupId>io.vidocq.chappe</groupId>
