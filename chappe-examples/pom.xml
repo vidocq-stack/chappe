@@ -13,7 +13,18 @@
     <artifactId>chappe-examples</artifactId>
 
     <properties>
+        <!--
+            Demo modules: never released as dependencies. We disable every release-time
+            attachment (sources/javadoc/GPG) plus the deploy goal AND we override the
+            central-publishing-maven-plugin to skip publish — the latter is required
+            because central-publishing replaces maven-deploy-plugin via extensions=true
+            and ignores `maven.deploy.skip`. See vauban-examples for the same pattern.
+        -->
         <maven.deploy.skip>true</maven.deploy.skip>
+        <maven.install.skip>true</maven.install.skip>
+        <maven.javadoc.skip>true</maven.javadoc.skip>
+        <maven.source.skip>true</maven.source.skip>
+        <gpg.skip>true</gpg.skip>
     </properties>
 
     <name>Chappe Examples</name>
@@ -28,6 +39,13 @@
 
     <build>
         <plugins>
+            <plugin>
+                <groupId>org.sonatype.central</groupId>
+                <artifactId>central-publishing-maven-plugin</artifactId>
+                <configuration>
+                    <skipPublishing>true</skipPublishing>
+                </configuration>
+            </plugin>
             <!-- Indexe src/main/resources/static/** → META-INF/chappe-static-index.properties
                  pour que StaticFileHandler résolve en O(1) sans URLConnection.openConnection(). -->
             <plugin>
