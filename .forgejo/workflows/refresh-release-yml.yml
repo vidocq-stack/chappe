@@ -1,0 +1,57 @@
+# Re-runs Vidocq/ci/release-maven/bootstrap-workflows.sh against this repo and
+# commits the resulting .forgejo/workflows/release.yml if anything changed.
+# Triggered:
+#   * manually (workflow_dispatch — pass `source` for traceability), or
+#   * automatically by Vidocq/ci/refresh-downstream-release-yml from any
+#     upstream Vidocq repo whose release just succeeded.
+name: refresh-release-yml
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: 'Upstream repo whose release triggered this refresh (free-form, e.g. Vidocq/vauban)'
+        type: string
+        required: false
+        default: 'manual'
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.VIDOCQ_BOT_TOKEN }}
+
+      # The bootstrap script lives in Vidocq/ci. Clone it next to the checkout
+      # rather than `uses:`-ing it as a composite, because the script must be
+      # invoked with the downstream's path as argv (it writes back into
+      # .forgejo/workflows/release.yml).
+      - name: Clone Vidocq/ci
+        run: |
+          git clone --depth 1 --branch main \
+            "https://oauth2:${{ secrets.VIDOCQ_BOT_TOKEN }}@codeberg.org/Vidocq/ci.git" \
+            /tmp/vidocq-ci
+
+      - name: Re-bootstrap release.yml
+        run: |
+          /tmp/vidocq-ci/release-maven/bootstrap-workflows.sh "${{ github.workspace }}"
+
+      - name: Commit + push if anything changed
+        env:
+          SOURCE: ${{ inputs.source }}
+        run: |
+          set -euo pipefail
+          git config user.name  'Vidocq CI Bot'
+          git config user.email 'ci@vidocq.dev'
+          if git diff --quiet .forgejo/workflows/release.yml; then
+            echo "::notice::release.yml is already in sync — no commit needed"
+            exit 0
+          fi
+          git add .forgejo/workflows/release.yml
+          git commit -m "ci: refresh release.yml after upstream ${SOURCE} release"
+          # Reroute ssh:// (declared in <developerConnection>) to HTTPS-with-token
+          git config --global --add 'url.https://oauth2:${{ secrets.VIDOCQ_BOT_TOKEN }}@codeberg.org/.insteadOf' 'ssh://git@codeberg.org/'
+          git config --global --add 'url.https://oauth2:${{ secrets.VIDOCQ_BOT_TOKEN }}@codeberg.org/.insteadOf' 'ssh://codeberg.org/'
+          git push origin HEAD:main
