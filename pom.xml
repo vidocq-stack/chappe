@@ -48,7 +48,7 @@
     <properties>
         <maven.compiler.enablePreview>true</maven.compiler.enablePreview>
 
-        <vauban.version>0.1.0-SNAPSHOT</vauban.version>
+        <vauban.version>0.1.1</vauban.version>
 
         <!-- Quality -->
         <spotless.version>2.46.1</spotless.version>
