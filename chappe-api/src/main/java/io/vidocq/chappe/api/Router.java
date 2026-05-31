@@ -69,6 +69,21 @@ public interface Router extends Handler {
         Builder mount(String prefix, Handler handler);
 
         /**
+         * Mounts a sub-handler at the given path prefix, controlling path stripping.
+         * <p>
+         * With {@code stripPrefix=true} (the behaviour of {@link #mount(String, Handler)}) the
+         * prefix is removed before the handler runs: {@code Request.pathInfo()} is relative to the
+         * mount (e.g. a {@code /api} mount sees {@code /rooms} for {@code /api/rooms}).
+         * <p>
+         * With {@code stripPrefix=false} the prefix is used for <em>routing only</em>: the handler
+         * receives the <em>full</em> path ({@code pathInfo() == path()}). This suits handlers whose
+         * resources carry absolute paths (e.g. a JAX-RS resource {@code @Path("/health")} mounted at
+         * the {@code /health} prefix matches {@code GET /health}, {@code /health/live}, … without the
+         * prefix doubling), while still leaving sibling prefixes (static {@code /}, {@code /api}) untouched.
+         */
+        Builder mount(String prefix, Handler handler, boolean stripPrefix);
+
+        /**
          * Registers a WebSocket endpoint (RFC 6455).
          * <p>
          * On an HTTP/1.1 {@code GET} request with the correct handshake headers,

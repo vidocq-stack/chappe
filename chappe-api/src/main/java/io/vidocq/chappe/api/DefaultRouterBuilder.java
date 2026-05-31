@@ -21,7 +21,7 @@ final class DefaultRouterBuilder implements Router.Builder {
 
     private record Route(HttpMethod method, String pattern, Handler handler, List<Filter> filters) {}
 
-    private record Mount(String prefix, Handler handler, List<Filter> filters) {}
+    private record Mount(String prefix, Handler handler, List<Filter> filters, boolean stripPrefix) {}
 
     private final List<Route> routes = new ArrayList<>();
     private final List<Mount> mounts = new ArrayList<>();
@@ -92,7 +92,12 @@ final class DefaultRouterBuilder implements Router.Builder {
 
     @Override
     public Router.Builder mount(String mountPrefix, Handler handler) {
-        mounts.add(new Mount(prefix + mountPrefix, handler, List.copyOf(filters)));
+        return mount(mountPrefix, handler, true);
+    }
+
+    @Override
+    public Router.Builder mount(String mountPrefix, Handler handler, boolean stripPrefix) {
+        mounts.add(new Mount(prefix + mountPrefix, handler, List.copyOf(filters), stripPrefix));
         return this;
     }
 
@@ -339,7 +344,10 @@ final class DefaultRouterBuilder implements Router.Builder {
                     for (int i = mf.size() - 1; i >= 0; i--) {
                         h = mf.get(i).apply(h);
                     }
-                    return h.handle(withMount(request, mount.prefix(), path));
+                    // stripPrefix=true: handler sees the path relative to the mount (context stripping).
+                    // stripPrefix=false: routing-only — handler sees the full path (pathInfo == path),
+                    // so resources with absolute @Path match without the prefix doubling.
+                    return h.handle(mount.stripPrefix() ? withMount(request, mount.prefix(), path) : request);
                 }
             }
 
