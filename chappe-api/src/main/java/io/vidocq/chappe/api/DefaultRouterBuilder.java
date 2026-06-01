@@ -138,7 +138,8 @@ final class DefaultRouterBuilder implements Router.Builder {
                         .body("Missing Sec-WebSocket-Key")
                         .build();
             }
-            return new WebSocketUpgrade(handler);
+            // Carry the matched request (with route pathParams) so onOpen sees {param} captures.
+            return new WebSocketUpgrade(handler, null, request);
         });
     }
 

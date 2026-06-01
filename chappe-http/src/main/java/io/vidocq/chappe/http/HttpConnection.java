@@ -161,13 +161,15 @@ public final class HttpConnection {
                     if (bodyStream != null) HttpBodyReader.drain(bodyStream);
                     var key = request.headers().firstOrNull("Sec-WebSocket-Key");
                     WebSocketHandshake.writeResponse(writeChannel, key, upgrade.subprotocol());
+                    // Prefer the matched handshake request (carries route pathParams) over the raw one.
+                    var handshakeReq = upgrade.handshakeRequest() != null ? upgrade.handshakeRequest() : request;
                     var wsConn = new WebSocketConnection(
                             readChannel,
                             writeChannel,
                             closeable,
                             readBuffer,
                             upgrade.handler(),
-                            request,
+                            handshakeReq,
                             upgrade.subprotocol());
                     wsConn.run();
                     return; // closeable already closed by WebSocketConnection

@@ -14,19 +14,34 @@ public final class WebSocketUpgrade implements Response {
 
     private final WebSocketHandler handler;
     private final String subprotocol;
+    private final Request handshakeRequest;
 
-    public WebSocketUpgrade(WebSocketHandler handler, String subprotocol) {
+    public WebSocketUpgrade(WebSocketHandler handler, String subprotocol, Request handshakeRequest) {
         this.handler = Objects.requireNonNull(handler, "handler");
         this.subprotocol = subprotocol;
+        this.handshakeRequest = handshakeRequest;
+    }
+
+    public WebSocketUpgrade(WebSocketHandler handler, String subprotocol) {
+        this(handler, subprotocol, null);
     }
 
     public WebSocketUpgrade(WebSocketHandler handler) {
-        this(handler, null);
+        this(handler, null, null);
     }
 
     /** Handler to invoke once the handshake is confirmed. */
     public WebSocketHandler handler() {
         return handler;
+    }
+
+    /**
+     * The matched handshake {@link Request} — including route {@code pathParams()} — to hand to
+     * {@link WebSocketHandler#onOpen}. Null when the upgrade was built without routing context
+     * (then the transport falls back to the raw request, which carries no path parameters).
+     */
+    public Request handshakeRequest() {
+        return handshakeRequest;
     }
 
     /** Accepted subprotocol (sent in {@code Sec-WebSocket-Protocol}), or {@code null}. */

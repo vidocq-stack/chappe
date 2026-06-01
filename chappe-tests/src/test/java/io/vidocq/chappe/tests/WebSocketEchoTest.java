@@ -60,6 +60,14 @@ class WebSocketEchoTest {
                         ws.close(CloseCodes.INTERNAL_ERROR, "boom");
                     }
                 })
+                // Route path variables must reach the handshake Request (parity with HTTP routes).
+                .webSocket("/ws/rooms/{pin}", new WebSocketHandler() {
+                    @Override
+                    public void onOpen(io.vidocq.chappe.api.WebSocket ws, io.vidocq.chappe.api.Request h)
+                            throws Exception {
+                        ws.sendText("pin=" + h.pathParams().get("pin"));
+                    }
+                })
                 .build();
 
         server = Server.builder().port(0).handler(router).build();
@@ -94,6 +102,31 @@ class WebSocketEchoTest {
         ws.sendText("hello", true).get(5, TimeUnit.SECONDS);
         assertTrue(done.await(5, TimeUnit.SECONDS));
         assertEquals(List.of("hello"), new ArrayList<>(messages));
+
+        ws.sendClose(WebSocket.NORMAL_CLOSURE, "bye").get(5, TimeUnit.SECONDS);
+    }
+
+    @Test
+    void pathParamsReachHandshake() throws Exception {
+        var messages = new ConcurrentLinkedQueue<String>();
+        var done = new CountDownLatch(1);
+
+        var ws = HttpClient.newHttpClient()
+                .newWebSocketBuilder()
+                .buildAsync(URI.create(wsBaseUrl + "/ws/rooms/ABC123"), new WebSocket.Listener() {
+                    @Override
+                    public java.util.concurrent.CompletionStage<?> onText(
+                            WebSocket ws, CharSequence data, boolean last) {
+                        messages.add(data.toString());
+                        done.countDown();
+                        ws.request(1);
+                        return null;
+                    }
+                })
+                .get(5, TimeUnit.SECONDS);
+
+        assertTrue(done.await(5, TimeUnit.SECONDS), "onOpen should have sent the pin");
+        assertEquals(List.of("pin=ABC123"), new ArrayList<>(messages));
 
         ws.sendClose(WebSocket.NORMAL_CLOSURE, "bye").get(5, TimeUnit.SECONDS);
     }

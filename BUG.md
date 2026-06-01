@@ -5,6 +5,27 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-002 — WebSocket routes did not expose route `{pathParams}` to the handshake
+- **Date**: 2026-06-01 — **Status**: FIXED
+- **Severity**: medium (any WS endpoint with a `{var}` in its pattern, e.g. `/ws/rooms/{pin}`)
+- **Surfaced by**: Arago Phase 1 (room chat WebSocket) — `handshake.pathParams().get("pin")` was null.
+
+### Symptom
+`Router.webSocket("/ws/rooms/{pin}", handler)` matched the upgrade (the connection opened), but
+`onOpen(ws, handshake)` received a `Request` whose `pathParams()` was empty — the `{pin}` capture
+was lost. HTTP routes populate `pathParams()`; WS routes did not.
+
+### Cause
+`DefaultRouterBuilder.webSocket(...)` returns a `WebSocketUpgrade` from the route lambda. The lambda
+received the param-wrapped `Request` (route matching wraps it via `withPathParams`), but
+`WebSocketUpgrade` carried only the handler. `HttpConnection` then handed the **raw** request (no
+captures) to `WebSocketConnection` → `onOpen`.
+
+### Fix
+`WebSocketUpgrade` now carries the matched handshake `Request`; the `webSocket` lambda passes the
+param-wrapped `request` into it; `HttpConnection` prefers `upgrade.handshakeRequest()` over the raw
+request when invoking the WS connection. Regression: `WebSocketEchoTest.pathParamsReachHandshake`.
+
 ## CHAPPE-001 — Truncated Responses on Large Files (SO_SNDBUF Saturated)
 
 - **Date**: 2026-05-09
