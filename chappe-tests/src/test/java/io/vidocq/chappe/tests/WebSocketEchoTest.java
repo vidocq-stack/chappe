@@ -17,6 +17,7 @@ import io.vidocq.chappe.api.CloseCodes;
 import io.vidocq.chappe.api.Router;
 import io.vidocq.chappe.api.Server;
 import io.vidocq.chappe.api.WebSocketHandler;
+import io.vidocq.chappe.tests.log.CapturingLoggerFinder;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -58,6 +59,14 @@ class WebSocketEchoTest {
                     public void onOpen(io.vidocq.chappe.api.WebSocket ws, io.vidocq.chappe.api.Request h)
                             throws Exception {
                         ws.close(CloseCodes.INTERNAL_ERROR, "boom");
+                    }
+                })
+                // Handler that throws from onText and does NOT override onError: the framework must
+                // still surface the failure (log it) and close 1011 — never swallow it silently.
+                .webSocket("/throw-on-text", new WebSocketHandler() {
+                    @Override
+                    public void onText(io.vidocq.chappe.api.WebSocket ws, String message) {
+                        throw new IllegalStateException("handler-boom");
                     }
                 })
                 // Route path variables must reach the handshake Request (parity with HTTP routes).
@@ -205,6 +214,40 @@ class WebSocketEchoTest {
 
         assertTrue(closeLatch.await(5, TimeUnit.SECONDS), "Server must send Close");
         assertEquals(CloseCodes.INTERNAL_ERROR, statusHolder[0]);
+    }
+
+    @Test
+    void handlerErrorIsLoggedNotSwallowed() throws Exception {
+        var closeLatch = new CountDownLatch(1);
+        var statusHolder = new int[1];
+
+        var ws = HttpClient.newHttpClient()
+                .newWebSocketBuilder()
+                .buildAsync(URI.create(wsBaseUrl + "/throw-on-text"), new WebSocket.Listener() {
+                    @Override
+                    public java.util.concurrent.CompletionStage<?> onClose(
+                            WebSocket ws, int statusCode, String reason) {
+                        statusHolder[0] = statusCode;
+                        closeLatch.countDown();
+                        return null;
+                    }
+                })
+                .get(5, TimeUnit.SECONDS);
+
+        ws.sendText("trigger", true).get(5, TimeUnit.SECONDS);
+
+        // A handler that throws must surface as a clean 1011 close, never a silent hang.
+        assertTrue(closeLatch.await(5, TimeUnit.SECONDS), "Server must close on handler error");
+        assertEquals(CloseCodes.INTERNAL_ERROR, statusHolder[0]);
+
+        // …and the framework must LOG the cause at WARNING, even though the handler does not override
+        // onError (this is the regression: it used to be swallowed silently). Captured deterministically
+        // via the test System.LoggerFinder.
+        boolean logged = CapturingLoggerFinder.RECORDS.stream()
+                .anyMatch(r -> r.level() == System.Logger.Level.WARNING
+                        && r.thrown() instanceof IllegalStateException
+                        && "handler-boom".equals(r.thrown().getMessage()));
+        assertTrue(logged, "handler error must be logged at WARNING; records=" + CapturingLoggerFinder.RECORDS);
     }
 
     @Test

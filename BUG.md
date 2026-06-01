@@ -5,6 +5,30 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-003 — WebSocket handler exceptions were swallowed silently (no log)
+- **Date**: 2026-06-01 — **Status**: FIXED
+- **Severity**: medium (observability — turned any handler bug into a silent, hard-to-diagnose failure)
+- **Surfaced by**: Arago LAB seat locking (cf. Arago `ARAGO-007`) — a repository call threw inside
+  `onText`; the socket closed but nothing was logged, so the cause was invisible.
+
+### Symptom
+When a `WebSocketHandler` callback (`onOpen`/`onText`/`onBinary`) threw, `WebSocketConnection` closed
+the connection (1011) but the throwable vanished: `safeError` only delegated to `handler.onError`,
+whose default implementation is an empty no-op. A handler that does not override `onError` (the common
+case) lost the exception entirely — no stack trace, no log.
+
+### Cause
+`WebSocketConnection.safeError(Throwable)` called `handler.onError(this, t)` and nothing else. The
+`WebSocketHandler.onError` default is `{}`, so the framework relied on the application to surface its
+own errors.
+
+### Fix
+`safeError` now logs through a `System.Logger` (JDK, zero-dep) before delegating: routine I/O drops and
+client protocol violations (`IOException`, `WebSocketProtocolException`) at DEBUG, any other throwable
+(a handler-side bug) at WARNING. The close behaviour is unchanged. Regression:
+`WebSocketEchoTest.handlerErrorIsLoggedNotSwallowed` (captures `System.Logger` output deterministically
+via a test `System.LoggerFinder`). Full reactor green incl. 53 RFC 6455 conformance tests.
+
 ## CHAPPE-002 — WebSocket routes did not expose route `{pathParams}` to the handshake
 - **Date**: 2026-06-01 — **Status**: FIXED
 - **Severity**: medium (any WS endpoint with a `{var}` in its pattern, e.g. `/ws/rooms/{pin}`)

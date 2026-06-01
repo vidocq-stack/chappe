@@ -33,6 +33,8 @@ import io.vidocq.chappe.api.WebSocketHandler;
  */
 public final class WebSocketConnection implements WebSocket {
 
+    private static final System.Logger LOG = System.getLogger(WebSocketConnection.class.getName());
+
     private static final long DEFAULT_MAX_PAYLOAD = 64L * 1024 * 1024; // 64 MiB
     private static final int MAX_MESSAGE_SIZE = (int) DEFAULT_MAX_PAYLOAD;
 
@@ -378,6 +380,16 @@ public final class WebSocketConnection implements WebSocket {
     }
 
     private void safeError(Throwable t) {
+        // Surface the failure through the framework log before delegating: a WebSocketHandler is not
+        // required to override onError (its default is a no-op), so without this an exception thrown by
+        // a handler callback would vanish without a trace. Routine network/protocol noise (peer dropped
+        // the connection, client protocol violation) stays at DEBUG; an unexpected handler-side failure
+        // is logged at WARNING so it is actually visible.
+        if (t instanceof IOException || t instanceof WebSocketProtocolException) {
+            LOG.log(System.Logger.Level.DEBUG, "WebSocket connection closed on error", t);
+        } else {
+            LOG.log(System.Logger.Level.WARNING, "WebSocket handler error", t);
+        }
         try {
             handler.onError(this, t);
         } catch (Throwable _) {
