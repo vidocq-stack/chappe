@@ -42,6 +42,14 @@ import java.util.zip.GZIPOutputStream;
 public interface Filter {
 
     /**
+     * Named system logger used by the default {@link #accessLog()} sink — {@code io.vidocq.chappe.access}.
+     * Configure it through {@code java.util.logging} (or any {@link System.LoggerFinder}) to redirect
+     * the access log elsewhere. For the historical "stdout captured by Docker/Portainer" behaviour,
+     * use {@code accessLog(System.out::println)} explicitly.
+     */
+    System.Logger ACCESS_LOG = System.getLogger("io.vidocq.chappe.access");
+
+    /**
      * Wraps the handler {@code next} with additional behaviour.
      *
      * @param next the next handler in the chain
@@ -176,10 +184,14 @@ public interface Filter {
     /**
      * Access log filter in extended Apache Combined Log Format (CLF).
      * <p>
-     * Output to {@code System.out} (captured by Docker/Portainer):
+     * Each line is emitted at {@link System.Logger.Level#INFO INFO} on the named logger
+     * {@link #ACCESS_LOG io.vidocq.chappe.access}:
      * <pre>
      * 127.0.0.1 - yann.blazart@gmail.com [09/May/2026:18:50:54 +0000] "GET /a.png HTTP/1.1" 200 877719 12ms
      * </pre>
+     * For the cloud-native "stdout captured by Docker/Portainer" convention, use
+     * {@code accessLog(System.out::println)} explicitly, or configure JUL to bind
+     * {@code io.vidocq.chappe.access} to a {@code ConsoleHandler} on {@link System#out}.
      * <ul>
      *   <li>The client IP is read from {@code X-Forwarded-For} (first hop) or
      *       {@code X-Real-IP}, otherwise {@code Request.remoteAddress()}.</li>
@@ -190,7 +202,7 @@ public interface Filter {
      * </ul>
      */
     static Filter accessLog() {
-        return accessLog(line -> System.out.println(line));
+        return accessLog(line -> ACCESS_LOG.log(System.Logger.Level.INFO, line));
     }
 
     /** Variant of {@link #accessLog()} with a custom sink. */
