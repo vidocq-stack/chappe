@@ -55,7 +55,7 @@ Chappe provides the hooks for Servlet/JAX-RS/WebSocket/gRPC extensions:
 - **`RequestContext.CURRENT`** — ScopedValue propagated before each handler
 - **`Body.ofOutputStream()`** — streaming body (Servlet OutputStream compatibility)
 - **`Body.ofFile()`** — zero-copy via `FileChannel.transferTo()` (sendfile)
-- **`StaticFileHandler.builder()`** — static files with fallback chain (filesystem → classpath), in-memory cache, ETag, Cache-Control, `notFoundFile`/`spaFallback`, `preferPrecompressed` (`.br`/`.gz` sidecars)
+- **`StaticFileHandler.builder()`** — static files with fallback chain (filesystem → classpath), in-memory cache, ETag, Cache-Control, `notFoundFile`/`spaFallback`, `preferPrecompressed` (`.br`/`.gz` sidecars), `cleanUrls` (extensionless `/admin` → `admin.html`)
 - **`Filter.addHeader()`/`addHeaderIf()`/`addHeaderIfEnv()`/`gzip()`** — declarative header + compression middleware
 - **`AcceptEncoding.parse()`/`accepts()`** — `Accept-Encoding` negotiation (RFC 9110 §12.5.3)
 - **`MimeTypes.detect()`** — MIME detection by extension (26+ types)

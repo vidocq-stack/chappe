@@ -61,6 +61,7 @@ public final class StaticFileHandler implements Handler {
     private final String notFoundFile;
     private final String spaFallback;
     private final boolean preferPrecompressed;
+    private final boolean cleanUrls;
     private final ConcurrentHashMap<String, CachedResource> cache;
 
     private StaticFileHandler(
@@ -70,7 +71,8 @@ public final class StaticFileHandler implements Handler {
             boolean cacheInMemory,
             String notFoundFile,
             String spaFallback,
-            boolean preferPrecompressed) {
+            boolean preferPrecompressed,
+            boolean cleanUrls) {
         this.sources = List.copyOf(sources);
         this.indexFile = indexFile;
         this.cacheControl = cacheControl;
@@ -78,6 +80,7 @@ public final class StaticFileHandler implements Handler {
         this.notFoundFile = notFoundFile;
         this.spaFallback = spaFallback;
         this.preferPrecompressed = preferPrecompressed;
+        this.cleanUrls = cleanUrls;
         this.cache = cacheInMemory ? new ConcurrentHashMap<>() : null;
     }
 
@@ -150,6 +153,24 @@ public final class StaticFileHandler implements Handler {
             }
         }
 
+        // Clean URLs ("pretty URLs", GitHub Pages / Netlify style): an extensionless request
+        // (e.g. /admin or /admin/) resolves to its .html sibling (admin.html) once no file or
+        // directory index matched. Lets a multi-page build expose /admin without the .html suffix
+        // and without a per-app redirect. Skipped when the last path segment already carries an
+        // extension, so /style.css is never looked up as /style.css.html.
+        if (cleanUrls) {
+            String candidate = relative.endsWith("/") ? relative.substring(0, relative.length() - 1) : relative;
+            if (!candidate.isEmpty() && lastSegmentHasNoExtension(candidate)) {
+                String htmlPath = candidate + ".html";
+                for (var source : sources) {
+                    var resource = source.resolve(htmlPath, indexFile);
+                    if (resource != null) {
+                        return serveResource(request, resource, StatusCode.OK);
+                    }
+                }
+            }
+        }
+
         // Fallback (SPA ou 404 page)
         if (spaFallback != null) {
             Response fb = serveFallback(request, spaFallback, StatusCode.OK);
@@ -177,6 +198,13 @@ public final class StaticFileHandler implements Handler {
         }
         builder.body(resource.toBody());
         return builder.build();
+    }
+
+    /** True when the last path segment has no {@code .ext} suffix (so it is a candidate for clean-URL .html resolution). */
+    private static boolean lastSegmentHasNoExtension(String path) {
+        int slash = path.lastIndexOf('/');
+        String segment = slash < 0 ? path : path.substring(slash + 1);
+        return segment.indexOf('.') < 0;
     }
 
     private Response serveFallback(Request request, String fallbackPath, StatusCode status) throws IOException {
@@ -475,6 +503,7 @@ public final class StaticFileHandler implements Handler {
         private String notFoundFile;
         private String spaFallback;
         private boolean preferPrecompressed;
+        private boolean cleanUrls;
 
         private Builder() {}
 
@@ -537,6 +566,18 @@ public final class StaticFileHandler implements Handler {
         }
 
         /**
+         * Enables clean ("pretty") URLs: an extensionless request that matches no file or directory
+         * index is retried with a {@code .html} suffix — {@code /admin} and {@code /admin/} both serve
+         * {@code admin.html}. Lets a multi-page build expose suffix-free URLs without a per-app redirect
+         * (GitHub Pages / Netlify behaviour). Paths whose last segment already has an extension
+         * (e.g. {@code /style.css}) are never rewritten. Default: {@code false}.
+         */
+        public Builder cleanUrls(boolean enabled) {
+            this.cleanUrls = enabled;
+            return this;
+        }
+
+        /**
          * Serves pre-compressed sidecars ({@code path.br}, {@code path.gz}) in preference
          * over the original when the client accepts them. No runtime generation —
          * sidecars must exist on the filesystem (typically produced by
@@ -556,7 +597,14 @@ public final class StaticFileHandler implements Handler {
                 throw new IllegalStateException("notFoundFile and spaFallback are mutually exclusive");
             }
             return new StaticFileHandler(
-                    sources, indexFile, cacheControl, cacheInMemory, notFoundFile, spaFallback, preferPrecompressed);
+                    sources,
+                    indexFile,
+                    cacheControl,
+                    cacheInMemory,
+                    notFoundFile,
+                    spaFallback,
+                    preferPrecompressed,
+                    cleanUrls);
         }
     }
 }
