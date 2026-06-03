@@ -37,8 +37,24 @@ Also removed `SO_REUSEPORT` (kept `SO_REUSEADDR`): harmless for `port=0` tests b
 hazard for fixed-port deployments — a single-accept-loop server gains nothing from kernel
 load-balancing and it would let two live `Server` instances share one port.
 
-**Validation**: 10/10 clean `./mvnw clean install` runs, 0 RED, 0 HUNG (prior rate
-~40% RED + ~25% HUNG). jstack/jcmd evidence captured during a live stall.
+3. **Cross-PROCESS ephemeral-port collision on a wildcard `bind(0.0.0.0, 0)`**
+   (found while validating — the "cross-server contamination" of the early hypothesis was
+   in part this). A test server binding the IPv4 wildcard on an ephemeral port can be
+   handed a port a *foreign process* already holds on `127.0.0.1`/`::1` (a different
+   address family, so the two binds silently coexist — verified: `bind(0.0.0.0, P)`
+   succeeds even when `P` is taken on loopback, with or without `SO_REUSEADDR`, whereas
+   `bind(127.0.0.1, P)` correctly fails). A loopback client is then sometimes routed to
+   the foreign socket — observed as a test receiving a `301` from an IDE's built-in web
+   server (`server: IntelliJ IDEA`) and a `Invalid status line` from a local DB driver.
+   **Fix**: for `port == 0`, probe `127.0.0.1:0` first to obtain a loopback-free port,
+   then bind the real listener (on `config.host()`) to it (`ChappeServer.resolveBindPort`).
+   `SO_REUSEADDR` is irrelevant to this and was left unconditional. Production fixed-port
+   binds are unaffected.
+
+**Validation**: 10/10 clean `./mvnw clean install` runs for the protocol fixes (0 RED,
+0 HUNG; prior ~40% RED + ~25% HUNG), then 12/12 clean `chappe-tests` runs after the
+port-collision fix (the foreign-process collision reproduced ~1 run in 5 before).
+jstack/jcmd evidence captured during a live stall; bind semantics confirmed empirically.
 **Note**: the fix v1 (close active client sockets in `stop()`, commit `7591765`) remains
 valid defensive hardening but was not what closed this bug.
 

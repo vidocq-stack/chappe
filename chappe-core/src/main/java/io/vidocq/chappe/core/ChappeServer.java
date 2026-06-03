@@ -106,7 +106,7 @@ final class ChappeServer implements Server {
                 // let two live Server instances in the same JVM share one port and steal each
                 // other's connections (cross-server contamination — see CHAPPE-004).
                 ch.setOption(java.net.StandardSocketOptions.SO_REUSEADDR, true);
-                ch.bind(new InetSocketAddress(config.host(), config.port()), config.backlog());
+                ch.bind(new InetSocketAddress(config.host(), resolveBindPort()), config.backlog());
                 ch.configureBlocking(true);
                 lastBindEx = null;
                 done = true;
@@ -122,6 +122,29 @@ final class ChappeServer implements Server {
             throw lastBindEx;
         }
         return ch;
+    }
+
+    /**
+     * Resolve the port to bind to. For a fixed port this is simply {@code config.port()}.
+     * <p>
+     * For an ephemeral request ({@code port == 0}) we first bind a throwaway socket to
+     * {@code 127.0.0.1:0}: the kernel only hands back a port that is free on the loopback
+     * address, skipping any port a foreign process already holds there. We then bind the
+     * real listener (on {@code config.host()}, typically the {@code 0.0.0.0} wildcard) to
+     * that port. A plain wildcard {@code bind(0.0.0.0, 0)} can otherwise return a port a
+     * foreign service already owns on {@code 127.0.0.1}/{@code ::1} — a different address
+     * family, so the two binds silently coexist — and a loopback client is then sometimes
+     * routed to the foreign socket instead of ours. This surfaced as tests receiving
+     * responses from an IDE's built-in server or a local DB driver (CHAPPE-004).
+     */
+    private int resolveBindPort() throws IOException {
+        if (config.port() != 0) {
+            return config.port();
+        }
+        try (ServerSocketChannel probe = ServerSocketChannel.open()) {
+            probe.bind(new InetSocketAddress("127.0.0.1", 0));
+            return ((InetSocketAddress) probe.getLocalAddress()).getPort();
+        }
     }
 
     private static void closeQuietly(ServerSocketChannel ch) {
