@@ -100,8 +100,12 @@ final class ChappeServer implements Server {
         for (int attempt = 0; attempt < 5 && !done; attempt++) {
             try {
                 ch = ServerSocketChannel.open();
+                // SO_REUSEADDR only: allows rebinding a port still in TIME_WAIT on restart.
+                // SO_REUSEPORT is deliberately NOT set — Chappe has a single accept loop per
+                // Server, so kernel load-balancing across sockets buys nothing, and it would
+                // let two live Server instances in the same JVM share one port and steal each
+                // other's connections (cross-server contamination — see CHAPPE-004).
                 ch.setOption(java.net.StandardSocketOptions.SO_REUSEADDR, true);
-                setReusePort(ch);
                 ch.bind(new InetSocketAddress(config.host(), config.port()), config.backlog());
                 ch.configureBlocking(true);
                 lastBindEx = null;
@@ -138,14 +142,6 @@ final class ChappeServer implements Server {
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             return false;
-        }
-    }
-
-    private static void setReusePort(ServerSocketChannel ch) throws IOException {
-        try {
-            ch.setOption(java.net.StandardSocketOptions.SO_REUSEPORT, true);
-        } catch (UnsupportedOperationException _) {
-            // SO_REUSEPORT not supported on this OS — expected behavior
         }
     }
 
@@ -378,13 +374,43 @@ final class ChappeServer implements Server {
             channel.close();
             return;
         }
+        // Protocol sniffing needs the first 6 bytes ("PRI * ") to recognise the
+        // HTTP/2 cleartext connection preface. A single read() is NOT guaranteed
+        // to deliver them: TCP may split the 24-byte preface across segments,
+        // especially under load. Keep reading while the bytes so far are still a
+        // viable preface prefix and we have fewer than 6 of them. Bail out early
+        // (route to HTTP/1.1) the moment a byte diverges from the preface — so a
+        // real HTTP/1.1 request pays no extra latency. The socket SO_TIMEOUT
+        // bounds the wait; EOF ends it too. Without this loop a fragmented
+        // preface was misrouted to the HTTP/1.1 parser, which then choked on the
+        // binary SETTINGS frame and closed mid-handshake (client saw EOF) —
+        // CHAPPE-004.
+        while (readBuffer.position() < H2_PREFACE_PROBE.length && matchesPrefacePrefix(readBuffer)) {
+            if (channel.read(readBuffer) == -1) {
+                break;
+            }
+        }
         readBuffer.flip();
 
-        if (read >= 6 && isHttp2Preface(readBuffer)) {
+        if (isHttp2Preface(readBuffer)) {
             new Http2Connection(channel, handler, config, readBuffer).run();
         } else {
             new HttpConnection(channel, channel, channel, handler, config, readBuffer, writeBuffer).run();
         }
+    }
+
+    /** The 6 bytes that uniquely identify the start of the HTTP/2 connection preface. */
+    private static final byte[] H2_PREFACE_PROBE = {'P', 'R', 'I', ' ', '*', ' '};
+
+    /** True while every byte read so far is still consistent with the HTTP/2 preface prefix. */
+    private static boolean matchesPrefacePrefix(ByteBuffer buf) {
+        int n = Math.min(buf.position(), H2_PREFACE_PROBE.length);
+        for (int i = 0; i < n; i++) {
+            if (buf.get(i) != H2_PREFACE_PROBE[i]) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static boolean isHttp2Preface(ByteBuffer buf) {

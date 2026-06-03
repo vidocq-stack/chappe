@@ -6,9 +6,41 @@ cause hypothesis, and status.
 ---
 
 ## CHAPPE-004 — Intermittent HTTP `400 Bad Request` on `GET /` under concurrent reactor load
-- **Date**: 2026-06-03 — **Status**: OPEN — **needs deeper investigation**
+- **Date**: 2026-06-03 — **Status**: FIXED
 - **Severity**: high (real server-side race — not a CLI-specific bug as first thought)
 - **Surfaced by**: workspace-wide verification run (`./mvnw clean install` on `chappe`)
+
+### RESOLUTION (2026-06-03)
+The flake was NOT cross-server byte contamination (the early hypothesis below) and
+NOT `SO_REUSEPORT`. It was **two independent partial-read bugs**, both timing/load
+dependent, which is why the failing test mutated every run:
+
+1. **HTTP/2 cleartext preface detected on a single `read()`**
+   (`ChappeServer.handleCleartextConnection`). The 24-byte preface
+   (`PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n`) was matched only if the *first* `channel.read()`
+   returned ≥6 bytes. TCP may split the preface across segments under load, so a short
+   first read mis-routed an h2c connection to the HTTP/1.1 parser, which then choked on
+   the binary SETTINGS frame and closed mid-handshake → client saw `EOFException` /
+   `400` in ~5 ms. **Fix**: loop reading until enough bytes to confirm/reject the preface
+   prefix, bailing to HTTP/1.1 the moment a byte diverges (`matchesPrefacePrefix`).
+
+2. **`SslHandler.readInternal` deadlock on handshake-coalesced application data**
+   (the real cause of the *hangs*, proved by a `jcmd Thread.dump_to_file` virtual-thread
+   dump showing the server VT parked in `SslHandler.read` → `channel.read`). When the
+   client's first application bytes (the HTTP request) arrive in the same TCP segment as
+   the final TLS handshake flight, `doHandshake()` leaves them compacted in `netInBuffer`.
+   `readInternal()` called `channel.read()` *before* unwrapping that buffer, so a client
+   that had sent its full request and was waiting for the response blocked the server
+   forever. **Fix**: unwrap `netInBuffer` first; only `channel.read()` on `BUFFER_UNDERFLOW`.
+
+Also removed `SO_REUSEPORT` (kept `SO_REUSEADDR`): harmless for `port=0` tests but a real
+hazard for fixed-port deployments — a single-accept-loop server gains nothing from kernel
+load-balancing and it would let two live `Server` instances share one port.
+
+**Validation**: 10/10 clean `./mvnw clean install` runs, 0 RED, 0 HUNG (prior rate
+~40% RED + ~25% HUNG). jstack/jcmd evidence captured during a live stall.
+**Note**: the fix v1 (close active client sockets in `stop()`, commit `7591765`) remains
+valid defensive hardening but was not what closed this bug.
 
 ### Symptom
 Running `./mvnw clean install` on the `chappe` reactor produces an intermittent failure that
