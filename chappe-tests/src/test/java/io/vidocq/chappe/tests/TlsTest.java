@@ -3,17 +3,27 @@ package io.vidocq.chappe.tests;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.ByteBuffer;
+import java.nio.channels.SocketChannel;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.KeyStore;
 import java.security.cert.X509Certificate;
+import java.time.Duration;
 
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLEngine;
+import javax.net.ssl.SSLEngineResult;
+import javax.net.ssl.SSLEngineResult.HandshakeStatus;
+import javax.net.ssl.SSLEngineResult.Status;
+import javax.net.ssl.SSLParameters;
 import javax.net.ssl.X509TrustManager;
 
 import io.vidocq.chappe.api.Response;
@@ -149,5 +159,149 @@ class TlsTest {
         var request =
                 HttpRequest.newBuilder().uri(URI.create(baseUrl + path)).GET().build();
         return client.send(request, HttpResponse.BodyHandlers.ofString());
+    }
+
+    // -------------------------------------------------------------------------
+    // Regression: CHAPPE-004 (bug C) — application data coalesced with the final
+    // TLS handshake flight must not deadlock the server.
+    // -------------------------------------------------------------------------
+
+    private static final ByteBuffer EMPTY = ByteBuffer.allocate(0);
+
+    /**
+     * Regression for the {@code SslHandler.readInternal} deadlock: when a client sends
+     * its final handshake flight and the first application record in a single TCP
+     * segment, {@code doHandshake()} leaves the encrypted request buffered in
+     * {@code netInBuffer}. The old code called {@code channel.read()} before unwrapping
+     * that buffer, so the server blocked forever waiting for bytes the client (now
+     * waiting for the response) would never send.
+     * <p>
+     * We drive an {@link SSLEngine} by hand so we can deliberately coalesce the client
+     * Finished with the wrapped HTTP request into one socket write, then assert the
+     * server still answers. {@code assertTimeoutPreemptively} turns a regression (the
+     * server hanging) into a test failure instead of a hung build.
+     */
+    @Test
+    void requestCoalescedWithHandshakeFlightDoesNotHang() {
+        assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
+            String response = sendCoalescedRequest();
+            assertTrue(response.contains("200"), "expected a 200 status line, got:\n" + response);
+            assertTrue(response.contains("Hello TLS!"), "expected the handler body, got:\n" + response);
+        });
+    }
+
+    private String sendCoalescedRequest() throws Exception {
+        SSLEngine engine = trustAllContext.createSSLEngine("127.0.0.1", server.port());
+        engine.setUseClientMode(true);
+        SSLParameters params = engine.getSSLParameters();
+        params.setApplicationProtocols(new String[] {"http/1.1"});
+        engine.setSSLParameters(params);
+
+        int pkt = engine.getSession().getPacketBufferSize();
+        int app = engine.getSession().getApplicationBufferSize();
+        ByteBuffer netIn = ByteBuffer.allocate(pkt);
+        ByteBuffer appIn = ByteBuffer.allocate(app);
+
+        try (SocketChannel ch = SocketChannel.open(new InetSocketAddress("127.0.0.1", server.port()))) {
+            ch.configureBlocking(true);
+
+            engine.beginHandshake();
+            HandshakeStatus hs = engine.getHandshakeStatus();
+            ByteBuffer heldFinalFlight = null; // the client Finished — deferred so we can coalesce it
+
+            while (hs != HandshakeStatus.FINISHED && hs != HandshakeStatus.NOT_HANDSHAKING) {
+                switch (hs) {
+                    case NEED_WRAP -> {
+                        ByteBuffer netOut = ByteBuffer.allocate(pkt);
+                        SSLEngineResult r = engine.wrap(EMPTY, netOut);
+                        netOut.flip();
+                        hs = r.getHandshakeStatus();
+                        if (hs == HandshakeStatus.FINISHED) {
+                            heldFinalFlight = netOut; // don't send yet — coalesce with the request
+                        } else {
+                            writeFully(ch, netOut);
+                        }
+                    }
+                    case NEED_UNWRAP, NEED_UNWRAP_AGAIN -> {
+                        if (ch.read(netIn) < 0) {
+                            throw new IOException("peer closed during client handshake");
+                        }
+                        netIn.flip();
+                        SSLEngineResult r;
+                        do {
+                            appIn.clear();
+                            r = engine.unwrap(netIn, appIn);
+                            hs = r.getHandshakeStatus();
+                            if (hs == HandshakeStatus.NEED_TASK) {
+                                hs = runTasks(engine);
+                            }
+                        } while (netIn.hasRemaining()
+                                && r.getStatus() == Status.OK
+                                && (hs == HandshakeStatus.NEED_UNWRAP || hs == HandshakeStatus.NEED_UNWRAP_AGAIN));
+                        netIn.compact();
+                    }
+                    case NEED_TASK -> hs = runTasks(engine);
+                    default -> throw new IOException("unexpected handshake status: " + hs);
+                }
+            }
+
+            // Wrap the HTTP/1.1 request, then send [client Finished || request] in ONE write.
+            byte[] request = ("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+                    .getBytes(StandardCharsets.US_ASCII);
+            ByteBuffer reqNet = ByteBuffer.allocate(pkt);
+            engine.wrap(ByteBuffer.wrap(request), reqNet);
+            reqNet.flip();
+
+            int finalLen = heldFinalFlight != null ? heldFinalFlight.remaining() : 0;
+            ByteBuffer coalesced = ByteBuffer.allocate(finalLen + reqNet.remaining());
+            if (heldFinalFlight != null) {
+                coalesced.put(heldFinalFlight);
+            }
+            coalesced.put(reqNet);
+            coalesced.flip();
+            writeFully(ch, coalesced);
+
+            // Decrypt the response until the peer closes.
+            StringBuilder sb = new StringBuilder();
+            while (true) {
+                int n = ch.read(netIn);
+                if (n < 0) {
+                    break;
+                }
+                netIn.flip();
+                boolean progressed = true;
+                while (netIn.hasRemaining() && progressed) {
+                    appIn.clear();
+                    SSLEngineResult r = engine.unwrap(netIn, appIn);
+                    appIn.flip();
+                    if (appIn.hasRemaining()) {
+                        sb.append(StandardCharsets.US_ASCII.decode(appIn));
+                    }
+                    if (r.getHandshakeStatus() == HandshakeStatus.NEED_TASK) {
+                        runTasks(engine);
+                    }
+                    if (r.getStatus() == Status.CLOSED) {
+                        return sb.toString();
+                    }
+                    progressed = r.getStatus() == Status.OK;
+                }
+                netIn.compact();
+            }
+            return sb.toString();
+        }
+    }
+
+    private static HandshakeStatus runTasks(SSLEngine engine) {
+        Runnable task;
+        while ((task = engine.getDelegatedTask()) != null) {
+            task.run();
+        }
+        return engine.getHandshakeStatus();
+    }
+
+    private static void writeFully(SocketChannel ch, ByteBuffer buf) throws IOException {
+        while (buf.hasRemaining()) {
+            ch.write(buf);
+        }
     }
 }
