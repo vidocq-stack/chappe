@@ -6,6 +6,8 @@ import java.nio.ByteBuffer;
 import java.nio.channels.AsynchronousCloseException;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -46,6 +48,20 @@ final class ChappeServer implements Server {
     private final AtomicReference<ServerSocketChannel> serverChannel = new AtomicReference<>();
     private final AtomicReference<ExecutorService> executor = new AtomicReference<>();
     private final AtomicReference<Thread> acceptThread = new AtomicReference<>();
+
+    /**
+     * Live client sockets currently being handled. Required so {@link #stop()} can
+     * force-close them <em>before</em> the executor is shut down, which short-circuits
+     * any in-flight {@code channel.write()} via {@link java.nio.channels.ClosedChannelException}.
+     *
+     * <p>Without this, a virtual thread that was mid-write when {@code stop()} runs
+     * could finish its write <em>after</em> the listening port had been freed and
+     * recycled by the OS for a sibling {@code Server} instance in the same JVM
+     * (typical in test forks). The leftover bytes then surfaced as a fake response
+     * on the next test's socket — observed as 401/200/EOF/broken-pipe symptoms in
+     * CHAPPE-004.
+     */
+    private final Set<SocketChannel> activeConnections = ConcurrentHashMap.newKeySet();
 
     ChappeServer(ServerConfig config, Handler handler) {
         this.config = config;
@@ -139,7 +155,8 @@ final class ChappeServer implements Server {
             return;
         }
 
-        // 1. Close the ServerSocketChannel — unblocks accept()
+        // 1. Close the ServerSocketChannel — unblocks accept() and prevents new
+        //    connections from being accepted while we drain the existing ones.
         var ch = serverChannel.getAndSet(null);
         if (ch != null) {
             try {
@@ -159,11 +176,28 @@ final class ChappeServer implements Server {
             }
         }
 
-        // 3. Graceful shutdown: interrupt connections blocked on I/O,
-        //    then wait for draining during the grace period
+        // 3. Force-close every live client socket. This is what makes any
+        //    in-flight `channel.write()` fail with ClosedChannelException —
+        //    interrupt alone (via shutdownNow below) does NOT cancel a blocking
+        //    write, only closing the channel does. Without this step, a virtual
+        //    thread mid-write could finish *after* the listen port has been
+        //    recycled by the OS to a sibling Server in the same JVM, leaking
+        //    bytes onto another test's socket (CHAPPE-004).
+        for (SocketChannel conn : activeConnections) {
+            try {
+                conn.close();
+            } catch (IOException e) {
+                LOG.log(System.Logger.Level.DEBUG, () -> "Closing active client during stop: " + e.getMessage());
+            }
+        }
+        activeConnections.clear();
+
+        // 4. Graceful shutdown of handler executor: interrupt the (now writable-
+        //    failing) virtual threads, then wait for draining during the grace
+        //    period — by now every blocked write has thrown.
         var exec = executor.getAndSet(null);
         if (exec != null) {
-            exec.shutdownNow(); // interrupts virtual threads blocked on channel.read()
+            exec.shutdownNow();
             try {
                 long graceMs = config.shutdownGracePeriod().toMillis();
                 //noinspection ResultOfMethodCallIgnored
@@ -173,7 +207,7 @@ final class ChappeServer implements Server {
             }
         }
 
-        // 4. Release the buffer pool
+        // 5. Release the buffer pool
         bufferPool.clear();
     }
 
@@ -228,7 +262,36 @@ final class ChappeServer implements Server {
                 clientChannel.setOption(java.net.StandardSocketOptions.TCP_NODELAY, true);
                 // Configure read timeout (idle/read timeout)
                 clientChannel.socket().setSoTimeout(timeoutMs);
-                exec.execute(() -> handleConnection(clientChannel));
+                // Track for stop()-time force-close. Registering BEFORE submitting
+                // avoids a race where stop() runs between submit and the handler's
+                // own add: the handler removes itself in its finally block.
+                activeConnections.add(clientChannel);
+                // Race: stop() may have already iterated the live set and is now in
+                // the middle of shutdownNow(). Re-check `running`: if stop() has
+                // started, drop the freshly accepted client ourselves so its bytes
+                // can never reach the OS layer of a sibling Server (CHAPPE-004).
+                if (!running.get()) {
+                    activeConnections.remove(clientChannel);
+                    try {
+                        clientChannel.close();
+                    } catch (IOException _) {
+                        // best-effort
+                    }
+                    break;
+                }
+                try {
+                    exec.execute(() -> handleConnection(clientChannel));
+                } catch (java.util.concurrent.RejectedExecutionException _) {
+                    // Executor was shut down between our `running` check and submit.
+                    // Same remediation: deregister + close.
+                    activeConnections.remove(clientChannel);
+                    try {
+                        clientChannel.close();
+                    } catch (IOException _) {
+                        // best-effort
+                    }
+                    break;
+                }
             } catch (AsynchronousCloseException _) {
                 break;
             } catch (IOException e) {
@@ -256,6 +319,9 @@ final class ChappeServer implements Server {
                 // best-effort, connection already lost
             }
         } finally {
+            // Deregister BEFORE returning the buffers so stop() never sees a
+            // channel that this thread is about to release a buffer for.
+            activeConnections.remove(channel);
             bufferPool.release(readBuffer);
             bufferPool.release(writeBuffer);
         }

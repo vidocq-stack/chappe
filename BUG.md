@@ -5,6 +5,146 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-004 — Intermittent HTTP `400 Bad Request` on `GET /` under concurrent reactor load
+- **Date**: 2026-06-03 — **Status**: OPEN — **needs deeper investigation**
+- **Severity**: high (real server-side race — not a CLI-specific bug as first thought)
+- **Surfaced by**: workspace-wide verification run (`./mvnw clean install` on `chappe`)
+
+### Symptom
+Running `./mvnw clean install` on the `chappe` reactor produces an intermittent failure that
+*moves between tests* across runs:
+- Run 1: `ServeCommandTest.servesIndexFromYamlConfig` → `expected: <200> but was: <400>`
+- Run 2: `Http2GrpcTransportTest.unaryEcho` → `EOFException` at handshake
+- Run 3: `ExtensionSpiTest.requestUriHasAuthorityFromHostHeader` → `expected: <200> but was: <400>`
+
+Common pattern: **a perfectly valid HTTP/1.1 (or HTTP/2 handshake) request gets rejected with
+`400 Bad Request` (or the connection is closed mid-handshake) when the reactor is under
+multi-module test load**. In isolation (`mvn -pl chappe-cli test` or running the single test
+5×) every test passes — failure rate ≈ 33% across the full reactor.
+
+### Diagnostic so far
+- Branch clean, HEAD `d8e0b51`, no local diff
+- 5/5 isolated runs of `ServeCommandTest#servesIndexFromYamlConfig` → green
+- 3/3 isolated runs of full `chappe-cli` test suite → green
+- 5 full `./mvnw clean install` runs → 2 green, 3 red — **the failing test mutates every run**:
+  - `ServeCommandTest.servesIndexFromYamlConfig` (400 vs 200)
+  - `Http2GrpcTransportTest.unaryEcho` (EOFException at handshake)
+  - `ExtensionSpiTest.requestUriHasAuthorityFromHostHeader` (400 vs 200)
+  - `HttpMethodsTest.patchWithBody` (`HTTP/1.1 header parser received no bytes`)
+  - `ExtensionSpiTest.staticFilePathTraversal` (**401 vs 403** — see below)
+  - `Http2GrpcTransportTest.gzipRequestDecodedAutomatically` (`Broken pipe` mid-write)
+- All failing tests use real socket I/O against a `port=0` server
+- **Confirmed not related to a `:8080` port collision** — even with 8080 free, 3/3
+  full reactor runs still flake on different tests
+
+### Critical signal — `401` instead of `403` on a static-file test
+`ExtensionSpiTest.staticFilePathTraversal` tests a path traversal attempt against a
+**static-file server with no auth in scope**. The server simply cannot produce a `401
+Unauthorized` from its own routes — there is no challenge, no realm. Yet the client
+receives one. The only plausible source is a **cross-connection contamination**: the
+client socket reads bytes that belong to a *different* `Server` instance running
+elsewhere in the JVM (or a different test in the same fork) that legitimately answered
+`401` for an auth-protected endpoint.
+
+This pinpoints the cause to **JVM-wide shared mutable state**:
+- A `static` `ByteBufferPool` whose recycled buffers leak bytes across `Server` instances;
+- A `static` socket / `ServerSocketChannel` map keyed on something not unique per `Server`;
+- A `static` `RequestContext` / `ScopedValue` carrier that bleeds across handlers when
+  multiple servers run in parallel.
+
+The 400-vs-200, EOF, Broken-pipe, "no bytes" symptoms all fit the same root cause:
+the parser ingests bytes that belonged to a previous request (whether on the same
+connection or on a sibling Server's pool), parses junk, and either rejects (400) or
+closes mid-frame (EOF / Broken pipe).
+
+### Cause hypothesis
+Server-side race condition — likely candidates:
+1. **`ByteBufferPool` corruption** under concurrent connection burst (a buffer is recycled
+   while still being read by another thread).
+2. **Parser state leak** — `Http11Parser` or HPACK decoder reuses state from a previous
+   connection (no per-connection isolation).
+3. **`RequestContext.CURRENT` ScopedValue leak** between virtual threads.
+
+The fact that the symptom mutates between `400 Bad Request` and `EOFException` strongly
+suggests the server reads garbage bytes (recycled buffer) and either fails the request-line
+parse (→ 400) or closes mid-frame (→ EOF).
+
+### Minimal repro
+```bash
+cd chappe
+for i in 1 2 3 4 5; do ./mvnw -ntp clean install >/tmp/r$i.log 2>&1; \
+   grep "Tests run.*Failures: [1-9]" /tmp/r$i.log | head -1; done
+```
+≈ 33-50% red rate on a quiet machine.
+
+### Investigation results (this session)
+- `ByteBufferPool` is a per-instance field of `ChappeServer` (not a static singleton),
+  and its `ThreadLocal<ArrayDeque<ByteBuffer>>` is per-instance too → pool isolation OK.
+- The 401 in `ExtensionSpiTest.staticFilePathTraversal` matches exactly the 401 that
+  `RouterTest.filterBlocksUnauthenticated` produces on `/admin/dashboard`. Both tests
+  live in `chappe-tests`, same surefire fork, no `<parallel>` configured → tests run
+  sequentially. So the 401 must travel **across the `Server.stop()` / `Server.start()`
+  boundary** within the same JVM fork.
+- `ChappeServer.stop()` calls `executor.shutdownNow()` then `awaitTermination(graceMs)`.
+  `shutdownNow()` only **interrupts** the running virtual threads — a VT blocked in
+  `channel.write()` (response body) is *not* cancelled by interrupt; it finishes its
+  write loop. If the grace period expires before the VT lands, the next test starts
+  a new Server and the OS may recycle the freed port immediately (especially under
+  `SO_REUSEADDR`). The leftover VT then writes its `401` bytes onto a socket that
+  the *new* Server now serves to a *different* test's client.
+
+### Fix v1 applied (partial — knocks down rate from ~60-70% to ~20-40%)
+`ChappeServer` now:
+1. Tracks every accepted `SocketChannel` in a `ConcurrentHashMap`-backed set
+   (`activeConnections`).
+2. `acceptLoop()` does the registration *immediately* after `accept()` and re-checks
+   `running.get()` (plus catches `RejectedExecutionException`) to close any client
+   that races against `stop()`.
+3. `handleConnection()` de-registers in `finally` (regardless of how it exits).
+4. `stop()` now force-closes every still-live `SocketChannel` *after* closing the
+   `ServerSocketChannel` and joining the accept thread, but *before*
+   `executor.shutdownNow()`. Closing the channel turns any in-flight `channel.write()`
+   into `ClosedChannelException` (the only thing that actually unblocks a write —
+   `Thread.interrupt()` does not).
+
+### Remaining residual flake (~20-30% rate, different shape)
+After the fix two new failure patterns appear:
+1. `WebSocketRfc6455Test.serverDoesNotAcceptUnmaskedClientFrame` → handshake gets
+   `HTTP/1.1 404 Not Found` (still cross-Server, but harder to trigger).
+2. `ExtensionSpiTest.requestAttributes` → expected `user=admin`, got `` (empty body).
+   This one is *intra*-Server: a single Server using keep-alive seems to leak
+   `Request.attribute()` / `RequestContext` state between successive requests on
+   the same connection (`Request#attribute` map not cleared between requests on a
+   keep-alive socket, *or* `RequestContext.CURRENT` ScopedValue not re-bound).
+
+### Next step (dedicated session)
+1. Investigate `HttpConnection` (HTTP/1.1) keep-alive loop: confirm that
+   `Request#attribute()` map and any `ScopedValue` carrier are reset on every
+   new request, not reused across pipelined / keep-alive iterations.
+2. Consider disabling `SO_REUSEPORT` on test profiles (`bindWithRetry()` calls
+   `setReusePort`) — that option allows two `Server` instances to receive
+   connections on the same port concurrently and is unsafe inside a single JVM
+   where multiple servers come and go.
+3. Add a `Connection: close` short-circuit when `stop()` is called: walk the
+   live HTTP/1.1 connections and refuse further requests so keep-alive can't
+   sneak in a late one.
+
+### Next step
+1. Reproduce in a microbenchmark: start/stop 100 servers in a row with concurrent
+   requests in flight; observe whether late bytes appear on the next server's port.
+2. In `ChappeServer.stop()`, wait for **all** in-flight `channel.write()` to drain
+   before closing the serverChannel (block on a per-connection `latch`), or
+   explicitly close all client `SocketChannel` instances first to fail their writes.
+3. Verify `SO_REUSEADDR` setting on the `ServerSocketChannel` — if set, TIME_WAIT
+   sockets can be reassigned immediately to a different `Server` instance in the
+   same JVM.
+4. Alternative quick win: add a brief sleep (50 ms) in `Server.stop()` between
+   serverChannel close and executor termination to let pending writes flush.
+5. Capture server-side bytes on the 400 path (`io.vidocq.chappe.http.Http11Parser`)
+   to confirm the parser sees recycled bytes rather than a malformed real request.
+
+---
+
 ## CHAPPE-003 — WebSocket handler exceptions were swallowed silently (no log)
 - **Date**: 2026-06-01 — **Status**: FIXED
 - **Severity**: medium (observability — turned any handler bug into a silent, hard-to-diagnose failure)
