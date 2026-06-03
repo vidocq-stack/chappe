@@ -145,14 +145,17 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
         }
 
         while (true) {
-            appInBuffer.clear();
-
-            int bytesRead = channel.read(netInBuffer);
-            if (bytesRead < 0 && netInBuffer.position() == 0) {
-                return -1;
-            }
-
+            // Unwrap whatever is ALREADY buffered in netInBuffer before touching the
+            // socket. Application data often arrives coalesced with the final TLS
+            // handshake flight in a single TCP segment; doHandshake() leaves those
+            // encrypted bytes compacted in netInBuffer. If we blindly called
+            // channel.read() first (as the previous version did), a client that has
+            // sent its full request and is now waiting for the response would deadlock
+            // us forever — the complete record is in hand but the peer sends no more
+            // bytes. So we only read from the socket on BUFFER_UNDERFLOW (the engine
+            // genuinely needs more ciphertext). (CHAPPE-004)
             netInBuffer.flip();
+            appInBuffer.clear();
             SSLEngineResult result = engine.unwrap(netInBuffer, appInBuffer);
             netInBuffer.compact();
             appInBuffer.flip();
@@ -163,9 +166,15 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
             switch (result.getStatus()) {
                 case OK -> {
                     if (appInBuffer.hasRemaining()) return drain(dst);
+                    // Produced no application data (e.g. a non-app record was consumed)
+                    // — loop to unwrap any further buffered records.
                 }
                 case BUFFER_UNDERFLOW -> {
-                    if (bytesRead < 0) return -1;
+                    // Engine needs more ciphertext: now it is safe to block on the socket.
+                    int bytesRead = channel.read(netInBuffer);
+                    if (bytesRead < 0) {
+                        return -1;
+                    }
                 }
                 case BUFFER_OVERFLOW -> throw new IOException("appInBuffer overflow");
                 case CLOSED -> {
