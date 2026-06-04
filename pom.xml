@@ -46,10 +46,6 @@
     </licenses>
 
     <properties>
-        <maven.compiler.enablePreview>true</maven.compiler.enablePreview>
-
-        <vauban.version>0.1.1</vauban.version>
-
         <!-- Quality -->
         <spotless.version>2.46.1</spotless.version>
         <palantir.version>2.84.0</palantir.version>
@@ -58,6 +54,7 @@
         <sonar.java.source>25</sonar.java.source>
         <sonar.coverage.jacoco.xmlReportPaths>${project.build.directory}/site/jacoco/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
         <sonar.exclusions>**/generated/**</sonar.exclusions>
+        <sonar-maven-plugin.version>5.1.0.4751</sonar-maven-plugin.version>
     </properties>
 
     <modules>
@@ -96,29 +93,10 @@
     <build>
         <pluginManagement>
             <plugins>
-                <!-- Override : enable-preview requis pour les preview features Java 25 -->
-                <plugin>
-                    <groupId>org.apache.maven.plugins</groupId>
-                    <artifactId>maven-compiler-plugin</artifactId>
-                    <configuration>
-                        <release>${maven.compiler.release}</release>
-                        <enablePreview>${maven.compiler.enablePreview}</enablePreview>
-                        <compilerArgs>
-                            <arg>--enable-preview</arg>
-                        </compilerArgs>
-                    </configuration>
-                </plugin>
-                <plugin>
-                    <groupId>org.apache.maven.plugins</groupId>
-                    <artifactId>maven-surefire-plugin</artifactId>
-                    <configuration>
-                        <argLine>--enable-preview</argLine>
-                    </configuration>
-                </plugin>
                 <plugin>
                     <groupId>org.sonarsource.scanner.maven</groupId>
                     <artifactId>sonar-maven-plugin</artifactId>
-                    <version>5.1.0.4751</version>
+                    <version>${sonar-maven-plugin.version}</version>
                 </plugin>
                 <plugin>
                     <groupId>com.diffplug.spotless</groupId>
