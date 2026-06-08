@@ -8,7 +8,7 @@
     <parent>
         <groupId>io.vidocq</groupId>
         <artifactId>vidocq-parent</artifactId>
-        <version>0.1.1</version>
+        <version>0.1.2-SNAPSHOT</version>
         <relativePath/>
     </parent>
 
@@ -38,10 +38,28 @@
         <url>https://codeberg.org/Vidocq/chappe</url>
     </scm>
 
+    <!--
+        Disjunctive triple license: a recipient may use this software under
+        ANY ONE of the three licences below, at their option. EPL-2.0 is the
+        anchor (see the LICENSE file); per EPL-2.0 section 1, GPL-2.0-or-later
+        is offered as a Secondary License.
+        SPDX-License-Identifier: EPL-2.0 OR EUPL-1.2 OR GPL-2.0-or-later
+    -->
     <licenses>
         <license>
-            <name>Apache License, Version 2.0</name>
-            <url>https://www.apache.org/licenses/LICENSE-2.0</url>
+            <name>EPL-2.0</name>
+            <url>https://www.eclipse.org/legal/epl-2.0/</url>
+            <distribution>repo</distribution>
+        </license>
+        <license>
+            <name>EUPL-1.2</name>
+            <url>https://joinup.ec.europa.eu/collection/eupl/eupl-text-eupl-12</url>
+            <distribution>repo</distribution>
+        </license>
+        <license>
+            <name>GPL-2.0-or-later</name>
+            <url>https://www.gnu.org/licenses/old-licenses/gpl-2.0.html</url>
+            <distribution>repo</distribution>
         </license>
     </licenses>
 

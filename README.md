@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://www.java.com/"><img src="https://img.shields.io/badge/Java-25-orange?logo=openjdk" alt="Java 25"/></a>
   <a href="https://maven.apache.org/"><img src="https://img.shields.io/badge/Maven-4.0-blue?logo=apachemaven" alt="Maven 4"/></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-green.svg" alt="License"/></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-EPL--2.0%20OR%20EUPL--1.2%20OR%20GPL--2.0--or--later-blue.svg" alt="License"/></a>
   <img src="https://img.shields.io/badge/HTTP-1.1%20%7C%202-red" alt="HTTP 1.1/2"/>
   <img src="https://img.shields.io/badge/dependencies-0-brightgreen" alt="Zero deps"/>
 </p>
@@ -504,4 +504,4 @@ Chappe is part of the **Vidocq** family:
 
 ## License
 
-[Apache License 2.0](LICENSE) — © Yann Blazart
+[EPL-2.0 OR EUPL-1.2 OR GPL-2.0-or-later](LICENSE) — © Yann Blazart
