@@ -367,6 +367,25 @@ public final class HttpRequestImpl implements Request, Headers {
         return this;
     }
 
+    /** Connection-provided hook arming the client-disconnect probe (may be null). */
+    @FunctionalInterface
+    public interface DisconnectArmer {
+        boolean arm(Runnable callback);
+    }
+
+    private DisconnectArmer disconnectArmer;
+
+    /** Installed once per connection by {@code HttpConnection}. */
+    public void disconnectArmer(DisconnectArmer armer) {
+        this.disconnectArmer = armer;
+    }
+
+    @Override
+    public boolean onDisconnect(Runnable callback) {
+        var armer = this.disconnectArmer;
+        return armer != null && callback != null && armer.arm(callback);
+    }
+
     @Override
     public java.net.InetSocketAddress remoteAddress() {
         return remoteAddress;

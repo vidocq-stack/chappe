@@ -105,6 +105,28 @@ public interface Request {
         return this;
     }
 
+    /**
+     * Registers a callback invoked if the client connection is detected as
+     * closed (FIN or RST) while this request is still being handled — i.e.
+     * before the handler has returned its {@link Response}. Intended for
+     * long-suspended responses (JAX-RS {@code @Suspended AsyncResponse}):
+     * the callback lets the application stop working for a client that is
+     * gone instead of waiting for its own timeout.
+     *
+     * <p>Detection is best-effort, via a non-destructive read probe on the
+     * connection's parse buffer (pipelined bytes are preserved). The probe is
+     * disarmed as soon as the handler returns; once the response is being
+     * written, a disconnect surfaces as a write failure instead.
+     *
+     * @return {@code true} if the probe was armed; {@code false} when the
+     *         transport cannot probe — current limitations: TLS and HTTP/2
+     *         connections, and requests whose body has not been fully
+     *         consumed (the probe shares the parse buffer).
+     */
+    default boolean onDisconnect(Runnable callback) {
+        return false;
+    }
+
     /** Remote (client) socket address. */
     default java.net.InetSocketAddress remoteAddress() {
         return null;
