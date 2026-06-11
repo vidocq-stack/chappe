@@ -331,7 +331,7 @@ public final class HttpConnection {
 
         // Transfer-Encoding: chunked wins over Content-Length (RFC 9112 §6.3)
         if ("chunked".equalsIgnoreCase(transferEncoding)) {
-            return HttpBodyReader.chunked(readBuffer, readChannel);
+            return HttpBodyReader.chunked(readBuffer, readChannel, request::setTrailers);
         }
 
         if (contentLengthStr != null) {

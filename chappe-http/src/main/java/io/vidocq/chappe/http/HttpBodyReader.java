@@ -23,6 +23,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.ReadableByteChannel;
+import java.util.function.Consumer;
+
+import io.vidocq.chappe.api.Headers;
 
 /**
  * Factory for InputStreams used to read the HTTP body.
@@ -39,10 +42,12 @@ public final class HttpBodyReader {
     }
 
     /**
-     * Creates an InputStream for a chunked-transfer-encoded body.
+     * Creates an InputStream for a chunked-transfer-encoded body. Trailer
+     * fields after the terminal chunk are delivered to {@code trailersConsumer}
+     * (RFC 9112 §7.1.2).
      */
-    static InputStream chunked(ByteBuffer buffer, ReadableByteChannel channel) {
-        return new ChunkedInputStream(buffer, channel);
+    static InputStream chunked(ByteBuffer buffer, ReadableByteChannel channel, Consumer<Headers> trailersConsumer) {
+        return new ChunkedInputStream(buffer, channel, trailersConsumer);
     }
 
     /**

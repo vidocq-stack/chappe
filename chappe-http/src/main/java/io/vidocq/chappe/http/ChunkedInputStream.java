@@ -23,11 +23,17 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.ReadableByteChannel;
+import java.util.function.Consumer;
+
+import io.vidocq.chappe.api.Headers;
 
 /**
  * InputStream decoding chunked transfer encoding (RFC 9112, Section 7.1).
  * <p>
  * Format: {@code chunk-size(hex) CRLF chunk-data CRLF}, terminated by a chunk of size 0.
+ * Trailer fields after the terminal chunk (RFC 9112 §7.1.2) are parsed and
+ * delivered to the optional consumer, mirroring the HTTP/2 trailers path
+ * ({@code Request.trailers()}).
  */
 final class ChunkedInputStream extends InputStream {
 
@@ -40,12 +46,18 @@ final class ChunkedInputStream extends InputStream {
 
     private final ByteBuffer buffer;
     private final ReadableByteChannel channel;
+    private final Consumer<Headers> trailersConsumer;
     private ChunkState chunkState = ChunkState.READ_SIZE;
     private long chunkRemaining;
 
     ChunkedInputStream(ByteBuffer buffer, ReadableByteChannel channel) {
+        this(buffer, channel, null);
+    }
+
+    ChunkedInputStream(ByteBuffer buffer, ReadableByteChannel channel, Consumer<Headers> trailersConsumer) {
         this.buffer = buffer;
         this.channel = channel;
+        this.trailersConsumer = trailersConsumer;
     }
 
     @Override
@@ -190,18 +202,30 @@ final class ChunkedInputStream extends InputStream {
     }
 
     private void consumeTrailers() throws IOException {
-        // Trailers are header lines terminated by an empty line
-        boolean lineStart = true;
+        // Trailers are "name: value" lines terminated by an empty line.
+        // Parsed (not just skipped) so Request.trailers() can expose them.
+        StringBuilder line = new StringBuilder();
+        Headers.Builder trailers = null;
         while (true) {
-            if (!ensureData()) return;
+            if (!ensureData()) break; // EOF — deliver what was parsed so far
             int b = buffer.get() & 0xFF;
             if (b == '\r') continue;
             if (b == '\n') {
-                if (lineStart) return; // Empty line = end of trailers
-                lineStart = true;
+                if (line.isEmpty()) break; // empty line = end of trailers
+                int colon = line.indexOf(":");
+                if (colon > 0) {
+                    String name = line.substring(0, colon).trim();
+                    String value = line.substring(colon + 1).trim();
+                    if (trailers == null) trailers = Headers.builder();
+                    trailers.add(name, value);
+                }
+                line.setLength(0);
             } else {
-                lineStart = false;
+                line.append((char) b); // header field bytes, latin-1
             }
+        }
+        if (trailersConsumer != null && trailers != null) {
+            trailersConsumer.accept(trailers.build());
         }
     }
 
