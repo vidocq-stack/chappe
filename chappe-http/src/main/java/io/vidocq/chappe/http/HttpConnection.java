@@ -55,6 +55,12 @@ public final class HttpConnection {
     private final RequestContext context;
     private volatile boolean open = true;
 
+    // --- Client-disconnect probe (Request.onDisconnect) ---
+    private volatile boolean bodyPending;
+    private volatile boolean probeArmed;
+    private volatile Runnable disconnectCallback;
+    private volatile Thread probeThread;
+
     public HttpConnection(SocketChannel channel, Handler handler, ServerConfig config) {
         this(channel, channel, channel, handler, config, null, null);
     }
@@ -95,6 +101,7 @@ public final class HttpConnection {
         if (closeable instanceof SocketChannel sc) {
             request.initConnectionInfo(sc, false);
         }
+        request.disconnectArmer(this::armDisconnectProbe);
     }
 
     /**
@@ -154,6 +161,7 @@ public final class HttpConnection {
                 if (bodyStream != null) {
                     request.body = Body.of(bodyStream, contentLength());
                 }
+                bodyPending = bodyStream != null;
 
                 // 3. Dispatch to handler with ScopedValue binding
                 boolean keepAlive = isKeepAlive();
@@ -166,6 +174,11 @@ public final class HttpConnection {
                             .status(StatusCode.INTERNAL_SERVER_ERROR)
                             .body("Internal Server Error")
                             .build();
+                } finally {
+                    // The probe shares the parse buffer: it must be fully stopped
+                    // before the loop resumes channel reads (next request parse,
+                    // WebSocket takeover) or response writing.
+                    disarmDisconnectProbe();
                 }
 
                 // 4a-bis. gRPC requires HTTP/2 — defensive rejection on HTTP/1.1 layer.
@@ -217,10 +230,90 @@ public final class HttpConnection {
     /** Closes the connection. */
     public void close() {
         open = false;
+        disarmDisconnectProbe();
         try {
             closeable.close();
         } catch (IOException _) {
             // Ignore
+        }
+    }
+
+    // --- Client-disconnect probe (Request.onDisconnect) ---
+
+    /**
+     * Arms a best-effort client-disconnect probe for the request currently
+     * being handled. Plaintext HTTP/1.1 only ({@code readChannel} must be the
+     * raw {@link SocketChannel} so the probe can switch to non-blocking reads),
+     * and only when the request body is absent — the probe reads into the
+     * shared parse buffer, which would race a concurrent body consumer.
+     */
+    private boolean armDisconnectProbe(Runnable callback) {
+        if (!(readChannel instanceof SocketChannel)) return false; // TLS / wrapped channel
+        if (bodyPending || !open || probeArmed) return false;
+        disconnectCallback = callback;
+        probeArmed = true;
+        probeThread = Thread.ofVirtual().name("chappe-disconnect-probe").start(this::probeLoop);
+        return true;
+    }
+
+    /**
+     * Polls the socket every 100 ms with a non-blocking, non-destructive read
+     * into the parse buffer: EOF (FIN) or an IOException (RST) means the
+     * client is gone → fire the callback. Pipelined bytes that arrive early
+     * are simply kept in the buffer for the next parse iteration.
+     */
+    private void probeLoop() {
+        var sc = (SocketChannel) readChannel;
+        try {
+            while (probeArmed && open) {
+                int n;
+                sc.configureBlocking(false);
+                try {
+                    readBuffer.compact();
+                    n = sc.read(readBuffer);
+                    readBuffer.flip();
+                } finally {
+                    sc.configureBlocking(true);
+                }
+                if (n == -1) {
+                    fireDisconnect();
+                    return;
+                }
+                Thread.sleep(100);
+            }
+        } catch (IOException _) {
+            fireDisconnect(); // hard close / connection reset
+        } catch (InterruptedException _) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private void fireDisconnect() {
+        if (!probeArmed) return;
+        probeArmed = false;
+        Runnable cb = disconnectCallback;
+        disconnectCallback = null;
+        if (cb != null) {
+            try {
+                cb.run();
+            } catch (RuntimeException _) {
+                // listener failure must not take the connection down
+            }
+        }
+    }
+
+    /** Stops the probe and waits for it to release the parse buffer/channel. */
+    private void disarmDisconnectProbe() {
+        probeArmed = false;
+        disconnectCallback = null;
+        Thread t = probeThread;
+        probeThread = null;
+        if (t != null) {
+            try {
+                t.join(500); // probe wakes within its 100 ms poll interval
+            } catch (InterruptedException _) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 
