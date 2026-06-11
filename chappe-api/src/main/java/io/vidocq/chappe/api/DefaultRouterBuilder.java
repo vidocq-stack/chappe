@@ -19,7 +19,6 @@
  */
 package io.vidocq.chappe.api;
 
-import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -434,94 +433,20 @@ final class DefaultRouterBuilder implements Router.Builder {
     }
 
     /**
-     * Creates a Request wrapper that adds pathParams.
+     * Creates a Request wrapper that adds pathParams. Forwards everything
+     * else (see {@link ForwardingRequest} for why hand-rolled wrappers are
+     * forbidden here).
      */
     private static Request withPathParams(Request delegate, Map<String, String> pathParams) {
-        return new Request() {
+        return new ForwardingRequest() {
             @Override
-            public HttpMethod method() {
-                return delegate.method();
-            }
-
-            @Override
-            public URI uri() {
-                return delegate.uri();
-            }
-
-            @Override
-            public String path() {
-                return delegate.path();
-            }
-
-            @Override
-            public String contextPath() {
-                return delegate.contextPath();
-            }
-
-            @Override
-            public String pathInfo() {
-                return delegate.pathInfo();
-            }
-
-            @Override
-            public String query() {
-                return delegate.query();
-            }
-
-            @Override
-            public HttpVersion version() {
-                return delegate.version();
-            }
-
-            @Override
-            public Headers headers() {
-                return delegate.headers();
-            }
-
-            @Override
-            public Body body() {
-                return delegate.body();
+            public Request delegate() {
+                return delegate;
             }
 
             @Override
             public Map<String, String> pathParams() {
                 return pathParams;
-            }
-
-            @Override
-            public Map<String, String> queryParams() {
-                return delegate.queryParams();
-            }
-
-            @Override
-            public Object attribute(String key) {
-                return delegate.attribute(key);
-            }
-
-            @Override
-            public Request attribute(String key, Object value) {
-                delegate.attribute(key, value);
-                return this;
-            }
-
-            @Override
-            public java.net.InetSocketAddress remoteAddress() {
-                return delegate.remoteAddress();
-            }
-
-            @Override
-            public java.net.InetSocketAddress localAddress() {
-                return delegate.localAddress();
-            }
-
-            @Override
-            public boolean isSecure() {
-                return delegate.isSecure();
-            }
-
-            @Override
-            public String scheme() {
-                return delegate.scheme();
             }
         };
     }
@@ -530,15 +455,10 @@ final class DefaultRouterBuilder implements Router.Builder {
         String stripped = originalPath.substring(mountPrefix.length());
         if (stripped.isEmpty()) stripped = "/";
         final String mountedPath = stripped;
-        return new Request() {
+        return new ForwardingRequest() {
             @Override
-            public HttpMethod method() {
-                return delegate.method();
-            }
-
-            @Override
-            public URI uri() {
-                return delegate.uri();
+            public Request delegate() {
+                return delegate;
             }
 
             @Override
@@ -554,67 +474,6 @@ final class DefaultRouterBuilder implements Router.Builder {
             @Override
             public String pathInfo() {
                 return mountedPath;
-            }
-
-            @Override
-            public String query() {
-                return delegate.query();
-            }
-
-            @Override
-            public HttpVersion version() {
-                return delegate.version();
-            }
-
-            @Override
-            public Headers headers() {
-                return delegate.headers();
-            }
-
-            @Override
-            public Body body() {
-                return delegate.body();
-            }
-
-            @Override
-            public Map<String, String> pathParams() {
-                return delegate.pathParams();
-            }
-
-            @Override
-            public Map<String, String> queryParams() {
-                return delegate.queryParams();
-            }
-
-            @Override
-            public Object attribute(String key) {
-                return delegate.attribute(key);
-            }
-
-            @Override
-            public Request attribute(String key, Object value) {
-                delegate.attribute(key, value);
-                return this;
-            }
-
-            @Override
-            public java.net.InetSocketAddress remoteAddress() {
-                return delegate.remoteAddress();
-            }
-
-            @Override
-            public java.net.InetSocketAddress localAddress() {
-                return delegate.localAddress();
-            }
-
-            @Override
-            public boolean isSecure() {
-                return delegate.isSecure();
-            }
-
-            @Override
-            public String scheme() {
-                return delegate.scheme();
             }
         };
     }

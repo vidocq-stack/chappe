@@ -167,6 +167,43 @@ class ChunkedTrailersTest {
         }
     }
 
+    /**
+     * Trailers must survive the {@code Router.mount} wrapper (foy mounts the
+     * Servlet bridge this way — BUG-20260611-01 second leg: the mount wrapper
+     * fell back to the {@code trailers()} interface default).
+     */
+    @Test
+    void trailersSurviveMountWrapper() throws IOException {
+        var router = io.vidocq.chappe.api.Router.builder()
+                .mount("/ctx", req -> {
+                    String body;
+                    try {
+                        body = new String(req.body().asInputStream().readAllBytes(), StandardCharsets.UTF_8);
+                    } catch (IOException e) {
+                        return Response.of(io.vidocq.chappe.api.StatusCode.INTERNAL_SERVER_ERROR);
+                    }
+                    return Response.ok(
+                            "body=" + body + ";myTrailer=" + req.trailers().firstOrNull("myTrailer"));
+                })
+                .build();
+        var mounted = Server.builder().port(0).handler(router).build();
+        mounted.start();
+        try (var socket = new Socket("127.0.0.1", mounted.port())) {
+            socket.setSoTimeout(5000);
+            var out = socket.getOutputStream();
+            var in = socket.getInputStream();
+
+            write(out, "POST /ctx/t HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n");
+            write(out, "3\r\nABC\r\n0\r\nmyTrailer:foo\r\n\r\n");
+            out.flush();
+
+            var response = readResponse(in);
+            assertTrue(response.contains("myTrailer=foo"), "Trailers must traverse the mount wrapper: " + response);
+        } finally {
+            mounted.stop();
+        }
+    }
+
     /** Trailers must also be parsed when the handler does NOT read the body (drain path). */
     @Test
     void drainPath_doesNotDesyncKeepAlive() throws IOException {

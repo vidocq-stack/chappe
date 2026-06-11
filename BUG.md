@@ -5,6 +5,36 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-005 — Idle timeout was a silent no-op: idle keep-alive connections never closed
+
+- **Date**: 2026-06-12
+- **Status**: FIXED (`pr/ybl/forwarding-request` — `BoundedReads` watchdog)
+- **Symptom**: `ServerConfig.idleTimeout` (default 60 s) had no effect — an
+  idle keep-alive connection, or a client that connects and never sends a
+  request (slowloris), held its connection (and virtual thread) forever.
+  Discovered through the Servlet TCK 6.1.0 `TrailerTest`, whose client reads
+  the response to EOF on a keep-alive connection and relies on the
+  container's keep-alive timeout to close it (fixed upstream by switching to
+  `Connection: close`, jakartaee/servlet commit `079ceb29cb`) — the foy TCK
+  suite froze on it (foy BUG-20260611-01).
+- **Minimal repro**: `nc <host> <port>` and send nothing, or one full request
+  then nothing — the connection stayed open indefinitely.
+- **Root cause**: the accept loop configured
+  `clientChannel.socket().setSoTimeout(timeoutMs)`, but `SO_TIMEOUT` is a
+  silent no-op for blocking `SocketChannel` reads (it only applies to
+  `Socket.getInputStream()` reads) — a classic NIO trap. The intent existed,
+  the mechanism never fired.
+- **Fix**: `BoundedReads.readWithTimeout` — a virtual-thread watchdog closes
+  the channel at the deadline, waking the blocked read
+  (`AsynchronousCloseException`); `Selector.select` was rejected because it
+  pins the carrier thread. Applied to the keep-alive wait in
+  `HttpConnection.run()` (fast non-blocking probe first, so back-to-back
+  traffic pays nothing) and to the first protocol-sniffing read in
+  `ChappeServer.handleCleartextConnection`. TLS handshake reads are not
+  bounded yet (follow-up if needed). Tests: `KeepAliveIdleTimeoutTest`.
+
+---
+
 ## CHAPPE-004 — Intermittent HTTP `400 Bad Request` on `GET /` under concurrent reactor load
 - **Date**: 2026-06-03 — **Status**: FIXED
 - **Severity**: high (real server-side race — not a CLI-specific bug as first thought)

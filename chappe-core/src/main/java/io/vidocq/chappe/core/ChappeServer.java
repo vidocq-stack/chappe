@@ -40,6 +40,7 @@ import io.vidocq.chappe.api.ChappeException;
 import io.vidocq.chappe.api.Handler;
 import io.vidocq.chappe.api.Server;
 import io.vidocq.chappe.api.ServerConfig;
+import io.vidocq.chappe.http.BoundedReads;
 import io.vidocq.chappe.http.ByteBufferPool;
 import io.vidocq.chappe.http.HttpConnection;
 import io.vidocq.chappe.http.SslHandler;
@@ -411,7 +412,10 @@ final class ChappeServer implements Server {
     private void handleCleartextConnection(SocketChannel channel, ByteBuffer readBuffer, ByteBuffer writeBuffer)
             throws IOException {
         readBuffer.clear();
-        int read = channel.read(readBuffer);
+        // First read bounded by the idle timeout: SO_TIMEOUT is a silent no-op
+        // on blocking SocketChannel reads, so a connect-only client (slowloris)
+        // would otherwise hold the connection forever.
+        int read = BoundedReads.readWithTimeout(channel, channel, readBuffer, config.idleTimeout());
         if (read == -1) {
             channel.close();
             return;
@@ -422,13 +426,13 @@ final class ChappeServer implements Server {
         // especially under load. Keep reading while the bytes so far are still a
         // viable preface prefix and we have fewer than 6 of them. Bail out early
         // (route to HTTP/1.1) the moment a byte diverges from the preface — so a
-        // real HTTP/1.1 request pays no extra latency. The socket SO_TIMEOUT
-        // bounds the wait; EOF ends it too. Without this loop a fragmented
+        // real HTTP/1.1 request pays no extra latency. The idle-timeout-bounded
+        // read caps the wait; EOF ends it too. Without this loop a fragmented
         // preface was misrouted to the HTTP/1.1 parser, which then choked on the
         // binary SETTINGS frame and closed mid-handshake (client saw EOF) —
         // CHAPPE-004.
         while (readBuffer.position() < H2_PREFACE_PROBE.length && matchesPrefacePrefix(readBuffer)) {
-            if (channel.read(readBuffer) == -1) {
+            if (BoundedReads.readWithTimeout(channel, channel, readBuffer, config.idleTimeout()) == -1) {
                 break;
             }
         }

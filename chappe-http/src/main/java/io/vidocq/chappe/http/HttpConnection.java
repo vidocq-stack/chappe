@@ -114,6 +114,16 @@ public final class HttpConnection {
                 parser.reset();
                 request.reset();
 
+                // 0. Idle wait: block at most config.idleTimeout() for the first
+                // byte of the next request. SO_TIMEOUT is a silent no-op on
+                // blocking SocketChannel reads, so without this an idle
+                // keep-alive (or never-sending) client held the connection
+                // forever. Clients reading the response to EOF also rely on
+                // this close (Servlet TCK 6.1.0 TrailerTest).
+                if (!awaitNextRequest()) {
+                    break;
+                }
+
                 // 1. Parse request (request-line + headers)
                 ParseResult result;
                 try {
@@ -318,6 +328,51 @@ public final class HttpConnection {
     }
 
     // --- Internal helpers ---
+
+    /**
+     * Waits for the first byte of the next request, bounded by
+     * {@code config.idleTimeout()}.
+     *
+     * <p>Fast path: bytes already buffered (pipelining) or readable without
+     * blocking — zero overhead for back-to-back keep-alive traffic. Slow
+     * path: a virtual-thread watchdog closes the connection at the deadline,
+     * which wakes the blocking channel read ({@code AsynchronousCloseException})
+     * — the Loom-friendly way to bound a blocking read; {@code Selector.select}
+     * would pin the carrier thread and {@code SO_TIMEOUT} does not apply to
+     * channel reads.</p>
+     *
+     * @return {@code true} when request bytes are available; {@code false} on
+     *         EOF, idle timeout or interruption (caller closes the connection)
+     */
+    private boolean awaitNextRequest() {
+        if (readBuffer.hasRemaining()) return true; // pipelined bytes
+        if (!(readChannel instanceof SocketChannel sc)) {
+            return true; // TLS/wrapped channel: keep historical behavior for now
+        }
+        try {
+            // Fast path — non-blocking probe of the kernel buffer.
+            int n;
+            sc.configureBlocking(false);
+            try {
+                readBuffer.compact();
+                n = sc.read(readBuffer);
+                readBuffer.flip();
+            } finally {
+                sc.configureBlocking(true);
+            }
+            if (n == -1) return false;
+            if (readBuffer.hasRemaining()) return true;
+
+            // Slow path — blocking read bounded by a watchdog close.
+            readBuffer.compact();
+            n = BoundedReads.readWithTimeout(readChannel, closeable, readBuffer, config.idleTimeout());
+            readBuffer.flip();
+            return n > 0;
+        } catch (IOException _) {
+            // closed by the watchdog (idle timeout) or connection lost
+            return false;
+        }
+    }
 
     /**
      * Sets up the request body.
