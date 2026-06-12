@@ -1,7 +1,13 @@
 name: Notify Slack
 
+# pull_request_target (not pull_request): this workflow must also run for PRs opened from
+# external forks, and forks receive NO org secrets under pull_request — SLACK_WEBHOOK_URL
+# would be empty and the notification silently skipped. With pull_request_target the job
+# runs in the BASE repo context (secrets available) using the workflow file from the base
+# branch. Safe here because it only reads event metadata and posts to Slack: no checkout,
+# no build, no interaction with fork-controlled code (the one risk Forgejo warns about).
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, reopened, ready_for_review, closed]
 
 jobs:
