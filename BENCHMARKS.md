@@ -31,6 +31,7 @@ things. To avoid confusion:
 | 2026-04-16 | In-house NIO client **closed-loop** in-process JVM | Raw "full throttle" capacity without latency constraint | Historical — `see [§2026-04-16](#comparison--chappe-vs-reference-servers-2026-04-16-historical-closed-loop)` |
 | 2026-04-23 | Same post-compile-time optimizations    | Same                             | Historical — `see [§2026-04-23](#2026-04-23--post-compile-time-optimizations-closed-loop-historical)` |
 | 2026-05-18 | **`wrk2` open-loop, container fresh per rate, controlled p99** | **Real quality of service as seen by external client** | **Canonical reference** ⭐ |
+| 2026-06-12 | Same harness — diagnostic campaign (watchdog/syscalls/poller/GC A/B + JFR) | Why the 100k ceiling exists — every peripheral suspect acquitted | See [§BENCH-20260612-01](#bench-20260612-01--diagnostic-campaign-the-100k-ceiling-watchdog--syscalls--poller--gc-all-acquitted) |
 
 The in-process **closed-loop** figures (2026-04-16, 2026-04-23) report
 275k req/s for Chappe at 16 threads. These numbers **are not wrong** but
@@ -692,4 +693,82 @@ done
 java --enable-preview -cp "$CLASSES:$(cat /tmp/cp.txt)" \
     org.openjdk.jmh.Main -rf json -rff .bench-results/jmh-$(date +%F).json
 ```
+
+---
+
+## BENCH-20260612-01 — Diagnostic campaign: the 100k ceiling (watchdog / syscalls / poller / GC all acquitted)
+
+- **Date** : 2026-06-12
+- **Commit** : 4479ab3 (working/perf-diag — diagnostic toggles only; measured baseline ≡ main)
+- **JVM** : Temurin 25.0.3+9 (eclipse-temurin:25-jdk-noble), `--enable-preview`
+- **Hardware** : macuntu — Linux amd64, 12 cores, 32 GiB (same host as the 2026-05-18 canonical run)
+- **OS** : Ubuntu 22.04.5 LTS, Docker, `network_mode: host`, no cpuset (unleashed)
+- **Commande exacte** :
+  ```bash
+  # harness repaired first (vidocq-parent resolution + mvnw toolchain — commit cb23272)
+  SHOOTOUT_SERVICES="chappe-jvm jetty netty" ./chappe-bench/docker/run-remote.sh shootout-unleashed
+  # A/B variants:
+  CHAPPE_JAVA_OPTS="-Dchappe.bench.idleWatchdog=<perRequest|perConnection|off|raw>" \
+    SHOOTOUT_SERVICES="chappe-jvm" SHOOTOUT_RATES="150000 200000" \
+    ./chappe-bench/docker/run-remote.sh shootout-unleashed
+  # JFR: CHAPPE_JAVA_OPTS="-XX:StartFlightRecording=delay=12s,duration=60s,settings=profile,filename=/tmp/chappe-200k.jfr"
+  ```
+
+### Re-baseline (current code vs 2026-05-18)
+
+| Service | Max sustained (p99<10ms) | p99 @100k | p99 @200k | Peak |
+|---|---:|---:|---:|---:|
+| chappe-jvm | 100 000 | 2.77 ms | ~220–268 ms | 209k |
+| jetty 12.0.21 | **200 000** | 2.42 ms | 2.63 ms | 293k |
+| netty 4.2.6 | 100 000* | 2.45 ms | 199 ms* | 221k |
+
+(*) netty regressed vs May because **progressive warmup is now the harness default**
+(`SHOOTOUT_WARMUP_RATE=100000`), which the 2026-05-18 note already showed degrades
+netty specifically. Methodology difference, not a netty regression.
+Chappe: no regression vs May (2.46 → 2.77 ms p99 @100k, within noise).
+
+### Suspects tested — all acquitted
+
+| Suspect | Test | p99 @150k | p99 @200k | Verdict |
+|---|---|---:|---:|---|
+| CHAPPE-005 per-request watchdog VT (~150–200k VT/s churn) | `idleWatchdog=off` and `=perConnection` vs `=perRequest`, 2–3 runs each | 11–28 ms all modes, no consistent ordering | 218–268 ms all modes | ❌ **not the bottleneck** — even full removal changes nothing |
+| Probe-dance syscalls (2× fcntl + 1 read per request) | `idleWatchdog=raw` (single blocking read) | 13–53 ms (noise) | 261–268 ms | ❌ no effect |
+| JDK poller architecture | `-Djdk.pollerMode=1` (JDK ≤24 system-thread pollers) | **126 ms** | **4.64 s** (holds only 183k) | ❌ default (mode 2, VT subpollers) is already optimal — mode 1 is 10× worse |
+| Read poller count | `pollerMode=1 -Djdk.readPollers=4` | 160 ms | 7.72 s | ❌ worse |
+| GC | `-XX:+UseZGC` vs G1 | 18.5 ms | 244 ms | ❌ parity with G1 |
+
+Previously acquitted (2026-05-18): allocations (pre-cooked responses −5 %),
+`jdk.virtualThreadScheduler.parallelism` (degrades), C2 deopt, lock contention.
+
+### JFR under 200k (60 s, settings=profile)
+
+- **2 546 carrier parks ≥ 10 ms on `ForkJoinPool.awaitWork`** (12 workers) — carriers
+  keep oscillating busy/idle under a constant 200k open-loop load; confirms the May
+  diagnosis on the JDK 25 poller architecture (single `MasterPoller` platform thread +
+  subpollers running as virtual threads on the same FJP carriers).
+- **CPU during measure: machine 74–100 %** (wrk2 shares the 12 cores in unleashed
+  mode), JVM ≈ 38 % user + 22 % system. ExecutionSample: ≈ 30 % of JVM CPU in Loom
+  machinery (continuations, park/unpark, signalWork), ≈ 10 % in watchdog side-machinery
+  (DelayScheduler, clearInterrupt, 17k+ recorded `InterruptedException`), ≈ 8 % in
+  `AbstractStringBuilder.append` (String-based header parsing). Useful server work
+  (parse + write) is a minority share.
+- 13 parks of ~390 ms are a synchronized cluster at the warmup→measure connection
+  churn, not in-measure tail.
+
+### Conclusion
+
+The 100k @ p99<10ms ceiling is **intrinsic to the 1-VT-per-connection blocking model
+under open-loop load** — every peripheral suspect is now eliminated by measurement.
+Per-request overhead reductions (watchdog, syscalls, allocations) do not move the
+tail. The only remaining lever toward the Jetty/nginx 200k tier is the architectural
+one (event-loop front end / hybrid). Note: at the 100k tier chappe remains at
+Jetty-level latency (2.77 vs 2.42 ms p99) with ~2.6× less idle RSS.
+
+- **Comparaison vs run précédent** : baseline identical to BENCH 2026-05-18 within
+  noise (no code regression since May, CHAPPE-005 included).
+- **Notes** : raw logs in `.bench-results/` and `/tmp/shootout-p*.log` (bench host
+  runs); diagnostic toggle `-Dchappe.bench.idleWatchdog` kept on branch
+  `working/perf-diag`. The `perConnection` mode passes `KeepAliveIdleTimeoutTest`
+  and removes the per-request VT churn + InterruptedException storm at zero perf
+  cost — candidate to become the default (hygiene, not perf).
 
