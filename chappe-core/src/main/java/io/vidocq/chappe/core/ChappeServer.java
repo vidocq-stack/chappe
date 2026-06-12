@@ -28,7 +28,6 @@ import java.nio.channels.SocketChannel;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -103,7 +102,7 @@ final class ChappeServer implements Server {
         }
 
         serverChannel.set(ch);
-        executor.set(Executors.newVirtualThreadPerTaskExecutor());
+        executor.set(VtSchedulers.newServerExecutor());
 
         // unstarted() then set() then start(): guarantees acceptThread visibility
         // before a concurrent stop() call (otherwise join could be skipped)
