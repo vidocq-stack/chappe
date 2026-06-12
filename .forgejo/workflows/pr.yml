@@ -23,7 +23,25 @@ on:
     branches: [main]
 
 jobs:
+  # CLA + GPG-signature + Signed-off-by gate, mutualised in a composite action
+  # (https://codeberg.org/Vidocq/ci/governance-checks). Codeberg does not resolve
+  # cross-repo reusable workflows, so the shared logic ships as a step-level action.
+  # fetch-depth: 0 is required so the action can read the BASE_REF..HEAD commit range.
+  governance-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: https://codeberg.org/Vidocq/ci/governance-checks@main
+        with:
+          pr-author: ${{ github.event.pull_request.user.login }}
+          slack-webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+
   pr-validate:
+    # Gate the build on the governance checks: a PR that fails the CLA/GPG/sign-off gate
+    # is skipped here, so it never emits a "PR validated" success notification.
+    needs: governance-checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
