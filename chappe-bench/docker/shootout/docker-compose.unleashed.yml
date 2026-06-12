@@ -19,7 +19,8 @@ services:
   chappe-jvm:
     <<: *jvm-base
     container_name: chappe-shootout-u-chappe-jvm
-    environment: { PORT: "18081" }
+    # CHAPPE_JAVA_OPTS: extra JVM flags for diagnostic runs (JFR, pollers, GC)
+    environment: { PORT: "18081", JAVA_OPTS: "${CHAPPE_JAVA_OPTS:-}" }
     command: ["io.vidocq.chappe.bench.oop.ChappeMain"]
     profiles: [servers, jvm, all]
 

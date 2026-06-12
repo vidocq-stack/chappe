@@ -23,6 +23,7 @@
 #   SHOOTOUT_CONNECTIONS      connections wrk (default 100)
 #   SHOOTOUT_THREADS          threads wrk (default 4)
 #   SHOOTOUT_KEEP_UP          = 1 → ne fait pas `compose down` à la fin (debug)
+#   SHOOTOUT_SERVICES         subset of services to measure (default: all)
 
 set -euo pipefail
 
@@ -105,6 +106,8 @@ else
     NATIVE_SERVICES="chappe-native nginx go"
 fi
 ALL_SERVICES="$JVM_SERVICES $NATIVE_SERVICES"
+# Optional subset (e.g. "chappe-jvm jetty netty") — must be valid service names
+ALL_SERVICES="${SHOOTOUT_SERVICES:-$ALL_SERVICES}"
 
 # ─── Mapping service → URL & container name ───────────────────────────────────
 port_for() {
