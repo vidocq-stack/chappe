@@ -47,6 +47,42 @@ Captured from the design discussion so a future implementer starts informed:
 
 ---
 
+## Throughput ceiling — staying on the pure virtual-thread model (decision 2026-06-12)
+
+### Decision
+
+Chappe **stays on the 1-virtual-thread-per-connection blocking model** and accepts its
+measured ceiling: **100k req/s sustained @ p99 < 3 ms** (Jetty 12 / nginx / Netty reach
+200k on the same harness). Rationale: at the 100k tier Chappe matches Jetty-level latency
+with ~2.6× less idle RSS, the tier covers the overwhelming majority of production HTTP
+workloads, and the VT-first model is a core design principle of the project.
+
+### Why the ceiling is architectural — exhaustive elimination (BENCH-20260612-01)
+
+Every peripheral suspect was acquitted **by measurement** (wrk2 open-loop A/B, JFR):
+idle-watchdog VT churn, probe-dance syscalls, JDK poller mode/count (`jdk.pollerMode=1`
+is 10× *worse* than the JDK 25 default), G1 vs ZGC, allocations, FJP `parallelism` —
+and finally **the ForkJoinPool scheduler itself**: swapping it for a plain FIFO pool or
+spin-before-park carriers (internal `ThreadBuilders$VirtualThreadBuilder` hook,
+`-Dchappe.bench.vtScheduler`) changes nothing. The residual cost is the **per-request
+virtual-thread round-trip** (poller wakeup → dispatch → continuation mount/unmount →
+syscalls), which only an event-loop-style inline/batched processing model avoids.
+
+### Deferred option — hybrid event-loop front end (★★★)
+
+Re-open **only** on a demonstrated need for the 200k tier: an epoll-style readiness loop
+processing ready connections inline/batched, handing the handler off to a VT. This is a
+structural refactor (touches accept loop, HttpConnection lifecycle, TLS, H2) and
+contradicts the VT-first simplicity that makes Chappe maintainable — hence deferred,
+not planned. Smaller fallback lever if throughput headroom is ever needed first:
+zero-copy header parsing (~8 % of JVM CPU in `StringBuilder.append` under load).
+
+Diagnostic toggles kept in-tree for future re-measurement:
+`-Dchappe.bench.idleWatchdog` (default `perConnection` since 2026-06-12) and
+`-Dchappe.bench.vtScheduler` (needs `--add-opens java.base/java.lang=ALL-UNNAMED`).
+
+---
+
 ## Other known future targets
 
 Already noted elsewhere; listed here for a coherent roadmap.

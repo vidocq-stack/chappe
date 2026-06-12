@@ -796,5 +796,7 @@ option.
   `-Dchappe.bench.vtScheduler` kept on branch `working/perf-diag`. The
   `perConnection` mode passes `KeepAliveIdleTimeoutTest` and removes the
   per-request VT churn + InterruptedException storm at zero perf cost —
-  candidate to become the default (hygiene, not perf).
+  **made the default on 2026-06-12** (hygiene, not perf). Decision record:
+  Chappe stays on the pure VT model and accepts the 100k tier — see
+  `ROADMAP.md` §"Throughput ceiling".
 

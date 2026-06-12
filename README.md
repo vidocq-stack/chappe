@@ -361,16 +361,24 @@ Out of scope for v1 (to be implemented in extensions or later):
 
 ## Performance
 
-Benchmarks on macOS, Java 25, ultra-light NIO client ([details](BENCHMARKS.md)):
+Canonical reference: `wrk2` open-loop shootout, Linux 12 cores, Docker, p99 < 10 ms
+as quality-of-service filter ([details](BENCHMARKS.md)):
 
-| Server | 1 thread | 4 threads | 16 threads |
-|:--------|----------:|----------:|-----------:|
-| **Jetty 12** | 41 040 | **115 100** | **127 600** |
-| **Chappe 0.1** | 36 324 | **96 328** | 91 019 |
-| **Helidon SE 4** | 34 861 | 94 620 | 90 798 |
-| **JDK HttpServer** | 31 883 | 85 410 | 105 533 |
+| Server | Sustained | p99 | Idle RSS |
+|:--------|----------:|----:|---------:|
+| nginx · **Jetty 12** · Netty 4 | 200k req/s | 2.4–5.1 ms | 30–100 MiB |
+| **Chappe (JVM & native)** · Helidon SE 4 · JDK | **100k req/s** | **< 3 ms** | **37 MiB / 3 MiB native** |
 
-**p99 latency = 57 µs** on raw socket keep-alive (JMH run 2026-05-20, 317k samples). Validated with no regression after ErrorProne + Spotless cleanup — details in [BENCHMARKS.md](BENCHMARKS.md#2026-05-20--validation-jmh-post-cleanup-errorprone--spotless--systemlogger).
+**p99 latency = 57 µs** on raw socket keep-alive (JMH run 2026-05-20, 317k samples).
+
+The 100k ceiling is a **measured, documented property of the pure
+1-virtual-thread-per-connection model** — not a tuning gap: watchdog churn, syscalls,
+JDK poller mode, GC, allocations and even a full ForkJoinPool-scheduler replacement
+were all eliminated by A/B measurement
+([BENCH-20260612-01](BENCHMARKS.md#bench-20260612-01--diagnostic-campaign-the-100k-ceiling-watchdog--syscalls--poller--gc-all-acquitted)).
+Chappe deliberately stays on the VT-first model — at its tier it matches Jetty-level
+latency with a fraction of the footprint; see `ROADMAP.md` §"Throughput ceiling" for
+the decision record and the deferred event-loop option.
 
 ## Architecture
 

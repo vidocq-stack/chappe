@@ -43,14 +43,20 @@ public final class HttpConnection {
     private static final int BUFFER_SIZE = 16 * 1024; // 16 KB
 
     /**
-     * Idle-watchdog strategy for the keep-alive wait — diagnostic toggle for
-     * the 100k-ceiling study (see BENCHMARKS.md). {@code perRequest} is the
-     * CHAPPE-005 behavior (one watchdog virtual thread spawned per request);
-     * {@code perConnection} keeps a single long-lived watchdog per connection
-     * (one volatile write per request); {@code off} reverts to an unbounded
-     * blocking read (pre-CHAPPE-005, no idle timeout).
+     * Idle-watchdog strategy for the keep-alive wait. The default,
+     * {@code perConnection}, keeps a single long-lived watchdog virtual
+     * thread per connection (one volatile write per request) — same idle
+     * timeout semantics as CHAPPE-005 without its per-request VT churn
+     * (~1 spawned + slept + interrupted watchdog per request, i.e. an
+     * InterruptedException storm at high request rates; measured perf-neutral
+     * but pure scheduler/CPU waste — see BENCHMARKS.md BENCH-20260612-01).
+     *
+     * <p>Diagnostic values kept for A/B runs: {@code perRequest} (CHAPPE-005
+     * behavior, one watchdog VT per request), {@code off} (unbounded blocking
+     * read, no idle timeout), {@code raw} (single blocking read, also skips
+     * the non-blocking probe).</p>
      */
-    private static final String IDLE_WATCHDOG_MODE = System.getProperty("chappe.bench.idleWatchdog", "perRequest");
+    private static final String IDLE_WATCHDOG_MODE = System.getProperty("chappe.bench.idleWatchdog", "perConnection");
 
     private final ReadableByteChannel readChannel;
     private final WritableByteChannel writeChannel;

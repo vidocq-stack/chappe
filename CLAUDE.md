@@ -154,6 +154,11 @@ The server must be validated on three axes:
 - Benchmarks with JMH in a separate module when needed
 
 ### Performance (measured results, see BENCHMARKS.md)
+- **100k req/s sustained @ p99 < 3 ms** (wrk2 open-loop canonical run) — the ceiling is an
+  **accepted property of the 1-VT-per-connection model** (decision 2026-06-12, see
+  `ROADMAP.md` §"Throughput ceiling"): every peripheral suspect including a full
+  FJP-scheduler swap was acquitted by A/B measurement (BENCH-20260612-01). Do NOT
+  re-open scheduler/poller/GC tuning without new evidence.
 - **101K ops/s** JMH concurrent throughput on 8t (run 2026-05-20); **96K req/s** in-process closed-loop NIO (run 2026-04-16, validated)
 - **p99 latency = 57 µs** raw socket (JMH run 2026-05-20, 317k samples) — 17× below the 1ms target
 - Optimizations: write coalescing, zero-alloc headers, thread-local buffer pool, fast path 200 OK
