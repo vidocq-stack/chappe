@@ -42,6 +42,16 @@ public final class HttpConnection {
 
     private static final int BUFFER_SIZE = 16 * 1024; // 16 KB
 
+    /**
+     * Idle-watchdog strategy for the keep-alive wait — diagnostic toggle for
+     * the 100k-ceiling study (see BENCHMARKS.md). {@code perRequest} is the
+     * CHAPPE-005 behavior (one watchdog virtual thread spawned per request);
+     * {@code perConnection} keeps a single long-lived watchdog per connection
+     * (one volatile write per request); {@code off} reverts to an unbounded
+     * blocking read (pre-CHAPPE-005, no idle timeout).
+     */
+    private static final String IDLE_WATCHDOG_MODE = System.getProperty("chappe.bench.idleWatchdog", "perRequest");
+
     private final ReadableByteChannel readChannel;
     private final WritableByteChannel writeChannel;
     private final Closeable closeable;
@@ -54,6 +64,12 @@ public final class HttpConnection {
     private final HttpRequestImpl request;
     private final RequestContext context;
     private volatile boolean open = true;
+
+    // --- perConnection idle watchdog (diagnostic mode, see IDLE_WATCHDOG_MODE) ---
+    /** nanoTime when the idle slow-path wait began; 0 = not waiting. */
+    private volatile long idleWaitSince;
+    /** Only touched by the connection's own virtual thread. */
+    private Thread connectionWatchdog;
 
     // --- Client-disconnect probe (Request.onDisconnect) ---
     private volatile boolean bodyPending;
@@ -365,13 +381,57 @@ public final class HttpConnection {
 
             // Slow path — blocking read bounded by a watchdog close.
             readBuffer.compact();
-            n = BoundedReads.readWithTimeout(readChannel, closeable, readBuffer, config.idleTimeout());
+            n = switch (IDLE_WATCHDOG_MODE) {
+                case "off" -> readChannel.read(readBuffer);
+                case "perConnection" -> readBoundedByConnectionWatchdog();
+                default -> BoundedReads.readWithTimeout(readChannel, closeable, readBuffer, config.idleTimeout());
+            };
             readBuffer.flip();
             return n > 0;
         } catch (IOException _) {
             // closed by the watchdog (idle timeout) or connection lost
             return false;
         }
+    }
+
+    /**
+     * Idle-bounded blocking read using one long-lived watchdog per connection:
+     * the per-request cost is a single volatile write, instead of spawning a
+     * watchdog virtual thread per request ({@link BoundedReads}). Timeout
+     * precision is one tick (≤ idleTimeout/4, capped at 1 s) — acceptable for
+     * an idle-connection reaper.
+     */
+    private int readBoundedByConnectionWatchdog() throws IOException {
+        startConnectionWatchdogIfNeeded();
+        idleWaitSince = System.nanoTime();
+        try {
+            return readChannel.read(readBuffer);
+        } finally {
+            idleWaitSince = 0;
+        }
+    }
+
+    private void startConnectionWatchdogIfNeeded() {
+        if (connectionWatchdog != null) return;
+        long timeoutNanos = config.idleTimeout().toNanos();
+        long tickMillis = Math.clamp(config.idleTimeout().toMillis() / 4, 10, 1_000);
+        connectionWatchdog = Thread.ofVirtual()
+                .name("chappe-conn-idle-watchdog")
+                .start(() -> {
+                    try {
+                        // Exits within one tick after close() flips `open` — no interrupt needed.
+                        while (open) {
+                            Thread.sleep(tickMillis);
+                            long since = idleWaitSince;
+                            if (since != 0 && System.nanoTime() - since >= timeoutNanos) {
+                                closeable.close();
+                                return;
+                            }
+                        }
+                    } catch (InterruptedException | IOException _) {
+                        // connection closed or shutting down
+                    }
+                });
     }
 
     /**
