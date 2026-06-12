@@ -764,11 +764,37 @@ tail. The only remaining lever toward the Jetty/nginx 200k tier is the architect
 one (event-loop front end / hybrid). Note: at the 100k tier chappe remains at
 Jetty-level latency (2.77 vs 2.42 ms p99) with ~2.6× less idle RSS.
 
+### Addendum — replacing the ForkJoinPool scheduler itself (also acquitted)
+
+Follow-up question: if the FJP carrier oscillation drives the tail, swap the
+scheduler. Done via the JDK-internal `ThreadBuilders$VirtualThreadBuilder(Executor)`
+constructor (boot-time reflection, `--add-opens java.base/java.lang=ALL-UNNAMED`),
+hook `-Dchappe.bench.vtScheduler=fifo:N|spin:N:M` (commit 49e9d56). Note: the
+`jdk.virtualThreadScheduler.implClass` property does **not** exist in Temurin 25.0.3
+(JDK 26 EA material) — the internal builder is the only route on 25.
+
+| Scheduler (12 carriers)        | p99 @150k | p99 @200k |
+|--------------------------------|----------:|----------:|
+| ForkJoinPool (JDK default)     |  18.3 ms  |   237 ms  |
+| fifo (single FIFO queue, blocking take) | 13.6 ms | 221 ms |
+| spin 50 µs before parking      |  13.9 ms  |   227 ms  |
+| spin 200 µs before parking     |  38.4 ms  |   236 ms  |
+
+All within the established noise band (long spin even hurts at 150k — it burns
+CPU shared with the wrk2 client). **The scheduler policy is irrelevant**: the
+`awaitWork` oscillation seen in JFR is a symptom of burst arrival, not an FJP
+inefficiency. What remains is the per-request virtual-thread round-trip itself
+(poller wakeup → scheduler dispatch → continuation mount/unmount → syscalls),
+identical under every scheduler — only an event-loop-style inline/batched
+processing model avoids it, which closes the diagnosis on the architectural
+option.
+
 - **Comparaison vs run précédent** : baseline identical to BENCH 2026-05-18 within
   noise (no code regression since May, CHAPPE-005 included).
 - **Notes** : raw logs in `.bench-results/` and `/tmp/shootout-p*.log` (bench host
-  runs); diagnostic toggle `-Dchappe.bench.idleWatchdog` kept on branch
-  `working/perf-diag`. The `perConnection` mode passes `KeepAliveIdleTimeoutTest`
-  and removes the per-request VT churn + InterruptedException storm at zero perf
-  cost — candidate to become the default (hygiene, not perf).
+  runs); diagnostic toggles `-Dchappe.bench.idleWatchdog` and
+  `-Dchappe.bench.vtScheduler` kept on branch `working/perf-diag`. The
+  `perConnection` mode passes `KeepAliveIdleTimeoutTest` and removes the
+  per-request VT churn + InterruptedException storm at zero perf cost —
+  candidate to become the default (hygiene, not perf).
 
