@@ -366,6 +366,15 @@ public final class HttpConnection {
             return true; // TLS/wrapped channel: keep historical behavior for now
         }
         try {
+            // "raw" diagnostic mode: single blocking read — no non-blocking
+            // probe (saves 2 fcntl + 1 read syscall per request), no watchdog
+            // (loses the idle timeout). Measurement floor for syscall cost.
+            if ("raw".equals(IDLE_WATCHDOG_MODE)) {
+                readBuffer.compact();
+                int r = readChannel.read(readBuffer);
+                readBuffer.flip();
+                return r > 0;
+            }
             // Fast path — non-blocking probe of the kernel buffer.
             int n;
             sc.configureBlocking(false);
