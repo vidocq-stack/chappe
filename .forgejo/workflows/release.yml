@@ -25,6 +25,11 @@ on:
         required: true
         default: "manual"
         options: ["manual", "auto"]
+      vidocq_parent_release:
+        description: "io.vidocq:vidocq-parent — stable version (must be released on Central first)"
+        type: string
+        required: true
+        default:     "0.1.1"
 
 jobs:
   release:
@@ -34,6 +39,9 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.VIDOCQ_BOT_TOKEN }}
+          # Always checkout the current HEAD of the branch, not the SHA captured
+          # at dispatch time — ensures in-flight commits are included in the release.
+          ref: ${{ github.ref_name }}
 
       - uses: https://codeberg.org/Vidocq/ci/release-maven@main
         with:
@@ -42,6 +50,8 @@ jobs:
           dry-run:          ${{ inputs.dry_run }}
           # Map 'manual'/'auto' → 'false'/'true' so the action.yml input stays boolean.
           auto-publish:     ${{ inputs.auto_publish == 'auto' && 'true' || 'false' }}
+          overrides: |
+            io.vidocq=${{ inputs.vidocq_parent_release }}
           excluded-modules: |
             chappe-tests
             chappe-bench
