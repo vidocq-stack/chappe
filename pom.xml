@@ -8,7 +8,7 @@
     <parent>
         <groupId>io.vidocq</groupId>
         <artifactId>vidocq-parent</artifactId>
-        <version>0.1.2-SNAPSHOT</version>
+        <version>0.3.0-SNAPSHOT</version>
         <relativePath/>
     </parent>
 
