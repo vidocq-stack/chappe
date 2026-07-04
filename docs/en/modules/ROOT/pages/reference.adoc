@@ -10,31 +10,31 @@ This page is the canonical Chappe reference: Maven artifacts, exported JPMS modu
 |===
 | Artifact | Role
 
-| `io.vidocq.chappe:chappe-api:0.1.0-SNAPSHOT`
+| `io.vidocq.chappe:chappe-api:0.2.0`
 | Public API: `Server`, `Router`, `Handler`, `Filter`, `Request`, `Response`, `Body`, `StatusCode`, `MimeTypes`, `StaticFileHandler`, `AcceptEncoding`, `RequestContext`, `ServerProvider`.
 
-| `io.vidocq.chappe:chappe-http:0.1.0-SNAPSHOT`
+| `io.vidocq.chappe:chappe-http:0.2.0`
 | HTTP/1.1 + HTTP/2 layer, TLS, `ByteBufferPool`, HPACK.
 
-| `io.vidocq.chappe:chappe-core:0.1.0-SNAPSHOT`
+| `io.vidocq.chappe:chappe-core:0.2.0`
 | Server engine (virtual threads, protocol detection, lifecycle, `ChappeServerProvider`).
 
-| `io.vidocq.chappe:chappe-cli:0.1.0-SNAPSHOT`
+| `io.vidocq.chappe:chappe-cli:0.2.0`
 | Standalone `chappe serve` launcher (fat jar + scripts).
 
-| `io.vidocq.chappe:chappe-tests:0.1.0-SNAPSHOT`
+| `io.vidocq.chappe:chappe-tests:0.2.0`
 | Integration tests (113 tests).
 
-| `io.vidocq.chappe:chappe-conformance:0.1.0-SNAPSHOT`
+| `io.vidocq.chappe:chappe-conformance:0.2.0`
 | HTTP conformance (45 tests against RFC 9110/9112/9113).
 
-| `io.vidocq.chappe:chappe-bench:0.1.0-SNAPSHOT`
+| `io.vidocq.chappe:chappe-bench:0.2.0`
 | Comparative benchmarks (Jetty, Helidon, JDK HttpServer).
 
-| `io.vidocq.chappe:chappe-static-index-maven-plugin:0.1.0-SNAPSHOT`
+| `io.vidocq.chappe:chappe-static-index-maven-plugin:0.2.0`
 | Maven plugin: O(1) index + `.gz` sidecars at build (option `<compress>gzip</compress>`).
 
-| `io.vidocq.chappe:chappe-examples:0.1.0-SNAPSHOT`
+| `io.vidocq.chappe:chappe-examples:0.2.0`
 | Usage samples.
 |===
 
@@ -142,11 +142,11 @@ public interface Filter {
 [source,java]
 ----
 public final class BuildInfo {
-    public static String version();          // e.g. "0.1.0-SNAPSHOT"
+    public static String version();          // e.g. "0.2.0"
     public static String gitCommit();        // e.g. "8d670fb0"
     public static String buildTimestamp();   // e.g. "2026-05-09T19:43:04Z"
     public static String javaVersion();      // e.g. "25.0.3"
-    public static String serverHeader();     // e.g. "Chappe/0.1.0-SNAPSHOT+8d670fb0 (2026-05-09T19:43:04Z)"
+    public static String serverHeader();     // e.g. "Chappe/0.2.0+8d670fb0 (2026-05-09T19:43:04Z)"
 }
 ----
 
@@ -271,8 +271,8 @@ Every HTTP response from Chappe carries two headers identifying the exact binary
 
 [source]
 ----
-Server: Chappe/0.1.0-SNAPSHOT+8d670fb0 (2026-05-09T19:43:04Z)
-X-Chappe-Build: Chappe/0.1.0-SNAPSHOT+8d670fb0 (2026-05-09T19:43:04Z)
+Server: Chappe/0.2.0+8d670fb0 (2026-05-09T19:43:04Z)
+X-Chappe-Build: Chappe/0.2.0+8d670fb0 (2026-05-09T19:43:04Z)
 ----
 
 Format: `Chappe/<Maven version>+<short Git hash>(<build timestamp ISO-8601 UTC>)`. Read once at startup via `BuildInfo` (see public API).

@@ -6,7 +6,7 @@ Cette page rassemble les correspondances API et les pièges typiques pour migrer
 
 [CAUTION]
 ====
-Chappe est en `0.1.0-SNAPSHOT`. Une migration de production est prématurée. La table ci-dessous documente le mapping API ; valider chaque cas d'usage avec les tests d'intégration de votre service avant de basculer.
+Chappe est en `0.2.0`. Une migration de production est prématurée. La table ci-dessous documente le mapping API ; valider chaque cas d'usage avec les tests d'intégration de votre service avant de basculer.
 ====
 
 == Vue d'ensemble

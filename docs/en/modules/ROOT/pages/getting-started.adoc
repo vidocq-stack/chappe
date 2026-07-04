@@ -18,18 +18,18 @@ This page boots a Chappe HTTP server in under 30 lines of Java, then walks throu
 <dependency>
     <groupId>io.vidocq.chappe</groupId>
     <artifactId>chappe-api</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.2.0</version>
 </dependency>
 <dependency>
     <groupId>io.vidocq.chappe</groupId>
     <artifactId>chappe-core</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.2.0</version>
     <scope>runtime</scope>
 </dependency>
 <dependency>
     <groupId>io.vidocq.chappe</groupId>
     <artifactId>chappe-http</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.2.0</version>
     <scope>runtime</scope>
 </dependency>
 ----

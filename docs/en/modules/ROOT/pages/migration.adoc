@@ -6,7 +6,7 @@ This page collects the API mappings and the typical pitfalls when migrating an e
 
 [CAUTION]
 ====
-Chappe is at `0.1.0-SNAPSHOT`. A production migration is premature. The tables below document the API mapping; validate every use case with your service's integration tests before switching.
+Chappe is at `0.2.0`. A production migration is premature. The tables below document the API mapping; validate every use case with your service's integration tests before switching.
 ====
 
 == Overview
