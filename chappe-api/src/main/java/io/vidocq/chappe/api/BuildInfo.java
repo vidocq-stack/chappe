@@ -33,7 +33,7 @@ import java.util.Properties;
  *
  * <pre>{@code
  * BuildInfo.serverHeader();
- *   // → "Chappe/0.1.0-SNAPSHOT+ef864e8 (2026-05-09T18:14:52Z)"
+ *   // → "Chappe/0.2.0+ef864e8 (2026-07-04T10:38:00Z)"
  * }</pre>
  */
 public final class BuildInfo {
@@ -62,7 +62,7 @@ public final class BuildInfo {
 
     private BuildInfo() {}
 
-    /** Maven version (e.g. {@code 0.1.0-SNAPSHOT}). */
+    /** Maven version (e.g. {@code 0.2.0}). */
     public static String version() {
         return VERSION;
     }
