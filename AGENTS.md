@@ -29,7 +29,7 @@ If Maven reports unsupported `modelVersion 4.1.0`, switch back to Maven 4.
 
 ## Coding Style & Naming Conventions
 
-Use Java 25 with preview enabled. Keep packages and JPMS modules under `io.vidocq.chappe.*`. Follow existing 4-space indentation, fluent builder formatting, and package-private implementation classes where possible. Prefer records for immutable data, sealed interfaces for closed hierarchies, exhaustive switch expressions, and zero external runtime dependencies beyond the JDK.
+Use Java 25 with preview enabled. Keep packages and Java modules under `io.vidocq.chappe.*`. Follow existing 4-space indentation, fluent builder formatting, and package-private implementation classes where possible. Prefer records for immutable data, sealed interfaces for closed hierarchies, exhaustive switch expressions, and zero external runtime dependencies beyond the JDK.
 
 ## Testing Guidelines
 

@@ -1,7 +1,7 @@
 # Chappe — Development Plan
 
 ## Phase 1: Foundations ✅
-- [x] Multi-module Maven structure with JPMS
+- [x] Multi-module Maven structure with Java Modules
 - [x] Public API (chappe-api): Server, Handler, Request, Response, Router
 - [x] HTTP/1.1 parsing (RFC 9112)
 - [x] Basic TCP server with virtual threads

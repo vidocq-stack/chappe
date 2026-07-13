@@ -391,7 +391,7 @@ Benchmarks on macOS, Java 25, ultra-light NIO client ([details](BENCHMARKS.md)):
 │  Filter, StaticFileHandler, AcceptEncoding, MimeTypes │
 │  RequestContext                                       │
 ├─────────────────────────────────────────────────────┤
-│             Java 25 (Loom, ScopedValue, JPMS)        │
+│             Java 25 (Loom, ScopedValue, Java Modules)        │
 └─────────────────────────────────────────────────────┘
 ```
 

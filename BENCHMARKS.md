@@ -162,7 +162,7 @@ Client `java.net.http.HttpClient` — includes async framework overhead.
 
 | Server | Version | Architecture |
 |---------|---------|-------------|
-| Chappe | 0.1.0-SNAPSHOT | Virtual threads, blocking I/O, JPMS |
+| Chappe | 0.1.0-SNAPSHOT | Virtual threads, blocking I/O, Java Modules |
 | Helidon SE | 4.2.2 | Virtual threads (Loom), NIO |
 | Jetty | 12.0.21 | Thread pool, NIO (epoll/kqueue) |
 | JDK HttpServer | JDK 25 | Virtual threads, blocking I/O |
@@ -596,7 +596,7 @@ The harness is documented in detail in
 - **Distroless**: base (dynamic libc) for native binary, static for Go.
 - **No reflection to configure**: `reflect-config.json` and `resource-config.json`
   are empty — Chappe is compile-time first, `ServerProvider` ServiceLoader is
-  resolved via JPMS (provides/uses) then by shade at runtime.
+  resolved via Java Modules (provides/uses) then by shade at runtime.
 
 ---
 

@@ -26,7 +26,7 @@ La métaphore tient sur deux points :
 | Spec implémentée | HTTP/1.1 (RFC 9110, RFC 9112), HTTP/2 (RFC 9113), HTTP/3 (RFC 9114, planifié)
 | Repo | {repo-chappe}
 | Java | 25 (LTS)
-| Modules JPMS | `io.vidocq.chappe.api`, `io.vidocq.chappe.http`, `io.vidocq.chappe.core`, `io.vidocq.chappe.cli`
+| Modules Java Modules | `io.vidocq.chappe.api`, `io.vidocq.chappe.http`, `io.vidocq.chappe.core`, `io.vidocq.chappe.cli`
 | Dépendances runtime | zéro (JDK uniquement)
 | Conformité | 45 tests RFC dans `chappe-conformance` ; 113 tests d'intégration dans `chappe-tests`
 | TCK | non applicable (pas de TCK officiel HTTP)
@@ -62,7 +62,7 @@ Chappe peut aussi fonctionner **sans extension** : c'est ce que fait sa CLI `cha
 
 * **Java 25 strict** — `ScopedValue` (JEP 506), pattern matching exhaustif, sealed interfaces, records.
 * **Virtual Threads** — un thread virtuel par connexion, pas de pool plateforme, pas de `Selector` applicatif.
-* **JPMS strict** — chaque module a son `module-info.java`, exports minimaux, pas de classpath.
+* **Java Modules strict** — chaque module a son `module-info.java`, exports minimaux, pas de classpath.
 * **Zéro dépendance** — pas de logger transitif, pas de bibliothèque utilitaire externe. Tests JUnit uniquement.
 * **Génération statique** — `chappe-static-index-maven-plugin` produit l'index O(1) et les sidecars `.gz` au build.
 * **Zero-copy I/O** — `FileChannel.transferTo()` pour les fichiers statiques et les sidecars pré-compressés.
@@ -77,5 +77,5 @@ Lecture rapide (TL;DR, tableau canonique, profil JFR, comparatif natif vs JVM) :
 * xref:usage.adoc[Cas d'usage] — TLS, HTTP/2, virtual hosts, fichiers statiques, compression, CLI.
 * xref:concepts.adoc[Concepts] — connexion, frame, multiplexage, scoped values.
 * xref:internals.adoc[Fonctionnement interne] — pipelines HTTP/1.1, HTTP/2, HTTP/3 ; modèle threading.
-* xref:reference.adoc[Référence] — coordonnées Maven, packages JPMS, API publique, plugin Maven.
+* xref:reference.adoc[Référence] — coordonnées Maven, packages Java Modules, API publique, plugin Maven.
 * xref:migration.adoc[Migration] — depuis Netty, Undertow, Jetty, JDK HttpServer.

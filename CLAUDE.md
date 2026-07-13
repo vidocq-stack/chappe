@@ -21,7 +21,7 @@ as the foundation for the future JAX-RS and Servlet projects of the Vidocq ecosy
 - Virtual Threads (Project Loom) — one virtual thread per connection
 - Scoped Values (JEP 506) — `RequestContext.CURRENT` propagated before each handler
 - Zero-copy I/O — `FileChannel.transferTo()` for static files
-- Java Modules (JPMS) — each module has a `module-info.java`
+- Java Modules (Java Modules) — each module has a `module-info.java`
 - ServiceLoader SPI — `ServerProvider` to discover the implementation
 
 ### Vauban integration (planned, not active yet)
@@ -138,7 +138,7 @@ The server must be validated on three axes:
 ### Naming
 - Packages: `io.vidocq.chappe.*`
 - Maven GroupId: `io.vidocq.chappe`
-- JPMS modules: `io.vidocq.chappe.*`
+- Java modules: `io.vidocq.chappe.*`
 
 ### Standards
 - Zero dependencies outside the JDK — that is the project's absolute rule
