@@ -26,7 +26,7 @@ The metaphor holds in two ways:
 | Implemented specs | HTTP/1.1 (RFC 9110, RFC 9112), HTTP/2 (RFC 9113), HTTP/3 (RFC 9114, planned)
 | Repo | {repo-chappe}
 | Java | 25 (LTS)
-| JPMS modules | `io.vidocq.chappe.api`, `io.vidocq.chappe.http`, `io.vidocq.chappe.core`, `io.vidocq.chappe.cli`
+| Java modules | `io.vidocq.chappe.api`, `io.vidocq.chappe.http`, `io.vidocq.chappe.core`, `io.vidocq.chappe.cli`
 | Runtime dependencies | none (JDK only)
 | Conformance | 45 RFC tests in `chappe-conformance`; 113 integration tests in `chappe-tests`
 | TCK | not applicable (no official HTTP TCK)
@@ -62,7 +62,7 @@ Chappe also runs **without any extension**: that is what its `chappe serve` CLI 
 
 * **Strict Java 25** — `ScopedValue` (JEP 506), exhaustive pattern matching, sealed interfaces, records.
 * **Virtual threads** — one virtual thread per connection, no platform pool, no application-side `Selector`.
-* **Strict JPMS** — every module ships a `module-info.java`, minimal exports, no classpath fallback.
+* **Strict Java Modules** — every module ships a `module-info.java`, minimal exports, no classpath fallback.
 * **Zero dependency** — no transitive logger, no external utility library. JUnit only for tests.
 * **Static codegen** — `chappe-static-index-maven-plugin` produces the O(1) index and `.gz` sidecars at build time.
 * **Zero-copy I/O** — `FileChannel.transferTo()` for static files and pre-compressed sidecars.
@@ -77,5 +77,5 @@ Quick read (TL;DR, canonical table, JFR profile, native vs JVM): xref:performanc
 * xref:usage.adoc[Usage] — TLS, HTTP/2, virtual hosts, static files, compression, CLI.
 * xref:concepts.adoc[Concepts] — connection, frame, multiplexing, scoped values.
 * xref:internals.adoc[Internals] — HTTP/1.1, HTTP/2, HTTP/3 pipelines; threading model.
-* xref:reference.adoc[Reference] — Maven coordinates, JPMS packages, public API, Maven plugin.
+* xref:reference.adoc[Reference] — Maven coordinates, Java Modules packages, public API, Maven plugin.
 * xref:migration.adoc[Migration] — from Netty, Undertow, Jetty, JDK HttpServer.

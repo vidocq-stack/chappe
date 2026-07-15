@@ -1,8 +1,8 @@
 = Reference
-:description: Maven coordinates, JPMS modules, public API, YAML/CLI configuration, Maven plugin.
+:description: Maven coordinates, Java modules, public API, YAML/CLI configuration, Maven plugin.
 
 [.lead]
-This page is the canonical Chappe reference: Maven artifacts, exported JPMS modules, the major public API, the CLI YAML schema, CLI flags, and the pre-compression Maven plugin. For RFC conformance see xref:concepts.adoc[Concepts] and `chappe-conformance` in the repository.
+This page is the canonical Chappe reference: Maven artifacts, exported Java modules, the major public API, the CLI YAML schema, CLI flags, and the pre-compression Maven plugin. For RFC conformance see xref:concepts.adoc[Concepts] and `chappe-conformance` in the repository.
 
 == Maven artifacts
 
@@ -38,7 +38,7 @@ This page is the canonical Chappe reference: Maven artifacts, exported JPMS modu
 | Usage samples.
 |===
 
-== JPMS modules
+== Java modules
 
 [cols="2,3"]
 |===
@@ -346,7 +346,7 @@ Served zero-copy by `StaticFileHandler.preferPrecompressed(true)`.
 
 * **Java**: 25 (LTS), no preview flag required (`ScopedValue` is final since JEP 506).
 * **Maven**: 3.9.16 (POM `modelVersion 4.0.0`).
-* **JPMS** strict: no classpath, no `--add-opens`.
+* **Java Modules** strict: no classpath, no `--add-opens`.
 
 == Bugs and benchmarks
 
