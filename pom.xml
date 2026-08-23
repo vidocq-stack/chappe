@@ -19,7 +19,7 @@
 
     <name>Chappe</name>
     <description>Serveur HTTP haute performance en Java 25 pur — zéro dépendance, virtual threads</description>
-    <url>https://codeberg.org/Vidocq/chappe</url>
+    <url>https://codefloe.com/Vidocq/chappe</url>
 
     <developers>
         <developer>
@@ -33,9 +33,9 @@
     </developers>
 
     <scm>
-        <connection>scm:git:https://codeberg.org/Vidocq/chappe.git</connection>
-        <developerConnection>scm:git:ssh://git@codeberg.org/Vidocq/chappe.git</developerConnection>
-        <url>https://codeberg.org/Vidocq/chappe</url>
+        <connection>scm:git:https://codefloe.com/Vidocq/chappe.git</connection>
+        <developerConnection>scm:git:ssh://git@codefloe.com/Vidocq/chappe.git</developerConnection>
+        <url>https://codefloe.com/Vidocq/chappe</url>
     </scm>
 
     <!--
