@@ -47,23 +47,22 @@ Keep changes scoped and root-cause oriented. Do not introduce runtime dependenci
 
 ## Documentation (Antora) conventions
 
-The project documentation lives in `docs/en` and `docs/fr` as Antora modules and is
+The project documentation lives in `docs/en` as an Antora component and is
 aggregated by the **vidocq-docs** site, which provides a **shared UI bundle** (banner,
 logo, fonts, colours, footer). **Never customise the documentation UI per project** —
 all visual harmonisation is centralised in `vidocq-docs/ui-bundle`.
 
 ### Gold reference
 **Vauban** is the reference implementation for documentation structure. Mirror its
-`docs/en` + `docs/fr` layout when creating or updating docs. **Chappe** (HTTP server)
+`docs/en` layout when creating or updating docs. **Chappe** (HTTP server)
 and **Vidocq** (runtime orchestrator) are *special cases*, not references: they are not
 Jakarta EE / MicroProfile spec implementations.
 
 ### Repository layout
-- `docs/en/antora.yml` → `name: <project>`, `title:`, `version: ~`, `nav:`, `lang: en`.
-- `docs/fr/antora.yml` → `name: <project>-fr`, same `title`, `lang: fr`.
+- `docs/en/antora.yml` → `name: <project>`, `title:`, versioned per branch (`dev` prerelease on `main`, `'<version>'` on `docs/<version>`), `project-version` attribute, `nav:`, `lang: en`.
 - Pages in `modules/ROOT/pages/`, navigation in `modules/ROOT/nav.adoc`, images in
   `modules/ROOT/images/`.
-- **EN/FR parity**: every page exists in both languages with translated content.
+- **English-only** (ADR 0004 in vidocq-docs): no French mirror — do not reintroduce one.
 
 ### Canonical navigation (section order)
 `index` → `getting-started` → `usage` → `concepts` → `internals` → `tck` →
