@@ -31,7 +31,7 @@ jobs:
       - name: Clone Vidocq/ci
         run: |
           git clone --depth 1 --branch main \
-            "https://oauth2:${{ secrets.VIDOCQ_BOT_TOKEN }}@codeberg.org/Vidocq/ci.git" \
+            "https://oauth2:${{ secrets.VIDOCQ_BOT_TOKEN }}@codefloe.com/Vidocq/ci.git" \
             /tmp/vidocq-ci
 
       - name: Re-bootstrap release.yml
@@ -52,6 +52,6 @@ jobs:
           git add .forgejo/workflows/release.yml
           git commit -m "ci: refresh release.yml after upstream ${SOURCE} release"
           # Reroute ssh:// (declared in <developerConnection>) to HTTPS-with-token
-          git config --global --add 'url.https://oauth2:${{ secrets.VIDOCQ_BOT_TOKEN }}@codeberg.org/.insteadOf' 'ssh://git@codeberg.org/'
-          git config --global --add 'url.https://oauth2:${{ secrets.VIDOCQ_BOT_TOKEN }}@codeberg.org/.insteadOf' 'ssh://codeberg.org/'
+          git config --global --add 'url.https://oauth2:${{ secrets.VIDOCQ_BOT_TOKEN }}@codefloe.com/.insteadOf' 'ssh://git@codeberg.org/'
+          git config --global --add 'url.https://oauth2:${{ secrets.VIDOCQ_BOT_TOKEN }}@codefloe.com/.insteadOf' 'ssh://codeberg.org/'
           git push origin HEAD:main

@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Notify Slack (PR opened)
-        uses: https://codeberg.org/Vidocq/ci/notify-slack@main
+        uses: https://codefloe.com/Vidocq/ci/notify-slack@main
         with:
           webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
           status: pr-open
@@ -33,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Notify Slack (PR merged)
-        uses: https://codeberg.org/Vidocq/ci/notify-slack@main
+        uses: https://codefloe.com/Vidocq/ci/notify-slack@main
         with:
           webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
           status: pr-merged

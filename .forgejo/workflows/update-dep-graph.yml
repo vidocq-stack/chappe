@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Update dependency graph
-        uses: https://codeberg.org/Vidocq/ci/update-dep-graph@main
+        uses: https://codefloe.com/Vidocq/ci/update-dep-graph@main
         with:
           bot-token: ${{ secrets.VIDOCQ_BOT_TOKEN }}
           repo: ${{ github.repository }}
