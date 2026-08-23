@@ -1,8 +1,0 @@
-* xref:index.adoc[Chappe]
-** xref:getting-started.adoc[Démarrage rapide]
-** xref:usage.adoc[Cas d'usage]
-** xref:concepts.adoc[Concepts]
-** xref:internals.adoc[Fonctionnement interne]
-** xref:performance.adoc[Performance]
-** xref:reference.adoc[Référence]
-** xref:migration.adoc[Migration]

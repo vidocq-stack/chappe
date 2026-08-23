@@ -6,7 +6,7 @@ name: Notify docs
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'docs/*']
     paths:
       - 'docs/**'
 

@@ -13,23 +13,23 @@ This page boots a Chappe HTTP server in under 30 lines of Java, then walks throu
 
 == Maven coordinates
 
-[source,xml]
+[source,xml,subs=attributes+]
 ----
 <dependency>
     <groupId>io.vidocq.chappe</groupId>
     <artifactId>chappe-api</artifactId>
-    <version>0.2.0</version>
+    <version>{project-version}</version>
 </dependency>
 <dependency>
     <groupId>io.vidocq.chappe</groupId>
     <artifactId>chappe-core</artifactId>
-    <version>0.2.0</version>
+    <version>{project-version}</version>
     <scope>runtime</scope>
 </dependency>
 <dependency>
     <groupId>io.vidocq.chappe</groupId>
     <artifactId>chappe-http</artifactId>
-    <version>0.2.0</version>
+    <version>{project-version}</version>
     <scope>runtime</scope>
 </dependency>
 ----

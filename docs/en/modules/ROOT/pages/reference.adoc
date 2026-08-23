@@ -10,31 +10,31 @@ This page is the canonical Chappe reference: Maven artifacts, exported Java modu
 |===
 | Artifact | Role
 
-| `io.vidocq.chappe:chappe-api:0.2.0`
+| `io.vidocq.chappe:chappe-api:{project-version}`
 | Public API: `Server`, `Router`, `Handler`, `Filter`, `Request`, `Response`, `Body`, `StatusCode`, `MimeTypes`, `StaticFileHandler`, `AcceptEncoding`, `RequestContext`, `ServerProvider`.
 
-| `io.vidocq.chappe:chappe-http:0.2.0`
+| `io.vidocq.chappe:chappe-http:{project-version}`
 | HTTP/1.1 + HTTP/2 layer, TLS, `ByteBufferPool`, HPACK.
 
-| `io.vidocq.chappe:chappe-core:0.2.0`
+| `io.vidocq.chappe:chappe-core:{project-version}`
 | Server engine (virtual threads, protocol detection, lifecycle, `ChappeServerProvider`).
 
-| `io.vidocq.chappe:chappe-cli:0.2.0`
+| `io.vidocq.chappe:chappe-cli:{project-version}`
 | Standalone `chappe serve` launcher (fat jar + scripts).
 
-| `io.vidocq.chappe:chappe-tests:0.2.0`
+| `io.vidocq.chappe:chappe-tests:{project-version}`
 | Integration tests (113 tests).
 
-| `io.vidocq.chappe:chappe-conformance:0.2.0`
+| `io.vidocq.chappe:chappe-conformance:{project-version}`
 | HTTP conformance (45 tests against RFC 9110/9112/9113).
 
-| `io.vidocq.chappe:chappe-bench:0.2.0`
+| `io.vidocq.chappe:chappe-bench:{project-version}`
 | Comparative benchmarks (Jetty, Helidon, JDK HttpServer).
 
-| `io.vidocq.chappe:chappe-static-index-maven-plugin:0.2.0`
+| `io.vidocq.chappe:chappe-static-index-maven-plugin:{project-version}`
 | Maven plugin: O(1) index + `.gz` sidecars at build (option `<compress>gzip</compress>`).
 
-| `io.vidocq.chappe:chappe-examples:0.2.0`
+| `io.vidocq.chappe:chappe-examples:{project-version}`
 | Usage samples.
 |===
 
