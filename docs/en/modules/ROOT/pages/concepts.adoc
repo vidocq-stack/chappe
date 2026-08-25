@@ -34,7 +34,7 @@ req.path()             // String relative to the mount, no query string
 req.queryParams()      // Map<String, List<String>>
 req.pathParams()       // Map<String, String>
 req.headers()          // Headers (case-insensitive)
-req.body()             // Body (asInputStream(), asBytes(), ...)
+req.body()             // Body (asInputStream(), contentLength(), ...)
 req.contextPath()      // mount prefix, "" otherwise
 req.pathInfo()         // alias of path() for mounts
 req.remoteAddress()    // client SocketAddress
@@ -45,7 +45,7 @@ req.attribute(k, v)    // mutable per-request attributes (Servlet-compat)
 
 == Body
 
-`Body` abstracts the request or response body. Several implementations exist, all sealed inside `chappe-api`:
+`Body` abstracts the request or response body. The interface is deliberately small — `contentLength()`, `asInputStream()`, `asPublisher()` — and is **not** sealed. Several final implementations live in `chappe-api`, created through the `Body` static factories (`Body.of(...)`, `Body.ofFile(...)`, `Body.ofOutputStream(...)`):
 
 [cols="1,3"]
 |===

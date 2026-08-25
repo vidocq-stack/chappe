@@ -8,7 +8,7 @@ This page boots a Chappe HTTP server in under 30 lines of Java, then walks throu
 
 * **Java 25** — Temurin recommended.
 * **Maven 3.9.16** — pinned via `.sdkmanrc` at the root of the `chappe` repo.
-* `sdk env` from the repo root loads the right JDK and Maven. If `mvn` fails with `modelVersion 4.1.0 not supported`, switch back to Maven 4: `sdk use maven 3.9.16`.
+* `sdk env` from the repo root loads the right JDK and Maven. If another Maven version is active in the shell, switch to the pinned one: `sdk use maven 3.9.16`.
 * Optional: `wrk` for the final load test (`brew install wrk` or equivalent).
 
 == Maven coordinates
@@ -126,7 +126,7 @@ Once the server is listening on 8080, confirm it sustains a minimal load:
 wrk -t4 -c100 -d10s http://localhost:8080/
 ----
 
-For reference numbers compared against Jetty, Helidon, and JDK HttpServer, see lien:{repo-chappe}/blob/main/BENCH.md[BENCH.md].
+For reference numbers compared against Jetty, Helidon, and JDK HttpServer, see link:{repo-chappe}/blob/main/BENCHMARKS.md[BENCHMARKS.md].
 
 == Diagram: starting a server
 

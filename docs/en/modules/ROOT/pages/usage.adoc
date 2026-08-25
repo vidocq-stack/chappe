@@ -36,13 +36,11 @@ Key points:
 
 HTTP/2 (RFC 9113) is carried by `chappe-http`: framing, HPACK (RFC 7541) with Huffman coding, flow control, `CONTINUATION` handling, `GOAWAY`/`SETTINGS` lifecycle. The module turns on automatically when TLS + ALPN h2 are configured.
 
-Without TLS (h2c, HTTP/2 cleartext), HTTP/1.1 stays the default. The `Upgrade: h2c` handshake is negotiated by the `chappe-http` layer.
+Without TLS, Chappe supports HTTP/2 cleartext (h2c) with **prior knowledge** only: a client that opens the connection with the HTTP/2 preface (`PRI * HTTP/2.0`) is routed straight to the HTTP/2 pipeline; any other cleartext connection is parsed as HTTP/1.1. There is no `Upgrade: h2c` handshake (RFC 9113 deprecated it).
 
 == HTTP/3 / QUIC
 
-HTTP/3 (RFC 9114) is **planned**. The underlying QUIC engine depends on the JDK (JDK 26+ or a pure implementation; see lien:{repo-chappe}/blob/main/BUG.md[BUG.md] for the current status).
-
-// TODO@user: confirm the target branch/version for HTTP/3 (JDK 26 native? in-house implementation? wait for pure-Java QUIC?).
+HTTP/3 (RFC 9114) is **planned**. The QUIC transport is expected to come from the JDK (targeting JDK 26+) — no in-house QUIC engine ships today. See link:{repo-chappe}/blob/main/ROADMAP.md[ROADMAP.md] for the current status.
 
 == Virtual hosts
 
@@ -170,13 +168,12 @@ CLI flags override YAML values. See xref:reference.adoc#_chappe_serve_cli[Refere
 ....
 flowchart TD
     accept[Accepted connection] --> tls{TLS?}
-    tls -- no --> h11p[Read HTTP/1.1 preamble]
+    tls -- no --> sniff{First bytes =<br/>H2 preface 'PRI * '?}
     tls -- yes --> alpn{ALPN?}
     alpn -- h2 --> h2pipe[HTTP/2 pipeline<br/>HPACK · framing · flow control]
-    alpn -- http/1.1 --> h11p
-    h11p --> upgrade{Upgrade: h2c?}
-    upgrade -- yes --> h2pipe
-    upgrade -- no --> h11pipe[HTTP/1.1 pipeline<br/>chunked · keep-alive]
+    alpn -- http/1.1 --> h11pipe[HTTP/1.1 pipeline<br/>chunked · keep-alive]
+    sniff -- yes --> h2pipe
+    sniff -- no --> h11pipe
     h2pipe --> handler[Router → Handler]
     h11pipe --> handler
 ....
