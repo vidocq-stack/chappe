@@ -69,7 +69,7 @@ Chappe also runs **without any extension**: that is what its `chappe serve` CLI 
 
 == Performance
 
-Quick read (TL;DR, canonical table, JFR profile, native vs JVM): xref:performance.adoc[Performance page]. The full log of all runs (closed-loop in-process and open-loop wrk2), detailed methodology and history of optimizations live in lien:{repo-chappe}/blob/main/BENCHMARKS.md[BENCHMARKS.md].
+Quick read (TL;DR, canonical table, JFR profile, native vs JVM): xref:performance.adoc[Performance page]. The full log of all runs (closed-loop in-process and open-loop wrk2), detailed methodology and history of optimizations live in link:{repo-chappe}/blob/main/BENCHMARKS.md[BENCHMARKS.md].
 
 == Quick links
 
