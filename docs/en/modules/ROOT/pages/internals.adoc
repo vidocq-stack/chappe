@@ -2,7 +2,7 @@
 :description: Layered architecture, HTTP/1.1 vs HTTP/2 vs HTTP/3 pipelines, threading model.
 
 [.lead]
-This page describes what Chappe does when a request arrives: how the connection is accepted, how the TCP/TLS preamble is inspected, how HTTP/1.1 and HTTP/2 are parsed, how the `Router` is invoked, how the response is written. No performance numbers here — see lien:{repo-chappe}/blob/main/BENCH.md[BENCH.md].
+This page describes what Chappe does when a request arrives: how the connection is accepted, how the TCP/TLS preamble is inspected, how HTTP/1.1 and HTTP/2 are parsed, how the `Router` is invoked, how the response is written. No performance numbers here — see link:{repo-chappe}/blob/main/BENCHMARKS.md[BENCHMARKS.md].
 
 == Layered architecture
 
@@ -67,11 +67,9 @@ flowchart TD
     A[Accepted socket] --> B{TLS?}
     B -- no --> C[Read first 24 bytes]
     C --> D{H2 preface<br/>'PRI * HTTP/2.0'... ?}
-    D -- yes --> E[Http2Connection<br/>cleartext h2c]
+    D -- yes --> E[Http2Connection<br/>cleartext h2c<br/>prior knowledge]
     D -- no --> F[HttpConnection<br/>HTTP/1.1]
-    F --> G{Upgrade: h2c?}
-    G -- yes --> E
-    G -- no --> H[HTTP/1.1 pipeline]
+    F --> H[HTTP/1.1 pipeline]
     B -- yes --> I[SslHandler<br/>TLS handshake]
     I --> J{ALPN?}
     J -- h2 --> K[Http2Connection]
@@ -189,7 +187,7 @@ sequenceDiagram
     Quic->>Cli: encrypted packets
 ....
 
-// TODO@user: confirm the QUIC strategy (native JDK 26 vs in-house pure-Java implementation) — the current diagram is neutral.
+The QUIC transport is planned to come from the JDK (targeting JDK 26+ — see `ROADMAP.md`); no in-house pure-Java QUIC engine is planned, and Chappe ships no QUIC code today.
 
 == Threading model
 
@@ -239,7 +237,7 @@ Documented in `chappe/OPTIMS.md`:
 * **Fast path 200 OK** — pre-encoded `HTTP/1.1 200 OK` status line, direct copy.
 * **`StatusCodeCache`** — `StatusCode` enum cached in an indexed `String[]`.
 
-For measured numbers, see lien:{repo-chappe}/blob/main/BENCH.md[BENCH.md] and `chappe/BENCHMARKS.md`.
+For measured numbers, see link:{repo-chappe}/blob/main/BENCHMARKS.md[BENCHMARKS.md].
 
 == O(1) static index
 

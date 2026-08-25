@@ -49,8 +49,9 @@ build vs 389 MB / 38 MiB on the JVM.
   stays below 10 ms — that is the quality of service seen by an actual HTTP
   client.
 * Progressive warmup attempt (10 s @ 100k then measurement @ 200k):
-  *does NOT* help Chappe reach 200k @ p99 < 10 ms — p99 stays around ~210 ms
-  even with a fresh container and careful warmup. The limit is architectural
+  *does NOT* help Chappe reach 200k @ p99 < 10 ms — p99 is 214 ms with
+  progressive warmup vs ~200 ms with direct warmup, even with a fresh
+  container. The limit is architectural
   (Loom model: 1 VT per connection — see the JFR profile in BENCHMARKS.md).
 
 == Why is Chappe in mid-tier and not top-tier?
@@ -79,8 +80,8 @@ Helidon Níma approach. Estimated effort ★★★.
 | Docker image        | *37 MB*          | 389 MB         | **−90 %** (×10.5)
 | Idle RSS            | *3 MiB*          | 38 MiB         | **−92 %** (×12)
 | Sustained throughput| 100,000 req/s    | 100,000 req/s  | identical
-| p50 @ 100k          | 1.18 ms          | 1.13 ms        | +0.05 ms
-| p99 @ 100k          | 2.96 ms          | 2.46 ms        | +0.50 ms
+| p50 @ best sustained| 1.16 ms          | 1.15 ms        | identical
+| p99 @ best sustained| 2.83 ms          | 2.50 ms        | +0.33 ms
 |===
 
 Binary built with GraalVM Community Edition 25, `-march=compatibility`,

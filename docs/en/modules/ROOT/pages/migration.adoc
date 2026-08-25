@@ -2,7 +2,7 @@
 :description: From Netty, Undertow, Jetty, JDK HttpServer.
 
 [.lead]
-This page collects the API mappings and the typical pitfalls when migrating an existing HTTP service to Chappe. For comparative performance numbers, see lien:{repo-chappe}/blob/main/BENCH.md[BENCH.md].
+This page collects the API mappings and the typical pitfalls when migrating an existing HTTP service to Chappe. For comparative performance numbers, see link:{repo-chappe}/blob/main/BENCHMARKS.md[BENCHMARKS.md].
 
 [CAUTION]
 ====
@@ -99,7 +99,7 @@ Migrating a complex Netty pipeline (for example a multi-protocol proxy with cust
 | Undertow | Chappe | Note
 
 | `Undertow.builder().addHttpListener(port, host)`
-| `Server.builder().port(port).bindAddress(host)`
+| `Server.builder().port(port).host(host)`
 | Equivalent API.
 
 | `RoutingHandler`
@@ -132,7 +132,7 @@ Migrating a complex Netty pipeline (for example a multi-protocol proxy with cust
 | JDK HttpServer | Chappe | Note
 
 | `HttpServer.create(addr, backlog)`
-| `Server.builder().port(...).bindAddress(...).build()`
+| `Server.builder().port(...).host(...).backlog(...).build()`
 | Fluent builder.
 
 | `createContext("/path", handler)`
@@ -174,7 +174,7 @@ Configuration via YAML, environment-conditional headers, build-time `.gz` sideca
 | Not supported. `.br` sidecars produced by an external build pipeline, served when `Accept-Encoding: br`.
 
 | WebSocket
-| Planned — see lien:{repo-chappe}/blob/main/BUG.md[BUG.md].
+| Shipped — `Router.builder().webSocket(pattern, handler)`, RFC 6455 over HTTP/1.1 (handshake, TEXT/BINARY framing, close handshake, auto-PONG).
 
 | Full Servlet API
 | xref:foy::index.adoc[Foy] on Chappe (Jakarta Servlet 6.1).

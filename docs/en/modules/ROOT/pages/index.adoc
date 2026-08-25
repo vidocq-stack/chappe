@@ -23,12 +23,12 @@ The metaphor holds in two ways:
 
 [cols="1,3"]
 |===
-| Implemented specs | HTTP/1.1 (RFC 9110, RFC 9112), HTTP/2 (RFC 9113), HTTP/3 (RFC 9114, planned)
+| Implemented specs | HTTP/1.1 (RFC 9110, RFC 9112), HTTP/2 (RFC 9113), WebSocket (RFC 6455), gRPC transport framing over HTTP/2, HTTP/3 (RFC 9114, planned)
 | Repo | {repo-chappe}
 | Java | 25 (LTS)
 | Java modules | `io.vidocq.chappe.api`, `io.vidocq.chappe.http`, `io.vidocq.chappe.core`, `io.vidocq.chappe.cli`
 | Runtime dependencies | none (JDK only)
-| Conformance | 45 RFC tests in `chappe-conformance`; 113 integration tests in `chappe-tests`
+| Conformance | 53 RFC tests in `chappe-conformance`; 183 integration tests in `chappe-tests`
 | TCK | not applicable (no official HTTP TCK)
 |===
 
