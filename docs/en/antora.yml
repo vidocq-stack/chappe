@@ -1,11 +1,10 @@
 name: chappe
 title: Chappe
-version: dev
-prerelease: true
+version: '0.3.0'
 nav:
   - modules/ROOT/nav.adoc
 asciidoc:
   attributes:
     lang: en
-    project-version: 0.3.0-SNAPSHOT
-    release-version: 0.2.0
+    project-version: 0.3.0
+    release-version: 0.3.0
