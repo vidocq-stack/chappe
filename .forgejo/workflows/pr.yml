@@ -45,9 +45,54 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Detect a docs-only change set
+        # Docs-only PRs (*.md, *.adoc, docs/, LICENSE*, NOTICE*) skip the whole
+        # Maven build AND the downstream rebuild — the job still completes and
+        # reports the required `pr-validate` check as green. Files under any
+        # src/ directory never count as docs (they may be packaged in the
+        # artifact). Implemented as step-level `if`s: a `paths:` trigger filter
+        # would leave the required check unreported and block /merge forever.
+        id: changes
+        run: |
+          set -euo pipefail
+          api="${{ github.server_url }}/api/v1/repos/${{ github.repository }}/pulls/${{ github.event.number }}/files"
+          # VIDOCQ_BOT_TOKEN lifts rate limits on internal PRs; external fork
+          # PRs get no secrets and fall back to anonymous reads (public repo).
+          auth=()
+          if [ -n "${{ secrets.VIDOCQ_BOT_TOKEN }}" ]; then
+            auth=(-H "Authorization: token ${{ secrets.VIDOCQ_BOT_TOKEN }}")
+          fi
+          files=""
+          page=1
+          while :; do
+            chunk=$(curl -fsS "${auth[@]}" "${api}?page=${page}&limit=50" \
+              | python3 -c 'import sys,json; print("\n".join(f["filename"] for f in json.load(sys.stdin)))')
+            [ -z "$chunk" ] && break
+            files="${files}${chunk}"$'\n'
+            page=$((page+1))
+          done
+          echo "Changed files:"; printf '%s' "$files" | sed 's/^/  /'
+          docs_only=true
+          [ -n "$(printf '%s' "$files" | tr -d '[:space:]')" ] || docs_only=false
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            case "$f" in
+              src/*|*/src/*) docs_only=false; break ;;
+              *.md|*.adoc|docs/*|LICENSE|LICENSE.*|NOTICE|NOTICE.*) ;;
+              *) docs_only=false; break ;;
+            esac
+          done <<EOF
+          $files
+          EOF
+          echo "docs-only=$docs_only" >> "$GITHUB_OUTPUT"
+          echo "docs-only: $docs_only"
+
       - uses: https://codefloe.com/Vidocq/ci/setup-maven@main
+        if: steps.changes.outputs.docs-only != 'true'
 
       - name: Compute PR version (release-style, no -SNAPSHOT)
+        if: steps.changes.outputs.docs-only != 'true'
         id: version
         run: |
           # Parse pom.xml directly with Python — `mvn help:evaluate -q` does not strip all
@@ -73,12 +118,14 @@ jobs:
           echo "PR version: ${BASE}-${SUFFIX}"
 
       - name: Set PR version across the reactor
+        if: steps.changes.outputs.docs-only != 'true'
         run: |
           mvn -B -ntp versions:set \
             -DnewVersion=${{ steps.version.outputs.version }} \
             -DprocessAllModules=true -DgenerateBackupPoms=false
 
       - name: Sync plugin.xml descriptors with the PR version
+        if: steps.changes.outputs.docs-only != 'true'
         # versions:set does not touch resources; maven-plugin modules embed a plugin.xml
         # with a hardcoded <version> — without this sync the plugin JAR ships a stale
         # descriptor and every consumer fails with "Plugin's descriptor contains the wrong
@@ -115,11 +162,13 @@ jobs:
           PY
 
       - name: Build, test & install the producer locally
+        if: steps.changes.outputs.docs-only != 'true'
         # install (not deploy): the PR artifact lands in ~/.m2 only — nothing is published.
         # install runs the full lifecycle incl. integration-test/verify.
         run: mvn -B -ntp install
 
       - name: Rebuild impacted downstream consumers against the local PR artifacts
+        if: steps.changes.outputs.docs-only != 'true'
         uses: https://codefloe.com/Vidocq/ci/build-impacted@main
         with:
           producer-slug: ${{ github.repository }}
