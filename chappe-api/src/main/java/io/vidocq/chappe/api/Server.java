@@ -88,6 +88,12 @@ public interface Server extends AutoCloseable {
 
         Builder readTimeout(Duration timeout);
 
+        /**
+         * Bound on a single blocking write — how long the socket may refuse to accept
+         * bytes we are trying to send. Does not bound idle time on a response with
+         * nothing in flight (e.g. gaps between Server-Sent Events); see {@link
+         * ServerConfig#writeTimeout()}.
+         */
         Builder writeTimeout(Duration timeout);
 
         Builder idleTimeout(Duration timeout);

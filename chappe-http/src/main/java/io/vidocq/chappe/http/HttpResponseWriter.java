@@ -24,6 +24,7 @@ import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.WritableByteChannel;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
@@ -100,6 +101,13 @@ public final class HttpResponseWriter {
     // Buffer for putAsciiLong (avoids new byte[20] per Content-Length)
     private final byte[] digitsBuf = new byte[20];
 
+    // Bound for a single blocking channel.write() call within the current
+    // write()/writeError() invocation — set at entry, read by flush(). This
+    // writer is owned by exactly one HttpConnection and used single-threaded,
+    // one request at a time, so a plain instance field (not a per-call
+    // parameter threaded through every private helper) is safe.
+    private Duration writeTimeout = Duration.ZERO;
+
     // Fast path: pre-encoded headers for 200 OK keep-alive (without Date, without body)
     private static final byte[] FAST_200_KA_PREFIX = ("HTTP/1.1 200 OK\r\n"
                     + "Connection: keep-alive\r\n"
@@ -109,8 +117,14 @@ public final class HttpResponseWriter {
             .getBytes(StandardCharsets.US_ASCII);
 
     public void write(
-            Response response, ByteBuffer buffer, WritableByteChannel channel, boolean keepAlive, HttpMethod method)
+            Response response,
+            ByteBuffer buffer,
+            WritableByteChannel channel,
+            boolean keepAlive,
+            HttpMethod method,
+            Duration writeTimeout)
             throws IOException {
+        this.writeTimeout = writeTimeout;
         buffer.clear();
 
         int statusCode = response.status().code();
@@ -229,8 +243,10 @@ public final class HttpResponseWriter {
         flush(buffer, channel);
     }
 
-    public void writeError(StatusCode status, String message, ByteBuffer buffer, WritableByteChannel channel)
+    public void writeError(
+            StatusCode status, String message, ByteBuffer buffer, WritableByteChannel channel, Duration writeTimeout)
             throws IOException {
+        this.writeTimeout = writeTimeout;
         buffer.clear();
         putStatusLine(status, buffer, channel);
 
@@ -419,10 +435,19 @@ public final class HttpResponseWriter {
         }
     }
 
+    /**
+     * Flushes the buffer, bounding each individual {@code channel.write()}
+     * call by {@link #writeTimeout} — how long the socket may refuse to
+     * accept bytes we are trying to send. This bounds a single blocking
+     * write, never the response as a whole: a streamed response with long
+     * idle gaps between flushes (e.g. Server-Sent Events) is unaffected,
+     * since {@code write} is only called — and only bounded — while there is
+     * something to send.
+     */
     private void flush(ByteBuffer buffer, WritableByteChannel channel) throws IOException {
         buffer.flip();
         while (buffer.hasRemaining()) {
-            channel.write(buffer);
+            BoundedWrites.writeWithTimeout(channel, channel, buffer, writeTimeout);
         }
         buffer.clear();
     }

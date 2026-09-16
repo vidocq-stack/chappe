@@ -31,7 +31,14 @@ import javax.net.ssl.SSLContext;
  * @param port listen port (default: {@code 8080}, {@code 0} for an ephemeral port)
  * @param backlog TCP backlog size (default: {@code 1024})
  * @param readTimeout maximum read timeout (default: 30s)
- * @param writeTimeout maximum write timeout (default: 30s)
+ * @param writeTimeout bound on a single blocking {@code channel.write()} call — how
+ *     long the socket may refuse to accept bytes we are trying to send before the
+ *     connection is considered dead (default: 30s). This is <strong>not</strong> an
+ *     inactivity/idle bound on the response: {@code write} is only invoked — and only
+ *     timed — while there is data to send, so a streamed response (e.g. Server-Sent
+ *     Events) with long idle gaps between events, and no bytes in flight, is never
+ *     affected by this timeout, however long the gap. Use {@code idleTimeout} to bound
+ *     connection inactivity instead.
  * @param idleTimeout idle timeout before closing the connection (default: 60s)
  * @param maxRequestSize maximum request body size in bytes (default: 10 MiB)
  * @param maxHeaderSize maximum header size in bytes (default: 8 KiB)

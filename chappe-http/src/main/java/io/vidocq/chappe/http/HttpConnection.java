@@ -218,7 +218,7 @@ public final class HttpConnection {
                 }
 
                 // 4. Write response
-                writer.write(response, writeBuffer, writeChannel, keepAlive, request.method());
+                writer.write(response, writeBuffer, writeChannel, keepAlive, request.method(), config.writeTimeout());
 
                 // 5. Drain unread body (for keep-alive)
                 if (bodyStream != null) {
@@ -443,7 +443,7 @@ public final class HttpConnection {
 
     private void sendError(StatusCode status, String message) {
         try {
-            writer.writeError(status, message, writeBuffer, writeChannel);
+            writer.writeError(status, message, writeBuffer, writeChannel, config.writeTimeout());
         } catch (IOException _) {
             // Connection already lost
         }
