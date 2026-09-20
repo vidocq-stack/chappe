@@ -28,7 +28,7 @@ jobs:
   # cross-repo reusable workflows, so the shared logic ships as a step-level action.
   # fetch-depth: 0 is required so the action can read the BASE_REF..HEAD commit range.
   governance-checks:
-    runs-on: ubuntu-latest
+    runs-on: vidocq-runner
     steps:
       - uses: actions/checkout@v4
         with:
@@ -42,7 +42,7 @@ jobs:
     # Gate the build on the governance checks: a PR that fails the CLA/GPG/sign-off gate
     # is skipped here, so it never emits a "PR validated" success notification.
     needs: governance-checks
-    runs-on: ubuntu-latest
+    runs-on: vidocq-runner
     steps:
       - uses: actions/checkout@v4
 

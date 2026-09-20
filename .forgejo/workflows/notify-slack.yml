@@ -14,7 +14,7 @@ jobs:
   notify-pr-open:
     # PR opened / reopened / marked ready for review
     if: github.event.action != 'closed'
-    runs-on: ubuntu-latest
+    runs-on: vidocq-runner
     steps:
       - name: Notify Slack (PR opened)
         uses: https://codefloe.com/Vidocq/ci/notify-slack@main
@@ -30,7 +30,7 @@ jobs:
   notify-pr-merged:
     # PR closed WITH merge (PRs merely closed without merge are ignored)
     if: github.event.action == 'closed' && github.event.pull_request.merged == true
-    runs-on: ubuntu-latest
+    runs-on: vidocq-runner
     steps:
       - name: Notify Slack (PR merged)
         uses: https://codefloe.com/Vidocq/ci/notify-slack@main
