@@ -226,6 +226,7 @@ Design points:
 * **No platform thread is dedicated to Chappe** — only virtual threads.
 * **No pinning** — no `synchronized` on the hot path, no blocking JNI. `RequestContext` uses `ScopedValue`, not `ThreadLocal`.
 * **Lazy body** — the body is only read when `req.body().asInputStream()` is called. If a handler returns without consuming, the body is drained cleanly before the next request (HTTP/1.1 keep-alive) or the stream is reset (HTTP/2).
+* **Lingering close** — when an HTTP/1.1 connection ends after a response (an error such as `431` or `400`, or `Connection: close`), Chappe closes it in stages, as RFC 9112 §9.6 describes. First it closes its write side, so the response is followed by a FIN. Then it reads and discards what the client still sends, for at most 2 s or 1 MiB. Then it closes. A plain close with request bytes still unread makes the TCP stack send a reset, and the reset destroys the response before the client reads it. Plaintext only for now; TLS connections still close at once.
 
 == Zero-allocation tricks on the hot path
 

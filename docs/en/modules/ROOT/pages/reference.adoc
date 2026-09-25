@@ -354,7 +354,7 @@ Served zero-copy by `StaticFileHandler.preferPrecompressed(true)`.
 | Spec | Status | Notes
 
 | RFC 9110 (HTTP Semantics) | OK | Date, HEAD/204/304, 405+Allow, Host, 100-continue
-| RFC 9112 (HTTP/1.1)       | OK | request parsing, chunked, keep-alive, pipelining
+| RFC 9112 (HTTP/1.1)       | OK | request parsing, chunked, keep-alive, pipelining, lingering close (§9.6, plaintext)
 | RFC 9113 (HTTP/2)         | OK | framing, flow control, lifecycle, GOAWAY, SETTINGS, CONTINUATION
 | RFC 7541 (HPACK)          | OK | static table, dynamic table, Huffman encode/decode
 | RFC 6455 (WebSocket)      | OK | handshake, TEXT/BINARY framing, fragmentation, UTF-8 validation, client masking, close handshake, auto-PONG — over HTTP/1.1

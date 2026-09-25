@@ -8,7 +8,7 @@ cause hypothesis, and status.
 ## CHAPPE-007 — `RobustnessTest.oversizedHeader` fails with "Connection reset by peer" (main red since 2026-09-21)
 
 - **Date**: 2026-09-25
-- **Status**: OPEN
+- **Status**: FIXED (`fix/lingering-close`, issue #19): lingering close in `HttpConnection`
 - **Module**: `chappe-conformance` — `RobustnessTest.oversizedHeader` (test code)
 - **Symptom**: the `build-and-deploy` run on `main` of 2026-09-21 (task 60868) fails with
   `RobustnessTest.oversizedHeader:197->write:237 » Socket Connection reset by peer`. Main has been red since then.
@@ -23,6 +23,12 @@ cause hypothesis, and status.
 - **Investigations**:
   - 2026-09-25: read the failing log (task 60868, runner `87c30ab4`) and the test source; line 197 is
     the `Connection: close` write. Not reproduced locally.
+  - 2026-09-25: the root cause is the server's, not only the test's. `HttpConnection.run()` ends with
+    `close()` while request bytes are still unread, so the TCP stack sends a RST, and the RST also destroys
+    the response the client has not read. `LingeringCloseTest` shows it deterministically: the 431, a
+    400 and a `Connection: close` 200 are all lost to `Connection reset`, on macOS and on Linux (Temurin
+    25 container). Fixed with a lingering close (RFC 9112 §9.6): `shutdownOutput()`, then a bounded drain
+    (2 s / 1 MiB) through `BoundedReads`, then `close()`. `RobustnessTest.oversizedHeader` passes unchanged.
 
 ## CHAPPE-006 — `TlsTest.requestCoalescedWithHandshakeFlightDoesNotHang` times out on the CI runners
 
