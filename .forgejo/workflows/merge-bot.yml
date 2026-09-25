@@ -4,9 +4,11 @@ name: merge-bot
 # held by Vidocq/ci. Every repository carries this same file, so a change to
 # the bot's behaviour is one commit there rather than one pull request here.
 #
-# `runs-on` is deliberately absent: Forgejo's reference recommends omitting it
-# on a calling job, which lets the forge expand the called workflow's jobs into
-# the run instead of nesting them.
+# `runs-on` is required. Codefloe does not expand a workflow called from
+# another repository: without a label the forge creates a `merge` job with
+# `runs_on: []`, no runner ever takes it, and /merge waits forever without a
+# word (every repository from 2026-09-21 to 2026-09-25). With the label, the
+# runner that takes the job runs the called workflow's steps.
 
 on:
   issue_comment:
@@ -22,6 +24,7 @@ on:
 
 jobs:
   merge:
+    runs-on: vidocq-runner
     uses: https://codefloe.com/Vidocq/ci/.forgejo/workflows/merge-bot-reusable.yml@main
     with:
       pr-number: ${{ github.event.inputs.pr-number }}
