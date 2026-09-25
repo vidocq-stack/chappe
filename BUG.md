@@ -5,6 +5,50 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-007 — `RobustnessTest.oversizedHeader` fails with "Connection reset by peer" (main red since 2026-09-21)
+
+- **Date**: 2026-09-25
+- **Status**: OPEN
+- **Module**: `chappe-conformance` — `RobustnessTest.oversizedHeader` (test code)
+- **Symptom**: the `build-and-deploy` run on `main` of 2026-09-21 (task 60868) fails with
+  `RobustnessTest.oversizedHeader:197->write:237 » Socket Connection reset by peer`. Main has been red since then.
+- **Minimal reproduction**: CI only so far, and not every run. The test sends a 16 KiB
+  header value, which is larger than `maxHeaderSize`, then writes two more lines.
+- **Cause hypothesis**: a race in the test. When the server has read enough to reject
+  the oversized header, it may answer and close before the client has written
+  `Connection: close` and the blank line. Those `write` calls sit **outside** the
+  `try { … } catch (SocketException _)`, which covers `readResponse` only. The reset
+  then escapes. The server's behaviour, a 431/400 or a closed connection, is what the test
+  itself declares acceptable. Likely fix: move the writes inside the `try`.
+- **Investigations**:
+  - 2026-09-25: read the failing log (task 60868, runner `87c30ab4`) and the test source; line 197 is
+    the `Connection: close` write. Not reproduced locally.
+
+## CHAPPE-006 — `TlsTest.requestCoalescedWithHandshakeFlightDoesNotHang` times out on the CI runners
+
+- **Date**: 2026-09-25
+- **Status**: OPEN
+- **Module**: `chappe-tests` — `TlsTest.requestCoalescedWithHandshakeFlightDoesNotHang` (CHAPPE-004 bug C regression test)
+- **Symptom**: `execution timed out after 10000 ms` (`assertTimeoutPreemptively`) in
+  `pr-validate` on PR #16, twice: 2026-09-25 07:08 (runner `6c935f1a`, task 63927) and 08:17
+  (runner `ababeffb`, task 64135), both runners Forgejo runner v13.0.0. The PR changes docs only.
+  The same suite passed on PR #15 on 2026-09-21 (task 60792, runner `6c935f1a`).
+- **Minimal reproduction**:
+  ```
+  ./mvnw -o -pl chappe-tests -am install -Dtest=TlsTest -Dsurefire.failIfNoSpecifiedTests=false
+  ```
+  Passes 3/3 locally on `47ff813` (macOS arm64, Temurin 25). Fails on the Codefloe runners.
+- **Cause hypothesis**: to investigate. There are two candidates:
+  1. The test is too slow on a loaded runner: the handshake is driven by hand through `SSLEngine`, and the whole exchange is bounded by 10 s.
+  2. A real return of the CHAPPE-004 bug C deadlock under the runners' TCP timing: a
+     coalesced Finished + application record left in `netInBuffer` while the server blocks
+     on `channel.read()`. A local pass does not rule this out, since loopback on macOS may
+     not coalesce the same way. `fix: wire writeTimeout to bound a single blocking write (#13)`
+     landed just before, but #15 passed after it.
+  A thread dump on timeout would settle it.
+- **Investigations**:
+  - 2026-09-25: two CI failures on two runners, three local passes; logs read from the job logs API.
+
 ## CHAPPE-005 — Idle timeout was a silent no-op: idle keep-alive connections never closed
 
 - **Date**: 2026-06-12
