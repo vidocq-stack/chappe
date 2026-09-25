@@ -33,7 +33,7 @@ cause hypothesis, and status.
 ## CHAPPE-006 — `TlsTest.requestCoalescedWithHandshakeFlightDoesNotHang` times out on the CI runners
 
 - **Date**: 2026-09-25
-- **Status**: OPEN
+- **Status**: FIXED (`fix/chappe-006-tls-timeout`): the bug was in the test's hand-driven TLS client, not in the server
 - **Module**: `chappe-tests` — `TlsTest.requestCoalescedWithHandshakeFlightDoesNotHang` (CHAPPE-004 bug C regression test)
 - **Symptom**: `execution timed out after 10000 ms` (`assertTimeoutPreemptively`) in
   `pr-validate` on PR #16, twice: 2026-09-25 07:08 (runner `6c935f1a`, task 63927) and 08:17
@@ -60,6 +60,17 @@ cause hypothesis, and status.
     issue, and macOS has not reproduced it so far. Next step: a thread dump on timeout
     (`HotSpotDiagnosticMXBean.dumpThreads`, which includes virtual threads) to see whether the
     server is stuck in `SslHandler` or the hand-driven client waits for a close that never comes.
+  - 2026-09-25: **root cause found, and it is in the test, not in the server.** The test now dumps every thread,
+    virtual ones included (`HotSpotDiagnosticMXBean.dumpThreads`), when it times out. The dump showed the
+    server in `SslHandler.doHandshake` waiting for the client's second flight, and the test client still in
+    **its own** handshake read. Tracing both sides showed the path. The client sometimes gets the whole
+    server flight (ServerHello + ChangeCipherSpec + encrypted flight, 1284 bytes) in one read. It unwraps
+    the ServerHello, and TLS 1.3 then asks for NEED_WRAP (its compatibility ChangeCipherSpec) with 1157
+    server bytes still buffered. Back in NEED_UNWRAP, it called `channel.read()` before unwrapping those
+    bytes, so it waited for bytes the server had already sent. This is the pattern of CHAPPE-004 bug C,
+    on the client side. When the flight arrived in two reads (133 + 1151 bytes), the test passed. Fix: the
+    client unwraps what is buffered first and reads only when the buffer is empty or the last unwrap
+    underflowed. Linux container: 16/16 green, against 1 timeout in 8 before.
 
 ## CHAPPE-005 — Idle timeout was a silent no-op: idle keep-alive connections never closed
 

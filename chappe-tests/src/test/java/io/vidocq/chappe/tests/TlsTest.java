@@ -22,6 +22,7 @@ package io.vidocq.chappe.tests;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
+import java.lang.management.ManagementFactory;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -35,6 +36,11 @@ import java.nio.file.Path;
 import java.security.KeyStore;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
@@ -48,6 +54,7 @@ import javax.net.ssl.X509TrustManager;
 import io.vidocq.chappe.api.Response;
 import io.vidocq.chappe.api.Server;
 
+import com.sun.management.HotSpotDiagnosticMXBean;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -201,12 +208,37 @@ class TlsTest {
      * server hanging) into a test failure instead of a hung build.
      */
     @Test
-    void requestCoalescedWithHandshakeFlightDoesNotHang() {
-        assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
-            String response = sendCoalescedRequest();
-            assertTrue(response.contains("200"), "expected a 200 status line, got:\n" + response);
-            assertTrue(response.contains("Hello TLS!"), "expected the handler body, got:\n" + response);
-        });
+    void requestCoalescedWithHandshakeFlightDoesNotHang() throws Exception {
+        String response = withThreadDumpOnTimeout(Duration.ofSeconds(10), this::sendCoalescedRequest);
+        assertTrue(response.contains("200"), "expected a 200 status line, got:\n" + response);
+        assertTrue(response.contains("Hello TLS!"), "expected the handler body, got:\n" + response);
+    }
+
+    /**
+     * Runs {@code call} on a virtual thread and fails if it has not finished within
+     * {@code timeout}. Before failing, it dumps every thread of the JVM, virtual threads
+     * included, to the test output. The server runs in this JVM, so the dump shows
+     * which side waits and on what. {@code ThreadMXBean} would miss the virtual threads,
+     * hence {@code HotSpotDiagnosticMXBean.dumpThreads}. This is how CHAPPE-006 was found.
+     */
+    private static <T> T withThreadDumpOnTimeout(Duration timeout, Callable<T> call) throws Exception {
+        var task = new FutureTask<>(call);
+        Thread runner = Thread.ofVirtual().name("tls-test-client").start(task);
+        try {
+            return task.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            Path dump = Files.createTempFile("chappe-tls-timeout-", ".txt");
+            Files.delete(dump); // dumpThreads refuses an existing file
+            ManagementFactory.getPlatformMXBean(HotSpotDiagnosticMXBean.class)
+                    .dumpThreads(dump.toString(), HotSpotDiagnosticMXBean.ThreadDumpFormat.TEXT_PLAIN);
+            System.err.println("=== thread dump on timeout (" + dump + ") ===");
+            System.err.println(Files.readString(dump));
+            runner.interrupt();
+            return fail("execution timed out after " + timeout.toMillis() + " ms; thread dump above");
+        } catch (ExecutionException e) {
+            if (e.getCause() instanceof Exception cause) throw cause;
+            throw e;
+        }
     }
 
     private String sendCoalescedRequest() throws Exception {
@@ -227,6 +259,7 @@ class TlsTest {
             engine.beginHandshake();
             HandshakeStatus hs = engine.getHandshakeStatus();
             ByteBuffer heldFinalFlight = null; // the client Finished — deferred so we can coalesce it
+            boolean needMoreBytes = true; // nothing buffered yet, or the last unwrap underflowed
 
             while (hs != HandshakeStatus.FINISHED && hs != HandshakeStatus.NOT_HANDSHAKING) {
                 switch (hs) {
@@ -242,8 +275,15 @@ class TlsTest {
                         }
                     }
                     case NEED_UNWRAP, NEED_UNWRAP_AGAIN -> {
-                        if (ch.read(netIn) < 0) {
-                            throw new IOException("peer closed during client handshake");
+                        // Unwrap what is already buffered before reading (CHAPPE-006). The whole
+                        // server flight often arrives in one read, and TLS 1.3 switches to
+                        // NEED_WRAP right after the ServerHello (compatibility ChangeCipherSpec),
+                        // leaving the rest of the flight buffered. Reading first then waits for
+                        // bytes the server has already sent, while the server waits for us.
+                        if (needMoreBytes || netIn.position() == 0) {
+                            if (ch.read(netIn) < 0) {
+                                throw new IOException("peer closed during client handshake");
+                            }
                         }
                         netIn.flip();
                         SSLEngineResult r;
@@ -257,6 +297,7 @@ class TlsTest {
                         } while (netIn.hasRemaining()
                                 && r.getStatus() == Status.OK
                                 && (hs == HandshakeStatus.NEED_UNWRAP || hs == HandshakeStatus.NEED_UNWRAP_AGAIN));
+                        needMoreBytes = r.getStatus() == Status.BUFFER_UNDERFLOW;
                         netIn.compact();
                     }
                     case NEED_TASK -> hs = runTasks(engine);
