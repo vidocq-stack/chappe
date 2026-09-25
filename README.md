@@ -493,7 +493,7 @@ Router.builder()
 
 Chappe is part of the **Vidocq** family:
 
-- **[Vauban](https://codeberg.org/Vidocq/vauban)** — CDI 4.1 container (integration planned via extensions)
+- **[Vauban](https://codefloe.com/Vidocq/vauban)** — CDI 4.1 container (integration planned via extensions)
 - **Chappe** — HTTP server (this repository)
 - **vidocq-servlet** — Servlet 6.1 extension on top of Chappe (coming soon)
 - **vidocq-jaxrs** — native JAX-RS 4.0 extension on top of Chappe (coming soon)

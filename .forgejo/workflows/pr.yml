@@ -24,7 +24,7 @@ on:
 
 jobs:
   # CLA + GPG-signature + Signed-off-by gate, mutualised in a composite action
-  # (https://codefloe.com/Vidocq/ci/governance-checks). Codeberg does not resolve
+  # (https://codefloe.com/Vidocq/ci/governance-checks). Forgejo does not resolve
   # cross-repo reusable workflows, so the shared logic ships as a step-level action.
   # fetch-depth: 0 is required so the action can read the BASE_REF..HEAD commit range.
   governance-checks:

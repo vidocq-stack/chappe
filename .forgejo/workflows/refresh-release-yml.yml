@@ -51,7 +51,8 @@ jobs:
           fi
           git add .forgejo/workflows/release.yml
           git commit -m "ci: refresh release.yml after upstream ${SOURCE} release"
-          # Reroute ssh:// (declared in <developerConnection>) to HTTPS-with-token
+          # Legacy shim: reroute pre-migration ssh://codeberg.org remotes to HTTPS-with-token
+          # on Codefloe. Harmless now that POMs declare codefloe.com.
           git config --global --add 'url.https://oauth2:${{ secrets.VIDOCQ_BOT_TOKEN }}@codefloe.com/.insteadOf' 'ssh://git@codeberg.org/'
           git config --global --add 'url.https://oauth2:${{ secrets.VIDOCQ_BOT_TOKEN }}@codefloe.com/.insteadOf' 'ssh://codeberg.org/'
           git push origin HEAD:main
