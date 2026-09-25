@@ -292,6 +292,29 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
         return channel.isOpen();
     }
 
+    /**
+     * First half of a lingering close over TLS (see {@link LingeringClose}): sends
+     * close_notify, then half-closes the socket and drains the ciphertext the peer
+     * still sends. {@link #close()} completes it.
+     */
+    void closeNotifyAndDrain(ByteBuffer buffer) {
+        writeLock.lock();
+        try {
+            engine.closeOutbound();
+            netOutBuffer.clear();
+            engine.wrap(EMPTY, netOutBuffer);
+            netOutBuffer.flip();
+            while (netOutBuffer.hasRemaining()) {
+                channel.write(netOutBuffer);
+            }
+        } catch (IOException _) {
+            return; // the connection is gone: nothing left to drain
+        } finally {
+            writeLock.unlock();
+        }
+        LingeringClose.halfCloseAndDrain(channel, buffer);
+    }
+
     @Override
     public void close() throws IOException {
         writeLock.lock();

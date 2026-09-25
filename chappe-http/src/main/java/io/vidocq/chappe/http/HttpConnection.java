@@ -27,7 +27,6 @@ import java.nio.channels.ReadableByteChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.channels.WritableByteChannel;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 
 import io.vidocq.chappe.api.*;
 import io.vidocq.chappe.http.ws.WebSocketConnection;
@@ -42,11 +41,6 @@ import io.vidocq.chappe.http.ws.WebSocketHandshake;
 public final class HttpConnection {
 
     private static final int BUFFER_SIZE = 16 * 1024; // 16 KB
-
-    /** Lingering close budgets: how long, and how much, the server drains before its full close. */
-    private static final Duration LINGER_TIME = Duration.ofSeconds(2);
-
-    private static final long LINGER_MAX_BYTES = 1024 * 1024;
 
     private final ReadableByteChannel readChannel;
     private final WritableByteChannel writeChannel;
@@ -253,30 +247,15 @@ public final class HttpConnection {
     }
 
     /**
-     * Lingering close (RFC 9112 §9.6). With request bytes still unread in the
-     * receive buffer, a plain {@code close()} makes the TCP stack answer with a
-     * reset, and the reset destroys the response the client has not read yet.
-     * So: half-close (the response is followed by a FIN), drain what the client
-     * still sends within {@link #LINGER_TIME} and {@link #LINGER_MAX_BYTES}, then
-     * close. Plaintext only: over TLS the drain would have to go through the
-     * {@code SSLEngine}.
+     * Lingering close (RFC 9112 §9.6), see {@link LingeringClose}: plaintext
+     * half-closes and drains the socket; TLS sends its close_notify first.
      */
     private void lingeringClose() {
-        if (open && readChannel instanceof SocketChannel sc) {
-            try {
-                sc.shutdownOutput();
-                long deadline = System.nanoTime() + LINGER_TIME.toNanos();
-                long drained = 0;
-                while (drained < LINGER_MAX_BYTES) {
-                    long left = deadline - System.nanoTime();
-                    if (left <= 0) break;
-                    readBuffer.clear();
-                    int n = BoundedReads.readWithTimeout(sc, sc, readBuffer, Duration.ofNanos(left));
-                    if (n == -1) break; // the client closed its side
-                    drained += n;
-                }
-            } catch (IOException _) {
-                // reset by the client, or closed by the watchdog at the deadline
+        if (open) {
+            if (readChannel instanceof SocketChannel sc) {
+                LingeringClose.halfCloseAndDrain(sc, readBuffer);
+            } else if (closeable instanceof SslHandler ssl) {
+                ssl.closeNotifyAndDrain(readBuffer);
             }
         }
         close();

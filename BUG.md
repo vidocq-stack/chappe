@@ -54,6 +54,12 @@ cause hypothesis, and status.
   A thread dump on timeout would settle it.
 - **Investigations**:
   - 2026-09-25: two CI failures on two runners, three local passes; logs read from the job logs API.
+  - 2026-09-25: **reproduced locally in a Linux container** (`eclipse-temurin:25-jdk`, arm64, OrbStack):
+    `TlsTest` alone, 8 runs from the reactor, timed out in 1 of the 8 runs on `main` (`8f1cbc4`) and in 1 of the 8 runs with the
+    TLS lingering close of #21. The TLS lingering close does not change it. This is a separate
+    issue, and macOS has not reproduced it so far. Next step: a thread dump on timeout
+    (`HotSpotDiagnosticMXBean.dumpThreads`, which includes virtual threads) to see whether the
+    server is stuck in `SslHandler` or the hand-driven client waits for a close that never comes.
 
 ## CHAPPE-005 — Idle timeout was a silent no-op: idle keep-alive connections never closed
 
