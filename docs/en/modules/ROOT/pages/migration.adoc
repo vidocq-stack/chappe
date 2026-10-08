@@ -9,6 +9,11 @@ This page collects the API mappings and the typical pitfalls when migrating an e
 Chappe is at `{project-version}`. A production migration is premature. The tables below document the API mapping; validate every use case with your service's integration tests before switching.
 ====
 
+[#upgrading]
+== Upgrading from {release-version} [.tag-new]#NEW#
+
+* **`writeTimeout` now closes stalled connections** — up to {release-version}, `Server.Builder.writeTimeout(Duration)` was accepted and never applied. It now bounds each blocking write of an HTTP/1.1 response, 30 s by default: if a client stops reading and the socket refuses the bytes for longer than that, Chappe closes the connection and the client receives a truncated body. Idle gaps with nothing to send are not timed, so a quiet Server-Sent Events stream is not affected. If one of your clients legitimately takes longer than 30 s to accept bytes, set a larger `writeTimeout`. See xref:reference.adoc#timeouts[Reference — timeouts].
+
 == Overview
 
 [mermaid]
