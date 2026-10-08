@@ -102,6 +102,13 @@ The builder is the nested `Server.Builder` interface:
 
 The executor is not configurable: every connection is handled on its own virtual thread.
 
+[#timeouts]
+==== Timeouts
+
+* `readTimeout` (default 30 s) bounds a blocking read of the request.
+* `idleTimeout` (default 60 s) bounds inactivity on the read side: a connection that sends nothing for that long is closed.
+* `writeTimeout` (default 30 s) [.tag-new]#NEW# bounds *one* blocking write of an HTTP/1.1 response: how long the socket may refuse the bytes Chappe is sending, because the client does not read. When it expires, Chappe closes the connection, and the client gets a truncated body. It is not an inactivity bound on the response: nothing is timed while there is nothing to send, so a Server-Sent Events stream with long gaps between events is never cut by it. Until 0.3.0 the value was accepted by the builder and never applied.
+
 === `Router`
 
 [source,java]
@@ -354,7 +361,7 @@ Served zero-copy by `StaticFileHandler.preferPrecompressed(true)`.
 | Spec | Status | Notes
 
 | RFC 9110 (HTTP Semantics) | OK | Date, HEAD/204/304, 405+Allow, Host, 100-continue
-| RFC 9112 (HTTP/1.1)       | OK | request parsing, chunked, keep-alive, pipelining, lingering close (§9.6, plaintext and TLS)
+| RFC 9112 (HTTP/1.1)       | OK | request parsing, chunked, keep-alive, pipelining, lingering close (§9.6, plaintext and TLS) [.tag-new]#NEW#
 | RFC 9113 (HTTP/2)         | OK | framing, flow control, lifecycle, GOAWAY, SETTINGS, CONTINUATION
 | RFC 7541 (HPACK)          | OK | static table, dynamic table, Huffman encode/decode
 | RFC 6455 (WebSocket)      | OK | handshake, TEXT/BINARY framing, fragmentation, UTF-8 validation, client masking, close handshake, auto-PONG — over HTTP/1.1
