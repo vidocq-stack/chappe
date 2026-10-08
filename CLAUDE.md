@@ -120,9 +120,8 @@ The server must be validated on three axes:
 ## Environment
 
 - Use **sdkman** to manage Java and Maven versions
-- Required: **Java 25** (`sdk use java 25-open` or equivalent)
-- Required: **Maven 4** (`sdk use maven 4.0.0-rc-5`)
-- If `mvn` fails with "modelVersion 4.1.0 not supported", Maven `current` was reset to 3.x — switch back to 4.x
+- Required: **Java 25** (Temurin, `java=25-tem`) and **Maven 3.9.16** (`maven=3.9.16`), both pinned in `.sdkmanrc` — run `sdk env`
+- The POMs use `modelVersion 4.0.0`; Maven 4 is not required
 
 ## Context Mode
 

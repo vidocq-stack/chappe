@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-Chappe is a Maven 4 multi-module Java 25 project using the standard Maven layout:
+Chappe is a Maven multi-module Java 25 project using the standard Maven layout:
 
 - `chappe-api`: public API types, including `Server`, `Router`, `Request`, and `Response`.
 - `chappe-http`: HTTP/1.1, HTTP/2, TLS, parsing, and wire-level code.
@@ -25,7 +25,7 @@ Use SDKMAN to match the repository toolchain:
 - `mvn -ntp -Pquality verify`: runs verification with JaCoCo reporting.
 - `java --enable-preview -jar chappe-cli/target/chappe-cli-*-shaded.jar serve --root ./site --port 8080`: runs the packaged CLI locally.
 
-If Maven reports unsupported `modelVersion 4.1.0`, switch back to Maven 4.
+The POMs use `modelVersion 4.0.0`; Maven 4 is not required.
 
 ## Coding Style & Naming Conventions
 
