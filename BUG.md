@@ -57,6 +57,10 @@ cause hypothesis, and status.
   - the body streams extend `RequestBodyInputStream`, which records any failed read;
   - after the handler, a failed body read or a closed read channel closes the connection: no
     drain, no next request.
+  - the upgrade paths (`WebSocketUpgrade`, `ConnectionUpgrade`) apply the same guard before
+    their drain: the connection closes, with no upgrade head and no hand-over
+    (`chappe-tests/.../UpgradeAfterFailedBodyReadTest`: a chunked body `Z0\r\n\r\n` failed on
+    `Z`, then a drain ended it cleanly and the upgrade ran on a misaligned stream).
 
 ---
 

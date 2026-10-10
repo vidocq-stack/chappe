@@ -209,6 +209,16 @@ public final class HttpConnection {
                         response = Response.of(StatusCode.HTTP_VERSION_NOT_SUPPORTED);
                     }
 
+                    // An upgrade drains the request body before taking the connection over; after a
+                    // failed body read (or a closed read channel) the byte stream position is
+                    // unknown: close the connection, no drain, no upgrade head (CHAPPE-013).
+                    if ((response instanceof WebSocketUpgrade || response instanceof ConnectionUpgrade)
+                            && bodyStream != null
+                            && (bodyReadFailed(bodyStream) || !readChannel.isOpen())) {
+                        lingerOnClose = false;
+                        break;
+                    }
+
                     // 4a. WebSocket upgrade: switch to frame mode and end HTTP loop.
                     if (response instanceof WebSocketUpgrade upgrade) {
                         if (bodyStream != null) HttpBodyReader.drain(bodyStream);
