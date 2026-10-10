@@ -67,7 +67,9 @@ req.attribute(k, v)    // mutable per-request attributes (Servlet-compat)
 | Zero-copy via `FileChannel.transferTo()` — `Body.ofFile(path)`.
 |===
 
-On HTTP/1.1, in-memory and file bodies are written with as few socket writes as possible. Any other body is treated as a live stream and flushed after every read, so a client sees each part while the producer is still running: a body of unknown length (`contentLength() < 0`) is sent chunked on a keep-alive connection, and a body of known length is sent under its `Content-Length`. After the last chunk of a chunked body, the transport calls `Response.trailers()` and writes the fields it returns into the trailer section (RFC 9112 §7.1.2). It drops any field whose name or value contains CR, LF or NUL. HTTP/2 sends the same trailers as a final HEADERS frame.
+On HTTP/1.1, in-memory and file bodies are written with as few socket writes as possible. A body of unknown length (`contentLength() < 0`) is sent chunked on a keep-alive connection, one flushed chunk per read. A body of known length is sent under its `Content-Length` and fills full write buffers while its stream reports bytes ready (`available() > 0`). This is the case for classpath and jar resources. Whenever the next read could block, the buffered bytes are flushed, so a client sees each part while the producer is still running.
+
+After the last chunk of a chunked body, the transport calls `Response.trailers()` and writes the fields it returns into the trailer section (RFC 9112 §7.1.2). It drops any field whose name is not an RFC 9110 token, or whose value contains anything other than visible ASCII, obs-text (`0x80`–`0xFF`), space or tab; a char above `U+00FF` is always dropped. Choosing which names may appear in a trailer section is left to the caller: RFC 9110 §6.5.1 forbids framing fields such as `Content-Length` or `Transfer-Encoding` there. HTTP/2 sends the same trailers as a final HEADERS frame.
 
 == Filters
 

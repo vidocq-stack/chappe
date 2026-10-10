@@ -5,6 +5,29 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-008 — HTTP/1.1 writer truncates header chars to one byte (header injection)
+
+- **Date**: 2026-10-10
+- **Status**: OPEN (trailers fixed in `pr/ybl/servlet-streaming-upgrade`; ordinary headers not yet)
+- **Module**: `chappe-http`, `HttpResponseWriter.putAsciiString`, called from the header loop of `write()`
+- **Symptom**: `putAsciiString` casts each `char` of a header name or value to a `byte`, so a char
+  above U+00FF loses its high byte. U+010D and U+010A become CR and LF on the wire, so a value such as
+  `"ačĊSet-Cookie: a=b"` injects a header line (response splitting). Names and values are
+  not validated at all, so plain CR, LF and NUL go through as well.
+- **Minimal reproduction**: a handler returning
+  `Response.builder().header("X", "ačĊSet-Cookie: a=b").build()`. The raw response then
+  carries a separate `Set-Cookie: a=b` line.
+- **Cause hypothesis**: the writer assumes the application hands it ASCII header text.
+- **Cross-reference**: foy `BUG-20261009-11`. Foy already rejects CR, LF, NUL and chars above U+00FF
+  before they reach chappe (foy 2f7fcf0), so Servlet applications are covered. Other chappe users
+  are not.
+- **Investigations**:
+  - 2026-10-10 (Foy Phase 5, task 5.2): response trailers are validated before writing. Names must be
+    RFC 9110 §5.6.2 tokens. Values may contain only field-vchar, obs-text, SP and HTAB, so nothing
+    above U+00FF gets through. See `ResponseTrailersHttp11Test.trailerValueAboveLatin1IsDropped`. The same
+    check, or a 500 for an invalid header, still has to be applied to ordinary headers in `write()`.
+    That was deliberately left out of this task.
+
 ## CHAPPE-007 — `RobustnessTest.oversizedHeader` fails with "Connection reset by peer" (main red since 2026-09-21)
 
 - **Date**: 2026-09-25

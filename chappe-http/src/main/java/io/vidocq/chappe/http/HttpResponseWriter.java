@@ -240,7 +240,7 @@ public final class HttpResponseWriter {
                 int read;
                 while ((read = in.read(bodyChunk)) != -1) {
                     putBytes(bodyChunk, 0, read, buffer, channel);
-                    if (flushPerRead && read > 0) {
+                    if (flushPerRead && read > 0 && mayBlock(in)) {
                         flush(buffer, channel);
                     }
                 }
@@ -327,9 +327,18 @@ public final class HttpResponseWriter {
     /**
      * Writes the last chunk and the trailer section (RFC 9112 §7.1.2):
      * {@code 0\r\n}, one {@code name: value\r\n} line per trailer value, then
-     * the final {@code \r\n}. A trailer whose name or value contains CR, LF or
-     * NUL (or whose name is empty) is skipped, so it can neither inject a
-     * field nor break the framing.
+     * the final {@code \r\n}.
+     * <p>
+     * A trailer is skipped unless its name is a non-empty RFC 9110 §5.6.2
+     * token and its value contains only field-vchar ({@code 0x21-0x7E}),
+     * obs-text ({@code 0x80-0xFF}), SP and HTAB (RFC 9110 §5.5). Any char
+     * above {@code U+00FF} is rejected too, since it cannot be written as a
+     * single byte and truncating it could forge CR/LF. A trailer can therefore
+     * neither inject a field nor break the framing.
+     * <p>
+     * Which names may appear in a trailer section (RFC 9110 §6.5.1 forbids
+     * framing, routing and similar fields such as {@code Content-Length} or
+     * {@code Transfer-Encoding}) is left to the caller.
      */
     private void writeLastChunk(Headers trailers, ByteBuffer buffer, WritableByteChannel channel) throws IOException {
         if (trailers.isEmpty()) {
@@ -338,7 +347,7 @@ public final class HttpResponseWriter {
         }
         putBytes(LAST_CHUNK, buffer, channel);
         for (var entry : trailers) {
-            if (entry.name().isEmpty() || !isSafeFieldText(entry.name()) || !isSafeFieldText(entry.value())) {
+            if (!isToken(entry.name()) || !isFieldValue(entry.value())) {
                 continue;
             }
             putAsciiString(entry.name(), buffer, channel);
@@ -351,20 +360,47 @@ public final class HttpResponseWriter {
     }
 
     /**
-     * Whether a known-length body is produced live (and must therefore be
-     * flushed after every read) rather than already complete in memory or on
-     * disk. In-memory bodies ({@code Body.of(byte[]|String)}, or any body over
-     * a {@link ByteArrayInputStream}) and file bodies keep the coalesced
-     * single flush.
+     * Whether a known-length body may be produced live, so its reads must be
+     * checked for flushing (see {@link #mayBlock(InputStream)}). In-memory
+     * bodies ({@code Body.of(byte[]|String)}, or any body over a
+     * {@link ByteArrayInputStream}) and file bodies never are: they keep the
+     * coalesced writes without even querying the stream.
      */
     private static boolean isLiveStream(Body body, InputStream in) {
         return !(body instanceof FileBody) && !(in instanceof ByteArrayInputStream);
     }
 
-    private static boolean isSafeFieldText(String s) {
+    /**
+     * Whether the next read of a live body could block. The buffered bytes
+     * are then flushed, so the client receives them while the producer is
+     * still running. A stream with bytes ready ({@code available() > 0}), such
+     * as a classpath or jar resource, keeps filling the write buffer and is
+     * written in full-buffer writes.
+     */
+    private static boolean mayBlock(InputStream in) throws IOException {
+        return in.available() <= 0;
+    }
+
+    /** RFC 9110 §5.6.2 {@code token}: one or more tchar. */
+    private static boolean isToken(String s) {
+        if (s.isEmpty()) return false;
         for (int i = 0, len = s.length(); i < len; i++) {
             char c = s.charAt(i);
-            if (c == '\r' || c == '\n' || c == '\0') return false;
+            boolean tchar = (c >= 'a' && c <= 'z')
+                    || (c >= 'A' && c <= 'Z')
+                    || (c >= '0' && c <= '9')
+                    || "!#$%&'*+-.^_`|~".indexOf(c) >= 0;
+            if (!tchar) return false;
+        }
+        return true;
+    }
+
+    /** RFC 9110 §5.5 field value: field-vchar, obs-text, SP and HTAB only (one byte per char). */
+    private static boolean isFieldValue(String s) {
+        for (int i = 0, len = s.length(); i < len; i++) {
+            char c = s.charAt(i);
+            boolean ok = (c >= 0x21 && c <= 0x7E) || (c >= 0x80 && c <= 0xFF) || c == ' ' || c == '\t';
+            if (!ok) return false;
         }
         return true;
     }
@@ -402,17 +438,17 @@ public final class HttpResponseWriter {
             // For non-SocketChannel (TLS), fall through to InputStream path
         }
 
-        // InputStream-based path. In-memory and file bodies are coalesced into
-        // as few writes as possible; any other known-length body is a live
-        // stream, so each read is flushed and reaches the client while the
-        // producer is still running (e.g. Servlet flushBuffer() with a
-        // declared Content-Length).
+        // InputStream-based path. Bytes are coalesced into full write buffers,
+        // except that a live stream is flushed whenever its next read could
+        // block, so a partial body reaches the client while the producer is
+        // still running (e.g. Servlet flushBuffer() with a declared
+        // Content-Length).
         try (InputStream in = body.asInputStream()) {
             boolean flushPerRead = isLiveStream(body, in);
             int read;
             while ((read = in.read(bodyChunk)) != -1) {
                 putBytes(bodyChunk, 0, read, buffer, channel);
-                if (flushPerRead && read > 0) {
+                if (flushPerRead && read > 0 && mayBlock(in)) {
                     flush(buffer, channel);
                 }
             }

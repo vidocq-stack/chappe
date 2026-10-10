@@ -147,6 +147,54 @@ class ResponseTrailersHttp11Test {
         }
     }
 
+    /**
+     * Chars above U+00FF must not be truncated to their low byte on the wire:
+     * U+010D/U+010A would otherwise become CR/LF and split the trailer section.
+     */
+    @Test
+    void trailerValueAboveLatin1IsDropped() throws IOException {
+        start(_ -> Response.builder()
+                .body(Body.of(stream("hello"), -1))
+                .trailer("evil", "xčĊInjected: yes")
+                .trailer("nul", "aĀb")
+                .trailer("ctl", "a\u0001b")
+                .trailer("good", "kept\tvalue with obs-text é")
+                .build());
+
+        try (var socket = new Socket("127.0.0.1", server.port())) {
+            socket.setSoTimeout(5000);
+            var out = socket.getOutputStream();
+            var in = socket.getInputStream();
+
+            request(out, "/one", false);
+            String first = readChunkedResponse(in, StandardCharsets.ISO_8859_1);
+            assertTrue(first.endsWith("0\r\ngood: kept\tvalue with obs-text é\r\n\r\n"), first);
+            assertFalse(first.contains("Injected"), first);
+
+            request(out, "/two", false);
+            assertTrue(readChunkedResponse(in).startsWith("HTTP/1.1 200"), "framing must stay intact");
+        }
+    }
+
+    /** Trailer names must be RFC 9110 §5.6.2 tokens; anything else is dropped. */
+    @Test
+    void trailerNameThatIsNotATokenIsDropped() throws IOException {
+        start(_ -> Response.builder()
+                .body(Body.of(stream("hello"), -1))
+                .trailer("a: b", "v1")
+                .trailer("a b", "v2")
+                .trailer("x:", "v3")
+                .trailer("", "v4")
+                .trailer("été", "v5")
+                .trailer("Ok-Name_1.~!#$%&'*+^`|", "kept")
+                .build());
+
+        String raw = exchange();
+
+        assertTrue(raw.endsWith("0\r\nOk-Name_1.~!#$%&'*+^`|: kept\r\n\r\n"), raw);
+        assertFalse(raw.contains("v1") || raw.contains("v2") || raw.contains("v3") || raw.contains("v5"), raw);
+    }
+
     @Test
     void closeDelimitedBodyHasNoTrailers() throws IOException {
         start(_ -> Response.builder()
@@ -194,6 +242,10 @@ class ResponseTrailersHttp11Test {
      * connection positioned on the next response.
      */
     private static String readChunkedResponse(InputStream in) throws IOException {
+        return readChunkedResponse(in, StandardCharsets.US_ASCII);
+    }
+
+    private static String readChunkedResponse(InputStream in, java.nio.charset.Charset charset) throws IOException {
         var raw = new ByteArrayOutputStream();
         String line;
         do {
@@ -207,7 +259,7 @@ class ResponseTrailersHttp11Test {
         do {
             line = readLine(in, raw);
         } while (!line.isEmpty()); // trailer section
-        return raw.toString(StandardCharsets.US_ASCII);
+        return raw.toString(charset);
     }
 
     private static String readLine(InputStream in, ByteArrayOutputStream raw) throws IOException {
