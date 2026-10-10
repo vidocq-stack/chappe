@@ -31,6 +31,11 @@ import java.io.OutputStream;
  * writes {@link #output()}; concurrent writes are serialised. {@link #close()} may be called from
  * any thread and wakes a blocked read or write. Closing {@link #input()} or {@link #output()}
  * themselves does not close the connection; only {@link #close()} does.
+ * <p>
+ * The connection stays open until {@link #close()} is called or the server stops — the peer
+ * closing its side does not close it (a half-close is legitimate). The application must call
+ * {@link #close()} when it is done, in particular after reading {@code -1} and on any I/O error.
+ * Once closed, the streams throw {@link IOException}.
  *
  * @see ConnectionUpgrade
  */
@@ -38,8 +43,9 @@ public interface UpgradedConnection extends Closeable {
 
     /**
      * Bytes sent by the peer after the request head, including any already buffered by the
-     * transport. {@link InputStream#available()} reports the bytes readable without blocking.
-     * Reaching end of stream ({@code -1}) does not close the connection.
+     * transport. {@link InputStream#available()} reports the bytes the transport had buffered
+     * and that are not read yet (readable without blocking). Reaching end of stream
+     * ({@code -1}) does not close the connection: the application must call {@link #close()}.
      */
     InputStream input();
 

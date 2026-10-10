@@ -28,7 +28,6 @@ import java.nio.channels.ReadableByteChannel;
 import java.nio.channels.WritableByteChannel;
 import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 import io.vidocq.chappe.api.Request;
 import io.vidocq.chappe.api.UpgradedConnection;
@@ -37,24 +36,35 @@ import io.vidocq.chappe.api.UpgradedConnection;
  * Raw byte streams of an HTTP/1.1 connection taken over by a
  * {@link io.vidocq.chappe.api.ConnectionUpgrade}.
  * <p>
- * {@link #input()} first serves the bytes the transport had already read past the request head
- * (left in the parse buffer, in read mode: {@code position..limit}), then reads the channel.
- * {@link #output()} writes straight to the channel, without buffering and without the server's
- * write timeout (a write stalled by the peer is released by {@link #close()}). {@link #close()} closes
- * the connection once and releases {@link #awaitClose()}, on which the connection thread parks.
+ * The bytes the transport had already read past the request head are <em>copied</em> out of the
+ * parse buffer at construction: that buffer is pooled and goes back to the pool when the
+ * connection thread ends, so the application must never see it. {@link #input()} serves the copy
+ * first, then reads the channel. {@link #output()} writes straight to the channel, without
+ * buffering and without the server's write timeout (a write stalled by the peer is released by
+ * {@link #close()}). Once closed, both streams throw {@link IOException} and never touch the
+ * channel again. {@link #close()} closes the connection once and releases {@link #awaitClose()},
+ * on which the connection thread parks.
  */
 final class UpgradedConnectionImpl implements UpgradedConnection {
 
     private final ReadableByteChannel readChannel;
     private final WritableByteChannel writeChannel;
     private final Closeable closeable;
-    private final ByteBuffer leftover;
     private final Request request;
-    private final AtomicBoolean closed = new AtomicBoolean();
     private final CountDownLatch closedLatch = new CountDownLatch(1);
     private final InputStream input = new Input();
     private final OutputStream output = new Output();
+    private volatile boolean closed;
 
+    /** Private copy of the bytes buffered past the request head; guarded by the input lock. */
+    private final byte[] leftover;
+
+    private int leftoverPos;
+
+    /**
+     * @param leftover the parse buffer in read mode; its remaining bytes are copied and it is
+     *     not referenced afterwards
+     */
     UpgradedConnectionImpl(
             ReadableByteChannel readChannel,
             WritableByteChannel writeChannel,
@@ -63,7 +73,8 @@ final class UpgradedConnectionImpl implements UpgradedConnection {
             Request request) {
         this.readChannel = readChannel;
         this.writeChannel = writeChannel;
-        this.leftover = leftover;
+        this.leftover = new byte[leftover.remaining()];
+        leftover.get(this.leftover);
         this.closeable = closeable;
         this.request = request;
     }
@@ -85,7 +96,10 @@ final class UpgradedConnectionImpl implements UpgradedConnection {
 
     @Override
     public void close() throws IOException {
-        if (!closed.compareAndSet(false, true)) return;
+        synchronized (closedLatch) {
+            if (closed) return;
+            closed = true;
+        }
         try {
             closeable.close();
         } finally {
@@ -98,9 +112,11 @@ final class UpgradedConnectionImpl implements UpgradedConnection {
         closedLatch.await();
     }
 
-    private final class Input extends InputStream {
+    private void ensureOpen() throws IOException {
+        if (closed) throw new IOException("Upgraded connection closed");
+    }
 
-        private final Object lock = new Object();
+    private final class Input extends InputStream {
 
         @Override
         public int read() throws IOException {
@@ -110,27 +126,30 @@ final class UpgradedConnectionImpl implements UpgradedConnection {
         }
 
         @Override
-        public int read(byte[] b, int off, int len) throws IOException {
+        public synchronized int read(byte[] b, int off, int len) throws IOException {
             Objects.checkFromIndexSize(off, len, b.length);
+            ensureOpen();
             if (len == 0) return 0;
-            synchronized (lock) {
-                if (leftover.hasRemaining()) {
-                    int n = Math.min(len, leftover.remaining());
-                    leftover.get(b, off, n);
-                    return n;
-                }
-                var dst = ByteBuffer.wrap(b, off, len);
-                int n;
-                do {
-                    n = readChannel.read(dst);
-                } while (n == 0);
+            if (leftoverPos < leftover.length) {
+                int n = Math.min(len, leftover.length - leftoverPos);
+                System.arraycopy(leftover, leftoverPos, b, off, n);
+                leftoverPos += n;
                 return n;
             }
+            var dst = ByteBuffer.wrap(b, off, len);
+            int n;
+            do {
+                n = readChannel.read(dst);
+            } while (n == 0 && !closed);
+            ensureOpen(); // closed while blocked: never report data or EOF from a closed connection
+            return n;
         }
 
+        /** Bytes buffered by the transport and not read yet (0 once they are consumed). */
         @Override
-        public int available() {
-            return leftover.remaining();
+        public synchronized int available() throws IOException {
+            ensureOpen();
+            return leftover.length - leftoverPos;
         }
 
         @Override
@@ -151,13 +170,14 @@ final class UpgradedConnectionImpl implements UpgradedConnection {
             Objects.checkFromIndexSize(off, len, b.length);
             var src = ByteBuffer.wrap(b, off, len);
             while (src.hasRemaining()) {
+                ensureOpen();
                 writeChannel.write(src);
             }
         }
 
         @Override
-        public void flush() {
-            // Unbuffered: every write is already on the wire.
+        public void flush() throws IOException {
+            ensureOpen(); // unbuffered: every write is already on the wire
         }
 
         @Override

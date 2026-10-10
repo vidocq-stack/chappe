@@ -31,6 +31,11 @@ import java.util.Objects;
  * {@code Upgrade} / {@code Connection} itself. No {@code Date}, {@code Server} or framing header
  * is added.
  * <p>
+ * Deciding whether to upgrade is the caller's job: the transport performs the takeover for any
+ * HTTP/1.x request, so refusing {@code Upgrade} on an HTTP/1.0 request (RFC 9110 §7.8: a server
+ * must ignore it there) or checking the requested protocol is left to the code that builds this
+ * response.
+ * <p>
  * The status and headers are validated, and the headers copied, when the upgrade is built:
  * <ul>
  *   <li>a status code outside {@code 100-999}, or a reason phrase holding CR, LF or another

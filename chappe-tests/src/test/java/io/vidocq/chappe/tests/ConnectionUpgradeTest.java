@@ -49,12 +49,14 @@ import io.vidocq.chappe.http.h2.HpackDecoder;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 /**
  * Generic HTTP/1.1 connection upgrade ({@link ConnectionUpgrade}): the transport writes the
  * application's status line and headers, then hands the raw byte streams to an
  * {@link io.vidocq.chappe.api.UpgradeHandler}. HTTP/2 refuses the mechanism (RFC 9113 §8.6).
  */
+@Timeout(30)
 class ConnectionUpgradeTest {
 
     private static final Headers ECHO_HEADERS = Headers.builder()
@@ -142,17 +144,26 @@ class ConnectionUpgradeTest {
     void connectionStaysOpenAfterOnUpgradeReturns() throws Exception {
         var stored = new AtomicReference<UpgradedConnection>();
         var returned = new CountDownLatch(1);
+        var writerFailure = new AtomicReference<Throwable>();
+        var writerDone = new CountDownLatch(1);
         start(_ -> new ConnectionUpgrade(StatusCode.SWITCHING_PROTOCOLS, ECHO_HEADERS, conn -> {
             stored.set(conn);
             Thread.ofVirtual().start(() -> {
                 try {
-                    assertTrue(returned.await(5, TimeUnit.SECONDS));
+                    assertTrue(returned.await(5, TimeUnit.SECONDS), "onUpgrade did not return");
                     Thread.sleep(200);
                     conn.output().write("late\n".getBytes(StandardCharsets.US_ASCII));
                     conn.output().flush();
                     conn.close();
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
+                } catch (Throwable t) {
+                    writerFailure.set(t);
+                    try {
+                        conn.close();
+                    } catch (IOException _) {
+                        // best-effort, the failure is reported below
+                    }
+                } finally {
+                    writerDone.countDown();
                 }
             });
             // onUpgrade returns immediately; the connection must stay open.
@@ -165,10 +176,140 @@ class ConnectionUpgradeTest {
                             .getBytes(StandardCharsets.US_ASCII));
             InputStream in = socket.getInputStream();
             assertTrue(readHead(in).startsWith("HTTP/1.1 101 "));
-            assertEquals("late", readLine(in));
+            String late = readLine(in);
+            assertTrue(writerDone.await(5, TimeUnit.SECONDS), "writer thread did not finish");
+            if (writerFailure.get() != null) {
+                throw new AssertionError("writer thread failed", writerFailure.get());
+            }
+            assertEquals("late", late);
             assertEquals(-1, in.read());
         }
         assertNotNull(stored.get());
+    }
+
+    @Test
+    void streamsThrowOnceClosedAndNeverServeBufferedBytes() throws Exception {
+        var readResult = new AtomicReference<Object>();
+        var writeResult = new AtomicReference<Object>();
+        var availableResult = new AtomicReference<Object>();
+        var done = new CountDownLatch(1);
+        start(_ -> new ConnectionUpgrade(StatusCode.SWITCHING_PROTOCOLS, ECHO_HEADERS, conn -> {
+            try {
+                conn.close();
+                readResult.set(outcome(() -> conn.input().read(new byte[16])));
+                availableResult.set(outcome(() -> conn.input().available()));
+                writeResult.set(outcome(() -> {
+                    conn.output().write('x');
+                    return 1;
+                }));
+            } finally {
+                done.countDown();
+            }
+        }));
+
+        try (var socket = connect()) {
+            // "abc" lands in the transport's (pooled) read buffer together with the head.
+            socket.getOutputStream()
+                    .write(("GET /u HTTP/1.1\r\nHost: h\r\nUpgrade: echo\r\nConnection: Upgrade\r\n\r\nabc")
+                            .getBytes(StandardCharsets.US_ASCII));
+            InputStream in = socket.getInputStream();
+            assertTrue(readHead(in).startsWith("HTTP/1.1 101 "));
+            assertEquals(-1, in.read());
+        }
+        assertTrue(done.await(5, TimeUnit.SECONDS));
+        assertInstanceOf(IOException.class, readResult.get(), "read after close must throw");
+        assertInstanceOf(IOException.class, availableResult.get(), "available after close must throw");
+        assertInstanceOf(IOException.class, writeResult.get(), "write after close must throw");
+    }
+
+    @Test
+    void closeWakesAWriterStalledByAPeerThatDoesNotRead() throws Exception {
+        var stored = new AtomicReference<UpgradedConnection>();
+        var written = new java.util.concurrent.atomic.AtomicLong();
+        var writerEnd = new AtomicReference<Throwable>();
+        var writerDone = new CountDownLatch(1);
+        start(_ -> new ConnectionUpgrade(StatusCode.SWITCHING_PROTOCOLS, ECHO_HEADERS, conn -> {
+            stored.set(conn);
+            Thread.ofVirtual().start(() -> {
+                byte[] chunk = new byte[64 * 1024];
+                try {
+                    while (true) {
+                        conn.output().write(chunk);
+                        written.addAndGet(chunk.length);
+                    }
+                } catch (Throwable t) {
+                    writerEnd.set(t);
+                } finally {
+                    writerDone.countDown();
+                }
+            });
+        }));
+
+        try (var socket = connect()) {
+            socket.getOutputStream()
+                    .write(("GET /u HTTP/1.1\r\nHost: h\r\nUpgrade: echo\r\nConnection: Upgrade\r\n\r\n")
+                            .getBytes(StandardCharsets.US_ASCII));
+            assertTrue(readHead(socket.getInputStream()).startsWith("HTTP/1.1 101 "));
+            // Stop reading: wait until the writer is stuck in a blocking write.
+            awaitStalled(written);
+            assertEquals(1, writerDone.getCount(), "writer must be blocked, not finished");
+
+            long t0 = System.nanoTime();
+            stored.get().close();
+            long closeMs = (System.nanoTime() - t0) / 1_000_000;
+            assertTrue(closeMs < 2000, "close() took " + closeMs + " ms");
+            assertTrue(writerDone.await(2, TimeUnit.SECONDS), "close() must wake the stalled writer");
+            assertInstanceOf(IOException.class, writerEnd.get());
+        }
+    }
+
+    @Test
+    void serverStopReleasesAParkedUpgradedConnectionPromptly() throws Exception {
+        var upgraded = new CountDownLatch(1);
+        start(_ -> new ConnectionUpgrade(StatusCode.SWITCHING_PROTOCOLS, ECHO_HEADERS, _ -> upgraded.countDown()));
+
+        try (var socket = connect()) {
+            socket.getOutputStream()
+                    .write(("GET /u HTTP/1.1\r\nHost: h\r\nUpgrade: echo\r\nConnection: Upgrade\r\n\r\n")
+                            .getBytes(StandardCharsets.US_ASCII));
+            InputStream in = socket.getInputStream();
+            assertTrue(readHead(in).startsWith("HTTP/1.1 101 "));
+            assertTrue(upgraded.await(5, TimeUnit.SECONDS));
+
+            long t0 = System.nanoTime();
+            server.stop();
+            server = null;
+            long stopMs = (System.nanoTime() - t0) / 1_000_000;
+            assertTrue(stopMs < 5000, "stop() took " + stopMs + " ms");
+            assertEquals(-1, in.read(), "server stop must close the upgraded connection");
+        }
+    }
+
+    /** Waits until {@code written} stops growing for 300 ms (the writer is blocked). */
+    static void awaitStalled(java.util.concurrent.atomic.AtomicLong written) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        long last = -1;
+        while (System.nanoTime() < deadline) {
+            long now = written.get();
+            if (now == last && now > 0) return;
+            last = now;
+            Thread.sleep(300);
+        }
+        fail("writer never stalled (written=" + written.get() + ")");
+    }
+
+    @FunctionalInterface
+    private interface IoCall {
+        Object call() throws IOException;
+    }
+
+    /** The call's result, or the exception it threw. */
+    private static Object outcome(IoCall call) {
+        try {
+            return call.call();
+        } catch (IOException e) {
+            return e;
+        }
     }
 
     @Test

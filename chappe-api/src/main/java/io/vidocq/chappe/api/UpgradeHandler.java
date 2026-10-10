@@ -30,12 +30,16 @@ public interface UpgradeHandler {
     /**
      * Called on the connection's thread once the status line and headers are on the wire. The
      * connection stays open after this method returns, until {@link UpgradedConnection#close()}
-     * is called or the peer closes it; an exception closes it.
+     * is called or the server stops; an exception thrown by this method closes it (and is logged
+     * at {@code WARNING}).
      * <p>
-     * The application owns the connection from now on: reaching end of stream on
-     * {@link UpgradedConnection#input()} does not close it, so the application must call
-     * {@link UpgradedConnection#close()} when it is done. The server's idle timeout no longer
-     * applies.
+     * The application owns the connection from now on. The peer closing its side does not close
+     * the connection: end of stream ({@code -1}) on {@link UpgradedConnection#input()} may be a
+     * legitimate half-close after which the application still writes. The application
+     * <b>must</b> therefore call {@link UpgradedConnection#close()} when it is done, in
+     * particular after reading {@code -1} and on any I/O error; otherwise the connection (and
+     * its thread) stays open until the server stops. The server's idle and write timeouts no
+     * longer apply.
      *
      * @param connection the raw byte streams of the upgraded connection
      * @throws Exception any failure; the transport then closes the connection

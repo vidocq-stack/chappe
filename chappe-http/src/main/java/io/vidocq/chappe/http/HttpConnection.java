@@ -40,6 +40,8 @@ import io.vidocq.chappe.http.ws.WebSocketHandshake;
  */
 public final class HttpConnection {
 
+    private static final System.Logger LOG = System.getLogger(HttpConnection.class.getName());
+
     private static final int BUFFER_SIZE = 16 * 1024; // 16 KB
 
     private final ReadableByteChannel readChannel;
@@ -364,7 +366,8 @@ public final class HttpConnection {
      * Takes the connection over for a {@link ConnectionUpgrade}: drains the request body, writes
      * the status line and the application's headers, then calls
      * {@link UpgradeHandler#onUpgrade} on this thread. Bytes already read past the request head
-     * stay in {@code readBuffer} and are the first bytes of the upgraded input.
+     * are copied out of the pooled {@code readBuffer} and are the first bytes of the upgraded
+     * input.
      * <p>
      * The connection stays open after {@code onUpgrade} returns: this thread parks until
      * {@link UpgradedConnection#close()} is called (by the application, from any thread). An
@@ -381,8 +384,8 @@ public final class HttpConnection {
             conn.awaitClose();
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
-        } catch (Exception _) {
-            // Handler failure: the connection is closed below.
+        } catch (Exception e) {
+            LOG.log(System.Logger.Level.WARNING, "Upgrade handler error, closing the connection", e);
         } finally {
             conn.close();
         }

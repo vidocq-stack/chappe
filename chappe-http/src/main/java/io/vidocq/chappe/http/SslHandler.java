@@ -46,6 +46,9 @@ import javax.net.ssl.SSLEngineResult.Status;
  */
 public final class SslHandler implements ReadableByteChannel, WritableByteChannel, Closeable {
 
+    /** How long {@link #close()} waits for a concurrent writer before closing without close_notify. */
+    private static final long CLOSE_LOCK_WAIT_MS = 100;
+
     private final SocketChannel channel;
     private final SSLEngine engine;
 
@@ -315,15 +318,29 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
         LingeringClose.halfCloseAndDrain(channel, buffer);
     }
 
+    /**
+     * Sends close_notify (best-effort) and closes the socket.
+     * <p>
+     * close_notify needs {@code writeLock}. If another thread holds it for longer than
+     * {@link #CLOSE_LOCK_WAIT_MS} — typically a writer stalled in {@code channel.write} because
+     * the peer stopped reading — close_notify is skipped and the socket is closed at once, which
+     * wakes that writer (and any blocked reader) with an exception. {@code close()} therefore
+     * never blocks behind stalled I/O.
+     */
     @Override
     public void close() throws IOException {
-        writeLock.lock();
+        boolean locked = false;
         try {
-            engine.closeOutbound();
-            netOutBuffer.clear();
-            engine.wrap(EMPTY, netOutBuffer);
-            netOutBuffer.flip();
-            if (netOutBuffer.hasRemaining()) {
+            locked = writeLock.tryLock(CLOSE_LOCK_WAIT_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (InterruptedException _) {
+            Thread.currentThread().interrupt();
+        }
+        try {
+            if (locked) {
+                engine.closeOutbound();
+                netOutBuffer.clear();
+                engine.wrap(EMPTY, netOutBuffer);
+                netOutBuffer.flip();
                 while (netOutBuffer.hasRemaining()) {
                     channel.write(netOutBuffer);
                 }
@@ -331,7 +348,7 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
         } catch (IOException _) {
             // best-effort: flush outbound close_notify
         } finally {
-            writeLock.unlock();
+            if (locked) writeLock.unlock();
             try {
                 engine.closeInbound();
             } catch (javax.net.ssl.SSLException _) {
