@@ -20,7 +20,6 @@
 package io.vidocq.chappe.http;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.ReadableByteChannel;
 
@@ -30,7 +29,7 @@ import java.nio.channels.ReadableByteChannel;
  * First reads the remaining bytes from the shared {@link ByteBuffer},
  * then directly from the channel.
  */
-final class FixedLengthInputStream extends InputStream {
+final class FixedLengthInputStream extends RequestBodyInputStream {
 
     private final ByteBuffer buffer;
     private final ReadableByteChannel channel;
@@ -43,7 +42,7 @@ final class FixedLengthInputStream extends InputStream {
     }
 
     @Override
-    public int read() throws IOException {
+    int readByte() throws IOException {
         if (remaining <= 0) return -1;
 
         if (!buffer.hasRemaining()) {
@@ -55,7 +54,7 @@ final class FixedLengthInputStream extends InputStream {
     }
 
     @Override
-    public int read(byte[] b, int off, int len) throws IOException {
+    int readBytes(byte[] b, int off, int len) throws IOException {
         if (remaining <= 0) return -1;
 
         int toRead = (int) Math.min(len, remaining);
@@ -87,9 +86,6 @@ final class FixedLengthInputStream extends InputStream {
     }
 
     private boolean refill() throws IOException {
-        buffer.compact();
-        int read = channel.read(buffer);
-        buffer.flip();
-        return read > 0;
+        return ReadBuffers.compactAndRead(buffer, channel) > 0;
     }
 }

@@ -243,12 +243,20 @@ public final class HttpConnection {
                     releaseBody(handled);
                 }
 
-                // 5. Drain unread body (for keep-alive)
+                // 5. A body read that failed (truncated, reset, an interrupt that closed the
+                // channel) leaves the byte stream at an unknown position: never drain it nor parse
+                // a next request from it, close the connection (CHAPPE-013).
+                if (bodyStream != null && (bodyReadFailed(bodyStream) || !readChannel.isOpen())) {
+                    lingerOnClose = false;
+                    break;
+                }
+
+                // 6. Drain unread body (for keep-alive)
                 if (bodyStream != null) {
                     HttpBodyReader.drain(bodyStream);
                 }
 
-                // 6. Check keep-alive
+                // 7. Check keep-alive
                 if (!keepAlive) {
                     lingerOnClose = true;
                     break;
@@ -282,6 +290,10 @@ public final class HttpConnection {
     }
 
     /** {@link Body#release() Releases} the body of a response the handler returned; never throws. */
+    private static boolean bodyReadFailed(InputStream bodyStream) {
+        return bodyStream instanceof RequestBodyInputStream body && body.failed();
+    }
+
     private static void releaseBody(Response response) {
         try {
             Body body = response.body();
@@ -333,9 +345,7 @@ public final class HttpConnection {
                 int n;
                 sc.configureBlocking(false);
                 try {
-                    readBuffer.compact();
-                    n = sc.read(readBuffer);
-                    readBuffer.flip();
+                    n = ReadBuffers.compactAndRead(readBuffer, sc);
                 } finally {
                     sc.configureBlocking(true);
                 }
@@ -439,9 +449,7 @@ public final class HttpConnection {
             int n;
             sc.configureBlocking(false);
             try {
-                readBuffer.compact();
-                n = sc.read(readBuffer);
-                readBuffer.flip();
+                n = ReadBuffers.compactAndRead(readBuffer, sc);
             } finally {
                 sc.configureBlocking(true);
             }
@@ -450,8 +458,11 @@ public final class HttpConnection {
 
             // Slow path — blocking read bounded by a watchdog close.
             readBuffer.compact();
-            n = BoundedReads.readWithTimeout(readChannel, closeable, readBuffer, config.idleTimeout());
-            readBuffer.flip();
+            try {
+                n = BoundedReads.readWithTimeout(readChannel, closeable, readBuffer, config.idleTimeout());
+            } finally {
+                readBuffer.flip(); // a failed read leaves the buffer in read mode (CHAPPE-013)
+            }
             return n > 0;
         } catch (IOException _) {
             // closed by the watchdog (idle timeout) or connection lost

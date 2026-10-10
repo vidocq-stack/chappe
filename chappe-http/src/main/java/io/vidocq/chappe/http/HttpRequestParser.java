@@ -99,12 +99,10 @@ public final class HttpRequestParser {
 
         while (true) {
             if (!buffer.hasRemaining()) {
-                buffer.compact();
-                int read = channel.read(buffer);
+                int read = ReadBuffers.compactAndRead(buffer, channel);
                 if (read == -1) {
                     return ParseResult.CONNECTION_CLOSED;
                 }
-                buffer.flip();
             }
 
             while (buffer.hasRemaining()) {

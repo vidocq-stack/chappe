@@ -20,7 +20,6 @@
 package io.vidocq.chappe.http;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.ReadableByteChannel;
 import java.util.function.Consumer;
@@ -35,7 +34,7 @@ import io.vidocq.chappe.api.Headers;
  * delivered to the optional consumer, mirroring the HTTP/2 trailers path
  * ({@code Request.trailers()}).
  */
-final class ChunkedInputStream extends InputStream {
+final class ChunkedInputStream extends RequestBodyInputStream {
 
     private enum ChunkState {
         READ_SIZE,
@@ -61,7 +60,7 @@ final class ChunkedInputStream extends InputStream {
     }
 
     @Override
-    public int read() throws IOException {
+    int readByte() throws IOException {
         if (chunkState == ChunkState.DONE) return -1;
 
         while (true) {
@@ -90,7 +89,7 @@ final class ChunkedInputStream extends InputStream {
     }
 
     @Override
-    public int read(byte[] b, int off, int len) throws IOException {
+    int readBytes(byte[] b, int off, int len) throws IOException {
         if (chunkState == ChunkState.DONE) return -1;
 
         int totalRead = 0;
@@ -247,10 +246,7 @@ final class ChunkedInputStream extends InputStream {
 
     private boolean ensureData() throws IOException {
         if (buffer.hasRemaining()) return true;
-        buffer.compact();
-        int read = channel.read(buffer);
-        buffer.flip();
-        return read > 0;
+        return ReadBuffers.compactAndRead(buffer, channel) > 0;
     }
 
     private static int hexDigit(int b) {

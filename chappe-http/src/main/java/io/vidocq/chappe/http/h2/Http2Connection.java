@@ -808,8 +808,12 @@ public final class Http2Connection {
         for (int i = 0; i < CLIENT_PREFACE.length; i++) {
             if (!readBuffer.hasRemaining()) {
                 readBuffer.compact();
-                int read = readChannel.read(readBuffer);
-                readBuffer.flip();
+                int read;
+                try {
+                    read = readChannel.read(readBuffer);
+                } finally {
+                    readBuffer.flip(); // a failed read leaves the buffer in read mode (CHAPPE-013)
+                }
                 if (read == -1) {
                     throw new IOException("Connection closed during client preface");
                 }

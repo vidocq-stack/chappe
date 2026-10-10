@@ -154,8 +154,12 @@ public final class WebSocketFrameReader {
     private static void fill(ByteBuffer src, ReadableByteChannel channel) throws IOException {
         // Compact remaining bytes at buffer start, then read.
         src.compact();
-        int n = channel.read(src);
-        src.flip();
+        int n;
+        try {
+            n = channel.read(src);
+        } finally {
+            src.flip(); // a failed read leaves the buffer in read mode (CHAPPE-013)
+        }
         if (n < 0) {
             throw new EOFException("Connection closed mid-frame");
         }

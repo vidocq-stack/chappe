@@ -5,6 +5,61 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-014 — a connection closed after a failed body read skips the lingering close
+
+- **Date**: 2026-10-10
+- **Status**: OPEN (deferred)
+- **Module**: `chappe-http` (`HttpConnection`)
+- **Symptom**: after a request body read fails, the connection closes with `lingerOnClose = false`
+  (CHAPPE-013). The failure can be a truncated body, a reset, or an interrupt that closed the
+  channel, for example Foy handing the body back from a ReadListener pump once the response is
+  written. A client still uploading can then get a TCP RST, and the RST may discard the response
+  it has not read yet (RFC 9112 §9.6). Over TLS, close_notify is not sent either. When an
+  interrupt closed the channel, a half-close and a linger are no longer possible on it.
+- **Minimal reproduction**: not written yet. Shape: a client uploading a large body slowly, a
+  handler that answers early, and a body read interrupted after the response is written.
+- **Cause hypothesis**: the close after a failed body read does not linger, and an interrupt closes
+  the channel outright.
+- **Fix**: none yet. Options: a reader that stops without closing the channel (no interrupt), or a
+  linger on a still-open channel when only the body framing failed.
+
+---
+
+## CHAPPE-013 — an interrupted body read left stale bytes readable, parsed as a next request
+
+- **Date**: 2026-10-10
+- **Status**: FIXED (commit `fix(http): never parse a request from a failed body read`, branch
+  `pr/ybl/servlet-streaming-upgrade`)
+- **Module**: `chappe-http` (`ChunkedInputStream`, `FixedLengthInputStream`, `HttpConnection`,
+  `HttpRequestParser`, `h2/Http2FrameReader`, `h2/Http2Connection`, `ws/WebSocketFrameReader`)
+- **Symptom** (request smuggling): every buffer refill was `compact(); channel.read(); flip();`
+  without a `finally`. A read that threw skipped the `flip()`, which left the buffer at position 0
+  with limit = capacity, so the stale bytes of earlier reads read as unread data. Such reads
+  include a reset, a watchdog close, or an interrupt that closed the channel; the interrupt is how
+  Foy hands a request body back from its ReadListener pump. The sequence was:
+  1. A body read on another thread was interrupted after the response was written.
+  2. The connection drained the stale bytes as the rest of the body.
+  3. `open` was still true and `awaitNextRequest()` saw `readBuffer.hasRemaining()`.
+  4. The parser read stale body bytes as a next request, and the handler ran a request embedded
+     in the previous body (over TLS too).
+- **Minimal reproduction**: `chappe-tests/.../InterruptedBodyReadTest`:
+  1. `POST` with `Content-Length: n + 4`, whose body is `AAAA` followed by a whole
+     `GET /smuggled` request.
+  2. The handler reads those bytes on a second thread, which then blocks for more.
+  3. The response body's `release()` interrupts that thread.
+  Before the fix, `/smuggled` was dispatched.
+- **Cause hypothesis**: the buffer state was not restored on a failed read, and the connection
+  kept parsing after a failed body read.
+- **Fix** (defence in depth):
+  - every compact/read/flip goes through `ReadBuffers.compactAndRead` or flips in a `finally`:
+    body readers, request parser, idle probe and idle wait, HTTP/2 frame reader and preface,
+    WebSocket frame reader;
+  - the body streams extend `RequestBodyInputStream`, which records any failed read;
+  - after the handler, a failed body read or a closed read channel closes the connection: no
+    drain, no next request.
+
+---
+
 ## CHAPPE-012 — a Content-Length request body cut short reads as a whole, shorter body
 
 - **Date**: 2026-10-10

@@ -254,8 +254,12 @@ public final class Http2FrameReader {
     private void ensureReadable(int needed) throws IOException {
         while (buffer.remaining() < needed) {
             buffer.compact();
-            int read = channel.read(buffer);
-            buffer.flip();
+            int read;
+            try {
+                read = channel.read(buffer);
+            } finally {
+                buffer.flip(); // a failed read leaves the buffer in read mode (CHAPPE-013)
+            }
             if (read == -1) {
                 throw new EOFException("Channel closed while waiting for " + needed + " bytes");
             }
