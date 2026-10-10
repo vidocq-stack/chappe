@@ -41,6 +41,7 @@ final class OutputStreamBody implements Body {
         try {
             var pis = new PipedInputStream(8192);
             var pos = new PipedOutputStream(pis);
+            opened = pis;
             // pos is handed to the virtual thread, which closes it via try-with-resources
             Thread.startVirtualThread(() -> {
                 try (pos) {
@@ -52,6 +53,21 @@ final class OutputStreamBody implements Body {
             return pis;
         } catch (IOException e) {
             throw new UncheckedIOException(e);
+        }
+    }
+
+    /** The stream last handed out, closed by {@link #release()} so the writer stops. */
+    private volatile InputStream opened;
+
+    /** Closes the stream handed out, if any: the writer's next write fails and it stops. */
+    @Override
+    public void release() {
+        InputStream in = opened;
+        if (in == null) return;
+        try {
+            in.close();
+        } catch (IOException | RuntimeException _) {
+            // best-effort: releasing never fails the exchange
         }
     }
 

@@ -48,6 +48,18 @@ public interface Body {
     /** Reactive access to the body as a Publisher of ByteBuffers. */
     Flow.Publisher<ByteBuffer> asPublisher();
 
+    /**
+     * Releases what a response body holds once the server is done with it. The server calls it
+     * on every exit after a handler returned a response: after the body was fully written, when
+     * writing the head or the body failed, when the body is never read (HEAD, 204, 304, a refused
+     * upgrade), and when an HTTP/2 stream is reset or its connection ends — possibly from another
+     * thread while a read is blocked. A live body (an {@code InputStream} fed by a producer) is
+     * closed, so a producer waiting for its reader is released.
+     * <p>
+     * Idempotent and never throws. The default releases nothing.
+     */
+    default void release() {}
+
     /** Empty body (singleton). */
     static Body empty() {
         return EmptyBody.INSTANCE;

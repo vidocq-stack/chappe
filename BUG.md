@@ -5,6 +5,41 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-009 — a response body is never closed when it is not read to the end (live producers hang)
+
+- **Date**: 2026-10-10
+- **Status**: FIXED (commit `fix(http): close the response body on every exit`, branch
+  `pr/ybl/servlet-streaming-upgrade`)
+- **Module**: `chappe-api` (`Body`), `chappe-http` (`HttpConnection`, `h2/Http2Connection`, `h2/Http2Stream`)
+- **Symptom**: the response body stream was closed only by the try-with-resources around the body
+  read. It was never closed when chappe did not reach that read or stopped short of EOF:
+  - HTTP/1.1, writing the head fails (a client gone, the head larger than the write buffer);
+  - HTTP/1.1, the body is suppressed (HEAD, 204, 304);
+  - HTTP/2, the HEADERS write fails, or the peer resets the stream (RST_STREAM) before or while
+    the body is sent (chappe kept sending, then waited for a window that never comes);
+  - HTTP/2, the connection ends while a stream sends its body.
+  A live body (an `InputStream` fed by a producer thread, such as Foy's servlet output pipe or a
+  `PipedInputStream`) then left its producer blocked forever on a full buffer.
+- **Minimal reproduction**: `chappe-tests/.../ResponseBodyReleaseTest.java`. A handler returns
+  `Body.of(stream, -1)` over a stream that yields nothing until closed. For the four cases (HEAD;
+  RST-closed client and a 512 KiB head; HTTP/2 RST_STREAM; HTTP/2 client gone), the stream was
+  never closed within 5 s.
+- **Cause hypothesis**: the body's lifetime was tied to the read loop, not to the exchange.
+- **Fix**:
+  - New `Body.release()` default method (no-op by default; `InputStreamBody` closes its stream,
+    `OutputStreamBody` closes the pipe it handed out).
+  - HTTP/1.1 releases the handler's response body in a `finally` around everything that follows the
+    handler call.
+  - HTTP/2 releases it in `dispatchStream`'s `finally` and attaches it to the stream:
+    - `Http2Stream.cancel()` (RST_STREAM, connection close) releases the body and wakes a sender
+      parked on the stream window;
+    - the connection-window waiters are woken too;
+    - `waitForSendWindow` ends with an `IOException` for a cancelled stream;
+    - `sendResponse` sends nothing for a stream reset before its HEADERS (checked before HPACK
+      encoding, so the dynamic table never records an unsent block).
+
+---
+
 ## CHAPPE-008 — HTTP/1.1 writer truncates header chars to one byte (header injection)
 
 - **Date**: 2026-10-10

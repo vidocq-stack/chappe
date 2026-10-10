@@ -417,6 +417,17 @@ public final class Http2Connection {
         var stream = streams.remove(streamId);
         if (stream != null) {
             stream.cancel();
+            wakeConnectionWindowWaiters();
+        }
+    }
+
+    /** Wakes the senders parked on the connection window, so cancelled streams stop waiting. */
+    private void wakeConnectionWindowWaiters() {
+        connectionSendLock.lock();
+        try {
+            connectionSendWindowAvailable.signalAll();
+        } finally {
+            connectionSendLock.unlock();
         }
     }
 
@@ -430,6 +441,7 @@ public final class Http2Connection {
     // -------------------------------------------------------------------------
 
     private void dispatchStream(Http2Stream stream) {
+        Response handled = null;
         try {
             HttpRequestImpl request = stream.request();
 
@@ -445,6 +457,8 @@ public final class Http2Connection {
             } catch (Exception _) {
                 response = Response.of(StatusCode.INTERNAL_SERVER_ERROR);
             }
+            // Released on every exit below (see the finally block), whatever happens to the stream.
+            handled = response;
 
             // RFC 9113 §8.6: HTTP/2 removes the Upgrade mechanism — refuse a connection takeover.
             if (response instanceof io.vidocq.chappe.api.ConnectionUpgrade) {
@@ -467,21 +481,40 @@ public final class Http2Connection {
 
             sendResponse(stream, response);
         } catch (IOException _) {
-            // Connection lost while writing response
+            // Connection lost or stream reset while writing response
         } finally {
             stream.close();
             streams.remove(stream.streamId());
+            if (handled != null) releaseBody(handled);
+        }
+    }
+
+    /** {@link Body#release() Releases} the body of a response the handler returned; never throws. */
+    private static void releaseBody(Response response) {
+        try {
+            Body body = response.body();
+            if (body != null) body.release();
+        } catch (RuntimeException _) {
+            // best-effort: a release failure must not hide the exchange's outcome
         }
     }
 
     private void sendResponse(Http2Stream stream, Response response) throws IOException {
         int streamId = stream.streamId();
 
-        // Encode response headers via HPACK
-        byte[] encodedHeaders = hpackEncoder.encode(response.status().code(), response.headers());
-
         Body body = response.body();
         boolean hasBody = body != null && body.contentLength() != 0;
+
+        // A reset (RST_STREAM) or the end of the connection releases the body while it is sent.
+        if (body != null) stream.attachResponseBody(body);
+        if (stream.isCancelled()) {
+            // RFC 9113 §5.4.2: no frame for a stream the peer reset. Checked before HPACK encoding,
+            // which would otherwise update the dynamic table for a header block never sent.
+            throw new IOException("stream " + streamId + " reset before its response");
+        }
+
+        // Encode response headers via HPACK
+        byte[] encodedHeaders = hpackEncoder.encode(response.status().code(), response.headers());
 
         if (hasBody) {
             // HEADERS (without END_STREAM, body follows)
@@ -600,10 +633,12 @@ public final class Http2Connection {
     /**
      * Waits until both the connection and stream send windows allow sending data.
      * Returns the maximum number of bytes that can be sent in one DATA frame,
-     * respecting both windows and the remote max frame size.
+     * respecting both windows and the remote max frame size. A stream reset by the peer, or the
+     * end of the connection, ends the wait with an {@link IOException}.
      */
-    private int waitForSendWindow(Http2Stream stream) throws InterruptedException {
+    private int waitForSendWindow(Http2Stream stream) throws InterruptedException, IOException {
         while (true) {
+            if (stream.isCancelled()) throw new IOException("stream " + stream.streamId() + " reset");
             int connWindow = connectionSendWindow.get();
             int streamWindow = stream.sendWindow();
             int maxFrame = remoteSettings.maxFrameSize();
@@ -617,7 +652,7 @@ public final class Http2Connection {
             if (connWindow <= 0) {
                 connectionSendLock.lock();
                 try {
-                    while (connectionSendWindow.get() <= 0) {
+                    while (connectionSendWindow.get() <= 0 && !stream.isCancelled()) {
                         connectionSendWindowAvailable.await();
                     }
                 } finally {
@@ -629,7 +664,7 @@ public final class Http2Connection {
             if (streamWindow <= 0) {
                 stream.sendLock().lock();
                 try {
-                    while (stream.sendWindow() <= 0) {
+                    while (stream.sendWindow() <= 0 && !stream.isCancelled()) {
                         stream.sendWindowAvailable().await();
                     }
                 } finally {
@@ -801,12 +836,13 @@ public final class Http2Connection {
     // -------------------------------------------------------------------------
 
     private void close() {
-        // Close all active streams
+        // Cancel all active streams: their pending reads end, the bodies they were sending are
+        // released and their senders stop waiting for window.
         for (var stream : streams.values()) {
-            stream.signalEndStream();
-            stream.close();
+            stream.cancel();
         }
         streams.clear();
+        wakeConnectionWindowWaiters();
 
         // Close channels — best-effort, ignore close errors
         try {

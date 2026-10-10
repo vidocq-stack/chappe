@@ -108,12 +108,44 @@ public final class Http2Stream {
         state = State.CLOSED;
     }
 
-    /** Marks the stream as cancelled by the peer (RST_STREAM). */
+    /**
+     * Marks the stream as cancelled by the peer (RST_STREAM) or by the end of its connection:
+     * the response body being sent is released and a sender waiting for window is woken.
+     */
     public void cancel() {
         cancelled = true;
         signalEndStream();
         close();
+        releaseResponseBody();
+        sendLock.lock();
+        try {
+            sendWindowAvailable.signalAll();
+        } finally {
+            sendLock.unlock();
+        }
     }
+
+    /**
+     * Records the response body this stream is sending, so a reset or the end of the connection
+     * releases it. A stream already cancelled releases it at once.
+     */
+    public void attachResponseBody(Body body) {
+        responseBody = body;
+        if (cancelled) releaseResponseBody();
+    }
+
+    /** {@link Body#release() Releases} the attached response body, if any. Idempotent, never throws. */
+    public void releaseResponseBody() {
+        Body body = responseBody;
+        if (body == null) return;
+        try {
+            body.release();
+        } catch (RuntimeException _) {
+            // best-effort: a release failure must not hide the exchange's outcome
+        }
+    }
+
+    private volatile Body responseBody;
 
     public boolean isCancelled() {
         return cancelled;

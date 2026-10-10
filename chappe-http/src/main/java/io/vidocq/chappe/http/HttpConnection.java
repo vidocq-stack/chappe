@@ -196,41 +196,52 @@ public final class HttpConnection {
                     disarmDisconnectProbe();
                 }
 
-                // 4a-bis. gRPC requires HTTP/2 — defensive rejection on HTTP/1.1 layer.
-                // In practice router already returns 505 (see DefaultRouterBuilder.grpc()),
-                // this check only acts as guardrail if an extension builds GrpcDispatch elsewhere.
-                if (response instanceof io.vidocq.chappe.api.GrpcDispatch) {
-                    response = Response.of(StatusCode.HTTP_VERSION_NOT_SUPPORTED);
-                }
+                // From here on, the handler's response body is released on every exit: written,
+                // failed while writing the head or the body, never read (HEAD, 204, 304), or
+                // replaced. A live body's producer must never wait for a reader that is gone.
+                Response handled = response;
+                try {
 
-                // 4a. WebSocket upgrade: switch to frame mode and end HTTP loop.
-                if (response instanceof WebSocketUpgrade upgrade) {
-                    if (bodyStream != null) HttpBodyReader.drain(bodyStream);
-                    var key = request.headers().firstOrNull("Sec-WebSocket-Key");
-                    WebSocketHandshake.writeResponse(writeChannel, key, upgrade.subprotocol());
-                    // Prefer the matched handshake request (carries route pathParams) over the raw one.
-                    var handshakeReq = upgrade.handshakeRequest() != null ? upgrade.handshakeRequest() : request;
-                    var wsConn = new WebSocketConnection(
-                            readChannel,
-                            writeChannel,
-                            closeable,
-                            readBuffer,
-                            upgrade.handler(),
-                            handshakeReq,
-                            upgrade.subprotocol());
-                    wsConn.run();
-                    return; // closeable already closed by WebSocketConnection
-                }
+                    // 4a-bis. gRPC requires HTTP/2 — defensive rejection on HTTP/1.1 layer.
+                    // In practice router already returns 505 (see DefaultRouterBuilder.grpc()),
+                    // this check only acts as guardrail if an extension builds GrpcDispatch elsewhere.
+                    if (response instanceof io.vidocq.chappe.api.GrpcDispatch) {
+                        response = Response.of(StatusCode.HTTP_VERSION_NOT_SUPPORTED);
+                    }
 
-                // 4b. Generic connection upgrade: write the application's head, then hand the
-                // raw streams over and park until the application closes the connection.
-                if (response instanceof ConnectionUpgrade upgrade) {
-                    runUpgrade(upgrade, bodyStream);
-                    return; // the finally block closes the connection (idempotent)
-                }
+                    // 4a. WebSocket upgrade: switch to frame mode and end HTTP loop.
+                    if (response instanceof WebSocketUpgrade upgrade) {
+                        if (bodyStream != null) HttpBodyReader.drain(bodyStream);
+                        var key = request.headers().firstOrNull("Sec-WebSocket-Key");
+                        WebSocketHandshake.writeResponse(writeChannel, key, upgrade.subprotocol());
+                        // Prefer the matched handshake request (carries route pathParams) over the raw one.
+                        var handshakeReq = upgrade.handshakeRequest() != null ? upgrade.handshakeRequest() : request;
+                        var wsConn = new WebSocketConnection(
+                                readChannel,
+                                writeChannel,
+                                closeable,
+                                readBuffer,
+                                upgrade.handler(),
+                                handshakeReq,
+                                upgrade.subprotocol());
+                        wsConn.run();
+                        return; // closeable already closed by WebSocketConnection
+                    }
 
-                // 4. Write response
-                writer.write(response, writeBuffer, writeChannel, keepAlive, request.method(), config.writeTimeout());
+                    // 4b. Generic connection upgrade: write the application's head, then hand the
+                    // raw streams over and park until the application closes the connection.
+                    if (response instanceof ConnectionUpgrade upgrade) {
+                        runUpgrade(upgrade, bodyStream);
+                        return; // the finally block closes the connection (idempotent)
+                    }
+
+                    // 4. Write response
+                    writer.write(
+                            response, writeBuffer, writeChannel, keepAlive, request.method(), config.writeTimeout());
+
+                } finally {
+                    releaseBody(handled);
+                }
 
                 // 5. Drain unread body (for keep-alive)
                 if (bodyStream != null) {
@@ -268,6 +279,16 @@ public final class HttpConnection {
             }
         }
         close();
+    }
+
+    /** {@link Body#release() Releases} the body of a response the handler returned; never throws. */
+    private static void releaseBody(Response response) {
+        try {
+            Body body = response.body();
+            if (body != null) body.release();
+        } catch (RuntimeException _) {
+            // best-effort: a release failure must not hide the exchange's outcome
+        }
     }
 
     /** Closes the connection. */

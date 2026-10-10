@@ -19,6 +19,7 @@
  */
 package io.vidocq.chappe.api;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.util.concurrent.Flow;
@@ -44,6 +45,16 @@ final class InputStreamBody implements Body {
     @Override
     public InputStream asInputStream() {
         return stream;
+    }
+
+    /** Closes the stream, whether or not it was read. */
+    @Override
+    public void release() {
+        try {
+            stream.close();
+        } catch (IOException | RuntimeException _) {
+            // best-effort: releasing never fails the exchange
+        }
     }
 
     @Override
