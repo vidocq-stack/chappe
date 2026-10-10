@@ -47,7 +47,7 @@ final class FixedLengthInputStream extends InputStream {
         if (remaining <= 0) return -1;
 
         if (!buffer.hasRemaining()) {
-            if (!refill()) return -1;
+            if (!refill()) throw truncated();
         }
 
         remaining--;
@@ -61,7 +61,7 @@ final class FixedLengthInputStream extends InputStream {
         int toRead = (int) Math.min(len, remaining);
 
         if (!buffer.hasRemaining()) {
-            if (!refill()) return -1;
+            if (!refill()) throw truncated();
         }
 
         int available = Math.min(toRead, buffer.remaining());
@@ -78,6 +78,12 @@ final class FixedLengthInputStream extends InputStream {
     /** Number of bytes remaining to read. */
     long remaining() {
         return remaining;
+    }
+
+    /** The connection ended before Content-Length bytes arrived: the body is incomplete (CHAPPE-012). */
+    private java.io.EOFException truncated() {
+        return new java.io.EOFException(
+                "Unexpected end of body: " + remaining + " of the Content-Length bytes missing");
     }
 
     private boolean refill() throws IOException {

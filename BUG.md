@@ -5,6 +5,22 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-012 — a Content-Length request body cut short reads as a whole, shorter body
+
+- **Date**: 2026-10-10
+- **Status**: FIXED (commit `fix(http): a fixed-length body cut short fails the read`, branch
+  `pr/ybl/servlet-streaming-upgrade`)
+- **Module**: `chappe-http` (`FixedLengthInputStream`)
+- **Symptom**: when the connection ended before `Content-Length` bytes arrived, both read methods
+  returned `-1`, so a handler took a truncated body for a complete one (Foy fired
+  `ReadListener.onAllDataRead` instead of `onError`). Same defect as CHAPPE-011 for chunked bodies.
+- **Minimal reproduction**: `chappe-tests/.../FixedLengthRequestBodyTest`: `Content-Length: 10`,
+  `Hello` (or `Hel`) then a half-close; `readAllBytes()` returned `Hello`, the byte loop `Hel`.
+- **Cause hypothesis**: a failed `refill()` was mapped to `-1` with bytes still expected.
+- **Fix**: both read methods throw `EOFException` while Content-Length bytes are still missing.
+
+---
+
 ## CHAPPE-011 — a chunked request body cut inside a chunk reads as a whole, shorter body
 
 - **Date**: 2026-10-10
