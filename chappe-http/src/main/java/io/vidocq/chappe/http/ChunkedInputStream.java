@@ -104,6 +104,8 @@ final class ChunkedInputStream extends InputStream {
                 }
                 case READ_DATA -> {
                     if (chunkRemaining > 0) {
+                        // Bytes already read are returned rather than waiting on the socket for more.
+                        if (totalRead > 0 && !buffer.hasRemaining()) return totalRead;
                         if (!ensureData()) {
                             return totalRead > 0 ? totalRead : -1;
                         }
@@ -115,6 +117,9 @@ final class ChunkedInputStream extends InputStream {
                     }
                     if (chunkRemaining == 0) {
                         chunkState = ChunkState.READ_DATA_CRLF;
+                        // A chunk ends here: the next chunk may not have arrived yet, and a
+                        // streaming reader must see this one now (CHAPPE-010).
+                        return totalRead;
                     }
                 }
                 case READ_DATA_CRLF -> {

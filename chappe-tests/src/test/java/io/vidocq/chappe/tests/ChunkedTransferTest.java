@@ -118,6 +118,44 @@ class ChunkedTransferTest {
         }
     }
 
+    /**
+     * A read returns the chunk that arrived without waiting for the next one: a streaming reader
+     * (Foy's non-blocking ReadListener pump) sees each chunk as it comes (CHAPPE-010).
+     */
+    @Test
+    void aReadReturnsTheArrivedChunkWithoutWaitingForTheNext() throws Exception {
+        server.stop();
+        var firstRead = new java.util.concurrent.CompletableFuture<String>();
+        server = Server.builder()
+                .port(0)
+                .handler(req -> {
+                    var body = req.body().asInputStream();
+                    byte[] buf = new byte[1024];
+                    int n = body.read(buf, 0, buf.length);
+                    firstRead.complete(new String(buf, 0, n, StandardCharsets.US_ASCII));
+                    var rest = new String(body.readAllBytes(), StandardCharsets.US_ASCII);
+                    return Response.ok("rest:" + rest);
+                })
+                .build();
+        server.start();
+        port = server.port();
+        try (var socket = new Socket("127.0.0.1", port)) {
+            socket.setSoTimeout(5000);
+            var out = socket.getOutputStream();
+            write(
+                    out,
+                    "POST /echo HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n"
+                            + "Connection: close\r\n\r\n5\r\nHello\r\n");
+            out.flush();
+            // The second chunk is sent only once the first read returned.
+            assertEquals("Hello", firstRead.get(5, java.util.concurrent.TimeUnit.SECONDS));
+            write(out, "5\r\nWorld\r\n0\r\n\r\n");
+            out.flush();
+            var response = readResponse(socket.getInputStream());
+            assertTrue(response.contains("rest:World"), response);
+        }
+    }
+
     private void write(OutputStream out, String data) throws IOException {
         out.write(data.getBytes(StandardCharsets.US_ASCII));
     }

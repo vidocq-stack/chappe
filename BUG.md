@@ -5,6 +5,27 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-010 — a chunked request body read waits for the next chunk instead of returning the one that arrived
+
+- **Date**: 2026-10-10
+- **Status**: FIXED (commit `fix(http): return each request chunk as it arrives`, branch
+  `pr/ybl/servlet-streaming-upgrade`)
+- **Module**: `chappe-http` (`ChunkedInputStream`)
+- **Symptom**: `read(byte[], int, int)` on a chunked request body kept decoding chunks until `len`
+  bytes were read or the body ended. Once a chunk was consumed it blocked on the socket for the next
+  chunk size, although it already had bytes to return. A streaming reader (Foy's `ReadListener`
+  pump) saw `Hello` and `World`, sent one second apart, as a single `HelloWorld` read one second
+  late (TCK `ReadListenerTests.nioInputTest`).
+- **Minimal reproduction**: `chappe-tests/.../ChunkedTransferTest.aReadReturnsTheArrivedChunkWithoutWaitingForTheNext`:
+  the client sends `5\r\nHello\r\n` and sends the rest only after the handler's first
+  `read(buf, 0, 1024)` returned; it timed out after 5 s.
+- **Cause hypothesis**: the read loop ran until `totalRead == len`, through chunk boundaries and
+  socket reads.
+- **Fix**: a read returns at the end of each chunk, and never blocks on the socket once it has
+  bytes to return. The fixed-length and HTTP/2 body streams already returned what was available.
+
+---
+
 ## CHAPPE-009 — a response body is never closed when it is not read to the end (live producers hang)
 
 - **Date**: 2026-10-10
