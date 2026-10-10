@@ -72,7 +72,7 @@ final class ChunkedInputStream extends InputStream {
                 }
                 case READ_DATA -> {
                     if (chunkRemaining > 0) {
-                        if (!ensureData()) return -1;
+                        if (!ensureData()) throw truncated();
                         chunkRemaining--;
                         return buffer.get() & 0xFF;
                     }
@@ -106,9 +106,7 @@ final class ChunkedInputStream extends InputStream {
                     if (chunkRemaining > 0) {
                         // Bytes already read are returned rather than waiting on the socket for more.
                         if (totalRead > 0 && !buffer.hasRemaining()) return totalRead;
-                        if (!ensureData()) {
-                            return totalRead > 0 ? totalRead : -1;
-                        }
+                        if (!ensureData()) throw truncated();
                         int toRead =
                                 (int) Math.min(Math.min((long) len - totalRead, chunkRemaining), buffer.remaining());
                         buffer.get(b, off + totalRead, toRead);
@@ -240,6 +238,11 @@ final class ChunkedInputStream extends InputStream {
             int b = buffer.get() & 0xFF;
             if (b == '\n') return;
         }
+    }
+
+    /** The connection ended inside a chunk's data: the body is incomplete (CHAPPE-011). */
+    private static java.io.EOFException truncated() {
+        return new java.io.EOFException("Unexpected end of chunked stream inside a chunk");
     }
 
     private boolean ensureData() throws IOException {

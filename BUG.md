@@ -5,6 +5,22 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-011 — a chunked request body cut inside a chunk reads as a whole, shorter body
+
+- **Date**: 2026-10-10
+- **Status**: FIXED (commit `fix(http): a chunked body cut inside a chunk fails the read`, branch
+  `pr/ybl/servlet-streaming-upgrade`)
+- **Module**: `chappe-http` (`ChunkedInputStream`)
+- **Symptom**: when the connection ended inside a chunk's data, the body stream reported a normal
+  end of stream (`-1`). The handler took the truncated body for a complete one (Foy fired
+  `ReadListener.onAllDataRead` instead of `onError`). A cut inside a chunk-size line already threw.
+- **Minimal reproduction**: `chappe-tests/.../ChunkedTransferTest.aBodyTruncatedInsideAChunkFailsTheRead`:
+  the client sends `5\r\nHello\r\n3\r\nab` and half-closes; `readAllBytes()` returned `Helloab`.
+- **Cause hypothesis**: `read()` and `read(byte[], int, int)` mapped a failed `ensureData()` to `-1`.
+- **Fix**: both throw `EOFException` when the connection ends with chunk data still expected.
+
+---
+
 ## CHAPPE-010 — a chunked request body read waits for the next chunk instead of returning the one that arrived
 
 - **Date**: 2026-10-10

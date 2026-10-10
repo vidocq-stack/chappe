@@ -160,6 +160,37 @@ class ChunkedTransferTest {
         out.write(data.getBytes(StandardCharsets.US_ASCII));
     }
 
+    /** A connection closed in the middle of a chunk's data is a read failure, not the end of the body (CHAPPE-011). */
+    @Test
+    void aBodyTruncatedInsideAChunkFailsTheRead() throws Exception {
+        server.stop();
+        var outcome = new java.util.concurrent.CompletableFuture<String>();
+        server = Server.builder()
+                .port(0)
+                .handler(req -> {
+                    try {
+                        outcome.complete("body:"
+                                + new String(req.body().asInputStream().readAllBytes(), StandardCharsets.US_ASCII));
+                    } catch (IOException e) {
+                        outcome.complete("IOException");
+                    }
+                    return Response.ok("done");
+                })
+                .build();
+        server.start();
+        port = server.port();
+        try (var socket = new Socket("127.0.0.1", port)) {
+            var out = socket.getOutputStream();
+            write(
+                    out,
+                    "POST /echo HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n"
+                            + "5\r\nHello\r\n3\r\nab");
+            out.flush();
+            socket.shutdownOutput();
+            assertEquals("IOException", outcome.get(5, java.util.concurrent.TimeUnit.SECONDS));
+        }
+    }
+
     private String readResponse(InputStream in) throws IOException {
         var sb = new StringBuilder();
         byte[] buf = new byte[4096];
