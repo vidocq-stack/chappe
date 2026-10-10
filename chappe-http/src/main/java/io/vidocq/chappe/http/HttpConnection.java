@@ -220,6 +220,13 @@ public final class HttpConnection {
                     return; // closeable already closed by WebSocketConnection
                 }
 
+                // 4b. Generic connection upgrade: write the application's head, then hand the
+                // raw streams over and park until the application closes the connection.
+                if (response instanceof ConnectionUpgrade upgrade) {
+                    runUpgrade(upgrade, bodyStream);
+                    return; // the finally block closes the connection (idempotent)
+                }
+
                 // 4. Write response
                 writer.write(response, writeBuffer, writeChannel, keepAlive, request.method(), config.writeTimeout());
 
@@ -348,6 +355,36 @@ public final class HttpConnection {
             } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             }
+        }
+    }
+
+    // --- Generic connection upgrade ---
+
+    /**
+     * Takes the connection over for a {@link ConnectionUpgrade}: drains the request body, writes
+     * the status line and the application's headers, then calls
+     * {@link UpgradeHandler#onUpgrade} on this thread. Bytes already read past the request head
+     * stay in {@code readBuffer} and are the first bytes of the upgraded input.
+     * <p>
+     * The connection stays open after {@code onUpgrade} returns: this thread parks until
+     * {@link UpgradedConnection#close()} is called (by the application, from any thread). An
+     * exception from {@code onUpgrade}, or an interruption of the parked thread (server stop),
+     * closes it. The idle timeout no longer applies once the connection is upgraded; end of
+     * stream on the input does not close it either — the application decides.
+     */
+    private void runUpgrade(ConnectionUpgrade upgrade, InputStream bodyStream) throws IOException {
+        if (bodyStream != null) HttpBodyReader.drain(bodyStream);
+        writer.writeUpgradeHead(upgrade.status(), upgrade.headers(), writeBuffer, writeChannel, config.writeTimeout());
+        var conn = new UpgradedConnectionImpl(readChannel, writeChannel, readBuffer, closeable, request);
+        try {
+            upgrade.handler().onUpgrade(conn);
+            conn.awaitClose();
+        } catch (InterruptedException _) {
+            Thread.currentThread().interrupt();
+        } catch (Exception _) {
+            // Handler failure: the connection is closed below.
+        } finally {
+            conn.close();
         }
     }
 

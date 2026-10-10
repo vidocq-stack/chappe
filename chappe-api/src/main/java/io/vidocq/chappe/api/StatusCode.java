@@ -31,6 +31,9 @@ public sealed interface StatusCode permits StatusCode.Standard, StatusCode.Custo
 
     String reason();
 
+    // --- 1xx Informational ---
+    StatusCode SWITCHING_PROTOCOLS = new Standard(101, "Switching Protocols");
+
     // --- 2xx Success ---
     StatusCode OK = new Standard(200, "OK");
     StatusCode CREATED = new Standard(201, "Created");

@@ -271,6 +271,32 @@ public final class HttpResponseWriter {
         flush(buffer, channel);
     }
 
+    /**
+     * Writes the head of a connection-upgrade response — status line, the given headers, the
+     * blank line — and flushes it. No {@code Date}, {@code Server}, {@code Connection} or
+     * framing header is added. A header whose name is not a token or whose value is not a valid
+     * field value is skipped, as for trailers ({@code ConnectionUpgrade} already rejects them).
+     */
+    public void writeUpgradeHead(
+            StatusCode status, Headers headers, ByteBuffer buffer, WritableByteChannel channel, Duration writeTimeout)
+            throws IOException {
+        this.writeTimeout = writeTimeout;
+        buffer.clear();
+        putStatusLine(status, buffer, channel);
+        for (var entry : headers) {
+            if (!isToken(entry.name()) || !isFieldValue(entry.value())) {
+                continue;
+            }
+            putAsciiString(entry.name(), buffer, channel);
+            putByte(COLON, buffer, channel);
+            putByte(SPACE, buffer, channel);
+            putAsciiString(entry.value(), buffer, channel);
+            putBytes(CRLF, buffer, channel);
+        }
+        putBytes(CRLF, buffer, channel);
+        flush(buffer, channel);
+    }
+
     // --- Status line ---
 
     private void putStatusLine(StatusCode status, ByteBuffer buffer, WritableByteChannel channel) throws IOException {

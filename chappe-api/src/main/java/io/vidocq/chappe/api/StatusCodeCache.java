@@ -34,6 +34,7 @@ final class StatusCodeCache {
         // Force initialization of StatusCode constants,
         // then index them by code.
         var constants = new StatusCode[] {
+            StatusCode.SWITCHING_PROTOCOLS,
             StatusCode.OK,
             StatusCode.CREATED,
             StatusCode.ACCEPTED,

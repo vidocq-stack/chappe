@@ -47,6 +47,7 @@ Vauban for component lifecycle. Chappe itself uses `ServiceLoader` (not CDI).
 ### Extension SPI
 Chappe provides the hooks for Servlet/JAX-RS/WebSocket/gRPC extensions:
 - **`Router.webSocket(pattern, handler)`** — RFC 6455 WebSocket endpoint (automatic handshake, TEXT/BINARY/PING/PONG/CLOSE frames, fragmentation, UTF-8 validation, optional subprotocol)
+- **`ConnectionUpgrade(status, headers, UpgradeHandler)`** — generic HTTP/1.1 connection takeover (Servlet `HttpUpgradeHandler`): writes the app's status + headers (validated, no framing headers), hands `UpgradedConnection.input()/output()` (buffered bytes first) to the handler, connection open until `close()`; HTTP/2 answers 505
 - **`Router.grpc(pattern, GrpcHandler)`** — transport-only gRPC endpoint; exposes byte-level `GrpcCall.receive()/send()/complete(status, msg)` (protobuf/JSON serialization is the extension's responsibility, e.g. `champollion`); rejects HTTP/1.1 with 505 and non-grpc content-type with 415
 - **`Router.mount(prefix, handler)`** — path-prefix registration with automatic stripping
 - **`Request.contextPath()`/`pathInfo()`** — path relative to the mount point

@@ -72,6 +72,7 @@ void main() {
 - **HTTP/2** — RFC 9113 (multiplexing, HPACK, flow control, CONTINUATION)
 - **HTTPS** — TLS via SSLContext/SSLEngine, ALPN (h2 + http/1.1)
 - **WebSocket** — RFC 6455 over HTTP/1.1 (handshake `Sec-WebSocket-Accept`, TEXT/BINARY framing, fragmentation, UTF-8 validation, mandatory client masking, close handshake, auto-PONG)
+- **Generic connection upgrade** — `ConnectionUpgrade` writes an application-chosen `101` + headers on HTTP/1.1, then hands the raw byte streams (`UpgradedConnection.input()/output()`) to an `UpgradeHandler` (Servlet `HttpUpgradeHandler`); HTTP/2 answers 505 (RFC 9113 §8.6)
 - **gRPC (transport)** — core framing (5-byte prefix) over HTTP/2 + trailers; 4 modes (unary, server-stream, client-stream, bidi); byte-level `GrpcCall` SPI — serialization (protobuf, JSON…) delegated to the application or to a dedicated extension (`champollion`)
 
 ### Routing

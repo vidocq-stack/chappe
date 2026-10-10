@@ -1,0 +1,132 @@
+/*
+ * Copyright (c) 2026 Yann Blazart, Antoine Sabot-Durand and the Vidocq contributors
+ *
+ * This program and the accompanying materials are made available under the
+ * terms of the Eclipse Public License 2.0 which is available at
+ * https://www.eclipse.org/legal/epl-2.0/
+ *
+ * This Source Code may also be made available under the following Secondary
+ * Licenses when the conditions for such availability set forth in the Eclipse
+ * Public License, v. 2.0 are satisfied: GNU General Public License, version 2
+ * or any later version, which is available at
+ * https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
+ *
+ * It is also made available under the European Union Public Licence v. 1.2,
+ * which is available at
+ * https://joinup.ec.europa.eu/collection/eupl/eupl-text-eupl-12
+ *
+ * SPDX-License-Identifier: EPL-2.0 OR EUPL-1.2 OR GPL-2.0-or-later
+ */
+package io.vidocq.chappe.api;
+
+import java.util.Objects;
+
+/**
+ * Response telling the HTTP/1.1 transport to write {@code status} and {@code headers} (no
+ * Content-Length, no Transfer-Encoding, no body) and then hand the connection to {@code handler}.
+ * HTTP/2 answers 505 (RFC 9113 section 8.6 forbids the Upgrade mechanism).
+ * <p>
+ * Unlike {@link WebSocketUpgrade}, the transport neither checks nor adds any header: the
+ * application chooses the status (normally {@link StatusCode#SWITCHING_PROTOCOLS}) and writes
+ * {@code Upgrade} / {@code Connection} itself. No {@code Date}, {@code Server} or framing header
+ * is added.
+ * <p>
+ * The status and headers are validated, and the headers copied, when the upgrade is built:
+ * <ul>
+ *   <li>a status code outside {@code 100-999}, or a reason phrase holding CR, LF or another
+ *       char outside {@code HTAB / SP / VCHAR / obs-text} (RFC 9112 §4), throws
+ *       {@link IllegalArgumentException};</li>
+ *   <li>a name that is not an RFC 9110 §5.6.2 token, or a value holding anything but
+ *       field-vchar, obs-text, SP and HTAB (RFC 9110 §5.5) — in particular CR or LF, or a char
+ *       above {@code U+00FF} — throws {@link IllegalArgumentException}, so no header can be
+ *       injected into the response head (the same rule the transport applies to trailers);</li>
+ *   <li>{@code Content-Length} and {@code Transfer-Encoding} are dropped: the upgraded stream
+ *       has no HTTP framing, and a 101 response must not carry them (RFC 9110 §8.6, RFC 9112
+ *       §6.1).</li>
+ * </ul>
+ */
+public final class ConnectionUpgrade implements Response {
+
+    private final StatusCode status;
+    private final Headers headers;
+    private final UpgradeHandler handler;
+
+    /**
+     * @param status  the status line to write, normally {@link StatusCode#SWITCHING_PROTOCOLS}
+     * @param headers the response headers, written as is (framing headers dropped)
+     * @param handler takes over the connection once the head is on the wire
+     * @throws IllegalArgumentException if a header name or value is invalid (see class doc)
+     */
+    public ConnectionUpgrade(StatusCode status, Headers headers, UpgradeHandler handler) {
+        this.status = Objects.requireNonNull(status, "status");
+        this.handler = Objects.requireNonNull(handler, "handler");
+        Objects.requireNonNull(headers, "headers");
+        if (status.code() < 100 || status.code() > 999) {
+            throw new IllegalArgumentException("Invalid upgrade status code: " + status.code());
+        }
+        if (status.reason() == null || !isFieldValue(status.reason())) {
+            throw new IllegalArgumentException("Invalid upgrade reason phrase for status " + status.code());
+        }
+        var copy = Headers.builder();
+        for (var entry : headers) {
+            String name = entry.name();
+            String value = entry.value();
+            if (name == null || !isToken(name)) {
+                throw new IllegalArgumentException("Invalid upgrade header name: " + name);
+            }
+            if (value == null || !isFieldValue(value)) {
+                throw new IllegalArgumentException("Invalid value for upgrade header " + name);
+            }
+            if (name.equalsIgnoreCase("Content-Length") || name.equalsIgnoreCase("Transfer-Encoding")) {
+                continue;
+            }
+            copy.add(name, value);
+        }
+        this.headers = copy.build();
+    }
+
+    /** Handler taking over the connection once the response head is on the wire. */
+    public UpgradeHandler handler() {
+        return handler;
+    }
+
+    @Override
+    public StatusCode status() {
+        return status;
+    }
+
+    /** The validated headers, without {@code Content-Length} / {@code Transfer-Encoding}. */
+    @Override
+    public Headers headers() {
+        return headers;
+    }
+
+    @Override
+    public Body body() {
+        return Body.empty();
+    }
+
+    /** RFC 9110 §5.6.2 {@code token}: one or more tchar. */
+    private static boolean isToken(String s) {
+        if (s.isEmpty()) return false;
+        for (int i = 0, len = s.length(); i < len; i++) {
+            char c = s.charAt(i);
+            boolean tchar = (c >= 'a' && c <= 'z')
+                    || (c >= 'A' && c <= 'Z')
+                    || (c >= '0' && c <= '9')
+                    || "!#$%&'*+-.^_`|~".indexOf(c) >= 0;
+            if (!tchar) return false;
+        }
+        return true;
+    }
+
+    /** RFC 9110 §5.5 field value: field-vchar, obs-text, SP and HTAB only (one byte per char). */
+    private static boolean isFieldValue(String s) {
+        for (int i = 0, len = s.length(); i < len; i++) {
+            char c = s.charAt(i);
+            boolean ok = (c >= 0x21 && c <= 0x7E) || (c >= 0x80 && c <= 0xFF) || c == ' ' || c == '\t';
+            if (!ok) return false;
+        }
+        return true;
+    }
+}

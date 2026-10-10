@@ -446,6 +446,11 @@ public final class Http2Connection {
                 response = Response.of(StatusCode.INTERNAL_SERVER_ERROR);
             }
 
+            // RFC 9113 §8.6: HTTP/2 removes the Upgrade mechanism — refuse a connection takeover.
+            if (response instanceof io.vidocq.chappe.api.ConnectionUpgrade) {
+                response = Response.of(StatusCode.HTTP_VERSION_NOT_SUPPORTED);
+            }
+
             // gRPC switch: router returned a GrpcDispatch marker.
             if (response instanceof io.vidocq.chappe.api.GrpcDispatch gd) {
                 var call = new io.vidocq.chappe.http.grpc.GrpcCallImpl(stream, request, this);
