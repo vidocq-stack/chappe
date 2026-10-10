@@ -110,11 +110,13 @@ public final class Http2Stream {
 
     /**
      * Marks the stream as cancelled by the peer (RST_STREAM) or by the end of its connection:
-     * the response body being sent is released and a sender waiting for window is woken.
+     * the response body being sent is released and a sender waiting for window is woken. A reader
+     * of the request body is woken too, and fails: a cut body is not a complete one, so only a
+     * received END_STREAM ends it cleanly.
      */
     public void cancel() {
         cancelled = true;
-        signalEndStream();
+        dataQueue.add(ByteBuffer.allocate(0)); // sentinel to unblock take(); not an END_STREAM
         close();
         releaseResponseBody();
         sendLock.lock();

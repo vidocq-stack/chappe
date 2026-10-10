@@ -299,11 +299,12 @@ public final class HttpConnection {
         close();
     }
 
-    /** {@link Body#release() Releases} the body of a response the handler returned; never throws. */
+    /** Whether reading the request body failed (a truncated or broken body leaves the stream unusable). */
     private static boolean bodyReadFailed(InputStream bodyStream) {
         return bodyStream instanceof RequestBodyInputStream body && body.failed();
     }
 
+    /** {@link Body#release() Releases} the body of a response the handler returned; never throws. */
     private static void releaseBody(Response response) {
         try {
             Body body = response.body();

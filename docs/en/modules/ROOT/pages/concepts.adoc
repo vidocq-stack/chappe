@@ -90,6 +90,13 @@ Helpers shipped on `Filter`:
 * `Filter.addHeaderIfEnv(envVar, expected, name, value)` — gate on an environment variable (typical: staging).
 * `Filter.gzip()` / `Filter.gzip(threshold)` — on-the-fly compression negotiated through `Accept-Encoding`.
 
+WARNING: Chappe recognises a connection takeover by the type of the response: a handler returns a
+`WebSocketUpgrade` or a `ConnectionUpgrade`, and the connection checks it with `instanceof`. A
+filter that rebuilds the response (for example with `Response.builder()` to add a header) returns a
+plain `Response`. The upgrade type is then lost and the takeover never happens. A filter must
+return an upgrade response unchanged: test `instanceof WebSocketUpgrade` and
+`instanceof ConnectionUpgrade` first, and pass the response through.
+
 == Connection, frame, multiplexing
 
 HTTP/2 vocabulary (RFC 9113), reused by HTTP/3 (RFC 9114) over a different transport.

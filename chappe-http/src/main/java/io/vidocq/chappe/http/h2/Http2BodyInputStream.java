@@ -57,10 +57,16 @@ final class Http2BodyInputStream extends InputStream {
         return current != null ? current.remaining() : 0;
     }
 
+    /**
+     * Makes bytes available, or returns {@code false} at a clean end of the body (END_STREAM).
+     * A stream reset by the peer, or cut by the end of its connection, before its END_STREAM
+     * fails the read: a truncated body must never pass for a complete one.
+     */
     private boolean ensureBuffer() throws IOException {
         while (current == null || !current.hasRemaining()) {
-            if (stream.isEndStreamReceived() && stream.isDataQueueEmpty()) {
-                return false;
+            if (stream.isDataQueueEmpty()) {
+                if (stream.isEndStreamReceived()) return false;
+                if (stream.isCancelled()) throw streamReset();
             }
             try {
                 current = stream.takeData();
@@ -68,10 +74,15 @@ final class Http2BodyInputStream extends InputStream {
                 Thread.currentThread().interrupt();
                 throw new IOException("Interrupted while reading HTTP/2 body", e);
             }
-            if (!current.hasRemaining() && stream.isEndStreamReceived()) {
-                return false;
+            if (!current.hasRemaining()) {
+                if (stream.isEndStreamReceived()) return false;
+                if (stream.isCancelled()) throw streamReset();
             }
         }
         return true;
+    }
+
+    private IOException streamReset() {
+        return new IOException("HTTP/2 stream " + stream.streamId() + " reset before the end of its request body");
     }
 }

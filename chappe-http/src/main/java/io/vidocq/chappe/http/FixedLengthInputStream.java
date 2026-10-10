@@ -55,6 +55,7 @@ final class FixedLengthInputStream extends RequestBodyInputStream {
 
     @Override
     int readBytes(byte[] b, int off, int len) throws IOException {
+        if (len == 0) return 0; // InputStream contract: nothing to read, no refill
         if (remaining <= 0) return -1;
 
         int toRead = (int) Math.min(len, remaining);

@@ -5,6 +5,59 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-017 — an HTTP/2 response body failing mid-stream left the client stream hanging
+
+- **Date**: 2026-10-10
+- **Status**: FIXED (commit `fix(http): reset an aborted HTTP/2 stream and fail a cut request body`,
+  branch `pr/ybl/servlet-streaming-upgrade`)
+- **Module**: `chappe-http` (`h2/Http2Connection`)
+- **Symptom**: when the response body threw while being sent (a live body the application
+  aborted: Foy on a late exception, an async timeout on a committed response, a short
+  Content-Length), `dispatchStream` only closed the stream locally. No RST_STREAM and no
+  END_STREAM reached the client, which waited for the end of the stream until its own timeout.
+- **Minimal reproduction**: `chappe-tests/.../Http2StreamAbortTest#aResponseBodyFailingMidStreamResetsTheStream`
+  (a body yielding one byte, then throwing; before the fix the client read timed out).
+- **Cause**: the `IOException` catch of `dispatchStream` sent nothing.
+- **Fix**: unless the stream was already cancelled (peer reset, connection gone: RFC 9113 §5.4.2),
+  the server sends `RST_STREAM(INTERNAL_ERROR)`. The HTTP/1.x counterpart aborts the connection.
+
+---
+
+## CHAPPE-016 — an HTTP/2 request body could be lost when its DATA frame beat the dispatch
+
+- **Date**: 2026-10-10
+- **Status**: FIXED (same commit as CHAPPE-017)
+- **Module**: `chappe-http` (`h2/Http2Connection`)
+- **Symptom**: a `POST` whose HEADERS frame had no END_STREAM, followed at once by a DATA frame with
+  END_STREAM, sometimes reached the handler with an empty body.
+- **Minimal reproduction**: `chappe-tests/.../Http2StreamAbortTest#aRequestBodyEndedByEndStreamReadsToTheEnd`
+  (intermittent: it failed with `body:` instead of `body:abc` during the CHAPPE-015 work).
+- **Cause**: the dispatch thread decided whether a body exists from `stream.state() == OPEN`. The
+  connection thread could already have processed the DATA frame with END_STREAM, which
+  half-closes the stream, so the body was never attached.
+- **Fix**: the body presence is decided on the connection thread from the HEADERS frame
+  (`!headersEndStream()`), and passed to the dispatch.
+
+---
+
+## CHAPPE-015 — an HTTP/2 stream reset or a lost connection read as a clean end of the request body
+
+- **Date**: 2026-10-10
+- **Status**: FIXED (same commit as CHAPPE-017)
+- **Module**: `chappe-http` (`h2/Http2Stream`, `h2/Http2BodyInputStream`)
+- **Symptom**: `Http2Stream.cancel()` (RST_STREAM from the peer, end of the connection) signalled
+  END_STREAM, so `Http2BodyInputStream` returned `-1`: a cut body read as a whole, shorter body.
+  The HTTP/2 counterpart of CHAPPE-011/012. In Foy, a ReadListener got `onAllDataRead` instead of
+  `onError`.
+- **Minimal reproduction**: `chappe-tests/.../Http2StreamAbortTest#aRequestBodyCutByAStreamResetFailsTheRead`
+  and `#aRequestBodyCutByTheEndOfTheConnectionFailsTheRead` (`body:abc` before the fix).
+- **Cause**: cancellation reused the END_STREAM signal.
+- **Fix**: `cancel()` wakes the reader with a sentinel without marking END_STREAM; a read on a
+  cancelled stream with no END_STREAM received throws `IOException`. A normal END_STREAM still
+  reads `-1`, also when the stream is cancelled after the whole body arrived.
+
+---
+
 ## CHAPPE-014 — a connection closed after a failed body read skips the lingering close
 
 - **Date**: 2026-10-10

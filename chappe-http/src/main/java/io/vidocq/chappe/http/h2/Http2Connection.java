@@ -213,7 +213,7 @@ public final class Http2Connection {
                     // Overflow: send RST_STREAM with FLOW_CONTROL_ERROR per RFC 9113 §6.9.2
                     frameWriter.writeRstStream(stream.streamId(), Http2ErrorCode.FLOW_CONTROL_ERROR);
                     streams.remove(stream.streamId());
-                    stream.close();
+                    stream.cancel(); // releases the body being sent and wakes its sender
                 } else {
                     stream.incrementSendWindow(delta);
                 }
@@ -328,13 +328,16 @@ public final class Http2Connection {
         extractPseudoHeaders(req);
 
         // Half-close remote if END_STREAM was set on HEADERS
-        if (stream.headersEndStream()) {
+        boolean hasBody = !stream.headersEndStream();
+        if (!hasBody) {
             stream.halfCloseRemote();
         }
 
-        // Dispatch in a dedicated virtual thread
+        // Dispatch in a dedicated virtual thread. Whether a body follows is decided here, from the
+        // HEADERS frame: by the time the thread runs, a DATA frame carrying END_STREAM may already
+        // have half-closed the stream, and its body must not be lost (CHAPPE-016).
         int streamId = stream.streamId();
-        Thread.ofVirtual().name("chappe-h2-stream-" + streamId).start(() -> dispatchStream(stream));
+        Thread.ofVirtual().name("chappe-h2-stream-" + streamId).start(() -> dispatchStream(stream, hasBody));
     }
 
     private void handleData(Http2Frame.DataFrame frame) throws IOException {
@@ -403,7 +406,7 @@ public final class Http2Connection {
                 if (current > Integer.MAX_VALUE - increment) {
                     frameWriter.writeRstStream(streamId, Http2ErrorCode.FLOW_CONTROL_ERROR);
                     streams.remove(streamId);
-                    stream.close();
+                    stream.cancel(); // releases the body being sent and wakes its sender
                     return;
                 }
                 stream.incrementSendWindow(increment);
@@ -440,13 +443,13 @@ public final class Http2Connection {
     // Dispatch and response
     // -------------------------------------------------------------------------
 
-    private void dispatchStream(Http2Stream stream) {
+    private void dispatchStream(Http2Stream stream, boolean hasBody) {
         Response handled = null;
         try {
             HttpRequestImpl request = stream.request();
 
-            // If stream is OPEN (not half-closed remote), there's a body
-            if (stream.state() == Http2Stream.State.OPEN) {
+            // HEADERS without END_STREAM: DATA frames carry a body
+            if (hasBody) {
                 request.setBody(stream.createBody());
             }
 
@@ -481,11 +484,24 @@ public final class Http2Connection {
 
             sendResponse(stream, response);
         } catch (IOException _) {
-            // Connection lost or stream reset while writing response
+            // Connection lost, stream reset, or the response body failed mid-stream (a live body the
+            // application aborted). Unless the stream is already gone, reset it: otherwise the client
+            // would wait forever for an END_STREAM that never comes (RFC 9113 §5.4.2).
+            resetAbortedStream(stream);
         } finally {
             stream.close();
             streams.remove(stream.streamId());
             if (handled != null) releaseBody(handled);
+        }
+    }
+
+    /** Sends RST_STREAM(INTERNAL_ERROR) for a stream whose response failed, unless it was cancelled. */
+    private void resetAbortedStream(Http2Stream stream) {
+        if (stream.isCancelled()) return; // reset by the peer or connection gone: no frame (§5.4.2)
+        try {
+            frameWriter.writeRstStream(stream.streamId(), Http2ErrorCode.INTERNAL_ERROR);
+        } catch (IOException _) {
+            // connection lost: nothing more to tell the peer
         }
     }
 

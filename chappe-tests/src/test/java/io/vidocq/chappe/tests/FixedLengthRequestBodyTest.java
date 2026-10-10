@@ -98,4 +98,31 @@ class FixedLengthRequestBodyTest {
             assertEquals("IOException", outcome.get(5, TimeUnit.SECONDS));
         }
     }
+
+    /** A zero-length read returns 0 without touching the connection (InputStream contract). */
+    @Test
+    void aZeroLengthReadReturnsZeroWithoutRefilling() throws Exception {
+        var outcome = new CompletableFuture<String>();
+        server = Server.builder()
+                .port(0)
+                .handler(req -> {
+                    try {
+                        outcome.complete("read:" + req.body().asInputStream().read(new byte[4], 0, 0));
+                    } catch (IOException e) {
+                        outcome.complete("IOException");
+                    }
+                    return Response.ok("done");
+                })
+                .build();
+        server.start();
+        try (var socket = new Socket("127.0.0.1", server.port())) {
+            var out = socket.getOutputStream();
+            // No body byte yet, then the end of input: a refill would fail the read.
+            out.write(("POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: 10\r\n\r\n")
+                    .getBytes(StandardCharsets.US_ASCII));
+            out.flush();
+            socket.shutdownOutput();
+            assertEquals("read:0", outcome.get(5, TimeUnit.SECONDS));
+        }
+    }
 }
