@@ -26,12 +26,14 @@ import java.io.InputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.net.Socket;
+import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 
 import io.vidocq.chappe.api.Body;
 import io.vidocq.chappe.api.Response;
@@ -157,6 +159,88 @@ class StreamingBodyTest {
 
         assertEquals(200, response.statusCode());
         assertEquals(String.join("", events), response.body());
+    }
+
+    /**
+     * A known-length body that is not an in-memory/file body is a live stream:
+     * each read reaches the client while the producer is still running
+     * (Servlet {@code flushBuffer()} with a declared Content-Length).
+     */
+    @Test
+    void knownLengthStreamingBodyIsFlushedPerRead() throws Exception {
+        assertKnownLengthBodyFlushedPerRead(false);
+    }
+
+    /** Same guarantee on the 200 OK text/plain small-body fast path of the HTTP/1.1 writer. */
+    @Test
+    void knownLengthStreamingBodyIsFlushedPerReadOnTheFastPath() throws Exception {
+        assertKnownLengthBodyFlushedPerRead(true);
+    }
+
+    private void assertKnownLengthBodyFlushedPerRead(boolean fastPath) throws Exception {
+        var release = new CountDownLatch(1);
+        InputStream producer = new InputStream() {
+            private int step;
+
+            @Override
+            public int read() {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public int read(byte[] b, int off, int len) throws IOException {
+                switch (step++) {
+                    case 0 -> {
+                        System.arraycopy("first".getBytes(StandardCharsets.US_ASCII), 0, b, off, 5);
+                        return 5;
+                    }
+                    case 1 -> {
+                        try {
+                            release.await();
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            throw new IOException(e);
+                        }
+                        System.arraycopy("final".getBytes(StandardCharsets.US_ASCII), 0, b, off, 5);
+                        return 5;
+                    }
+                    default -> {
+                        return -1;
+                    }
+                }
+            }
+        };
+        server = Server.builder()
+                .port(0)
+                .handler(_ -> {
+                    var builder = Response.builder();
+                    if (fastPath) builder.header("Content-Type", "text/plain; charset=utf-8");
+                    return builder.body(Body.of(producer, 10)).build();
+                })
+                .build();
+        server.start();
+
+        try (var socket = new Socket("127.0.0.1", server.port())) {
+            socket.setSoTimeout(2000);
+            var out = socket.getOutputStream();
+            var in = socket.getInputStream();
+            out.write("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n".getBytes(StandardCharsets.US_ASCII));
+            out.flush();
+
+            try {
+                String headers = readHeaders(in);
+                assertTrue(headers.contains("Content-Length: 10"), headers);
+                assertEquals(
+                        "first",
+                        new String(in.readNBytes(5), StandardCharsets.US_ASCII),
+                        "the first read must reach the client before the producer finishes");
+            } catch (SocketTimeoutException e) {
+                fail("partial known-length body was not flushed within 2 s", e);
+            } finally {
+                release.countDown();
+            }
+            assertEquals("final", new String(in.readNBytes(5), StandardCharsets.US_ASCII));
+        }
     }
 
     // --- Raw HTTP parsing helpers ---

@@ -19,6 +19,7 @@
  */
 package io.vidocq.chappe.http;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
@@ -33,6 +34,7 @@ import java.util.Locale;
 import io.vidocq.chappe.api.Body;
 import io.vidocq.chappe.api.BuildInfo;
 import io.vidocq.chappe.api.FileBody;
+import io.vidocq.chappe.api.Headers;
 import io.vidocq.chappe.api.HttpMethod;
 import io.vidocq.chappe.api.Response;
 import io.vidocq.chappe.api.StatusCode;
@@ -60,6 +62,7 @@ public final class HttpResponseWriter {
     private static final byte[] TRANSFER_ENCODING_CHUNKED =
             "Transfer-Encoding: chunked\r\n".getBytes(StandardCharsets.US_ASCII);
     private static final byte[] CHUNK_TERMINATOR = "0\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] LAST_CHUNK = "0\r\n".getBytes(StandardCharsets.US_ASCII);
     private static final byte[] DATE_PREFIX = "Date: ".getBytes(StandardCharsets.US_ASCII);
     private static final byte[] CONTENT_TYPE_TEXT =
             "Content-Type: text/plain; charset=utf-8\r\n".getBytes(StandardCharsets.US_ASCII);
@@ -200,7 +203,7 @@ public final class HttpResponseWriter {
         // Body
         if (!suppressBody) {
             if (chunked) {
-                writeBodyChunked(body, buffer, channel);
+                writeBodyChunked(response, body, buffer, channel);
             } else {
                 writeBody(body, buffer, channel);
             }
@@ -233,9 +236,13 @@ public final class HttpResponseWriter {
         // Inline body (everything fits in the 16K buffer)
         if (contentLength > 0) {
             try (InputStream in = body.asInputStream()) {
+                boolean flushPerRead = isLiveStream(body, in);
                 int read;
                 while ((read = in.read(bodyChunk)) != -1) {
                     putBytes(bodyChunk, 0, read, buffer, channel);
+                    if (flushPerRead && read > 0) {
+                        flush(buffer, channel);
+                    }
                 }
             }
         }
@@ -298,23 +305,68 @@ public final class HttpResponseWriter {
 
     // --- Body writers ---
 
-    private void writeBodyChunked(Body body, ByteBuffer buffer, WritableByteChannel channel) throws IOException {
-        if (body.contentLength() == 0) {
+    private void writeBodyChunked(Response response, Body body, ByteBuffer buffer, WritableByteChannel channel)
+            throws IOException {
+        if (body.contentLength() != 0) {
+            try (InputStream in = body.asInputStream()) {
+                int read;
+                while ((read = in.read(bodyChunk)) != -1) {
+                    putAsciiHex(read, buffer, channel);
+                    putBytes(CRLF, buffer, channel);
+                    putBytes(bodyChunk, 0, read, buffer, channel);
+                    putBytes(CRLF, buffer, channel);
+                    // Flush after each chunk so SSE events arrive without delay
+                    flush(buffer, channel);
+                }
+            }
+        }
+        // Response.trailers() is queried only now, once the body is fully consumed.
+        writeLastChunk(response.trailers(), buffer, channel);
+    }
+
+    /**
+     * Writes the last chunk and the trailer section (RFC 9112 §7.1.2):
+     * {@code 0\r\n}, one {@code name: value\r\n} line per trailer value, then
+     * the final {@code \r\n}. A trailer whose name or value contains CR, LF or
+     * NUL (or whose name is empty) is skipped, so it can neither inject a
+     * field nor break the framing.
+     */
+    private void writeLastChunk(Headers trailers, ByteBuffer buffer, WritableByteChannel channel) throws IOException {
+        if (trailers.isEmpty()) {
             putBytes(CHUNK_TERMINATOR, buffer, channel);
             return;
         }
-        try (InputStream in = body.asInputStream()) {
-            int read;
-            while ((read = in.read(bodyChunk)) != -1) {
-                putAsciiHex(read, buffer, channel);
-                putBytes(CRLF, buffer, channel);
-                putBytes(bodyChunk, 0, read, buffer, channel);
-                putBytes(CRLF, buffer, channel);
-                // Flush after each chunk so SSE events arrive without delay
-                flush(buffer, channel);
+        putBytes(LAST_CHUNK, buffer, channel);
+        for (var entry : trailers) {
+            if (entry.name().isEmpty() || !isSafeFieldText(entry.name()) || !isSafeFieldText(entry.value())) {
+                continue;
             }
+            putAsciiString(entry.name(), buffer, channel);
+            putByte(COLON, buffer, channel);
+            putByte(SPACE, buffer, channel);
+            putAsciiString(entry.value(), buffer, channel);
+            putBytes(CRLF, buffer, channel);
         }
-        putBytes(CHUNK_TERMINATOR, buffer, channel);
+        putBytes(CRLF, buffer, channel);
+    }
+
+    /**
+     * Whether a known-length body is produced live (and must therefore be
+     * flushed after every read) rather than already complete in memory or on
+     * disk. In-memory bodies ({@code Body.of(byte[]|String)}, or any body over
+     * a {@link ByteArrayInputStream}) and file bodies keep the coalesced
+     * single flush.
+     */
+    private static boolean isLiveStream(Body body, InputStream in) {
+        return !(body instanceof FileBody) && !(in instanceof ByteArrayInputStream);
+    }
+
+    private static boolean isSafeFieldText(String s) {
+        for (int i = 0, len = s.length(); i < len; i++) {
+            char c = s.charAt(i);
+            if (c == '\r' || c == '\n' || c == '\0') return false;
+        }
+        return true;
     }
 
     @SuppressWarnings("ThreadPriorityCheck") // Thread.yield() = workaround JDK-8264762 (sendfile retry)
@@ -350,11 +402,19 @@ public final class HttpResponseWriter {
             // For non-SocketChannel (TLS), fall through to InputStream path
         }
 
-        // Existing InputStream-based path
+        // InputStream-based path. In-memory and file bodies are coalesced into
+        // as few writes as possible; any other known-length body is a live
+        // stream, so each read is flushed and reaches the client while the
+        // producer is still running (e.g. Servlet flushBuffer() with a
+        // declared Content-Length).
         try (InputStream in = body.asInputStream()) {
+            boolean flushPerRead = isLiveStream(body, in);
             int read;
             while ((read = in.read(bodyChunk)) != -1) {
                 putBytes(bodyChunk, 0, read, buffer, channel);
+                if (flushPerRead && read > 0) {
+                    flush(buffer, channel);
+                }
             }
         }
     }

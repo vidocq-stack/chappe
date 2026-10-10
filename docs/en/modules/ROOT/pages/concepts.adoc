@@ -67,6 +67,8 @@ req.attribute(k, v)    // mutable per-request attributes (Servlet-compat)
 | Zero-copy via `FileChannel.transferTo()` — `Body.ofFile(path)`.
 |===
 
+On HTTP/1.1, in-memory and file bodies are written with as few socket writes as possible. Any other body is treated as a live stream and flushed after every read, so a client sees each part while the producer is still running: a body of unknown length (`contentLength() < 0`) is sent chunked on a keep-alive connection, and a body of known length is sent under its `Content-Length`. After the last chunk of a chunked body, the transport calls `Response.trailers()` and writes the fields it returns into the trailer section (RFC 9112 §7.1.2). It drops any field whose name or value contains CR, LF or NUL. HTTP/2 sends the same trailers as a final HEADERS frame.
+
 == Filters
 
 A `Filter` is a declarative middleware. It turns a `Handler` into another `Handler`:

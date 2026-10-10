@@ -68,7 +68,7 @@ void main() {
 ## Features
 
 ### Protocols
-- **HTTP/1.1** — RFC 9110/9112 (keep-alive, chunked, pipelining)
+- **HTTP/1.1** — RFC 9110/9112 (keep-alive, chunked with request and response trailers, pipelining)
 - **HTTP/2** — RFC 9113 (multiplexing, HPACK, flow control, CONTINUATION)
 - **HTTPS** — TLS via SSLContext/SSLEngine, ALPN (h2 + http/1.1)
 - **WebSocket** — RFC 6455 over HTTP/1.1 (handshake `Sec-WebSocket-Accept`, TEXT/BINARY framing, fragmentation, UTF-8 validation, mandatory client masking, close handshake, auto-PONG)
@@ -484,7 +484,7 @@ Router.builder()
 | Spec | Coverage |
 |------|-----------|
 | RFC 9110 (HTTP Semantics) | Date, HEAD/204/304, 405+Allow, Host, 100-continue |
-| RFC 9112 (HTTP/1.1) | Request parsing, chunked, keep-alive, pipelining |
+| RFC 9112 (HTTP/1.1) | Request parsing, chunked (request and response trailers), keep-alive, pipelining |
 | RFC 9113 (HTTP/2) | Framing, HPACK, flow control, stream lifecycle, GOAWAY, SETTINGS |
 | RFC 7541 (HPACK) | Static table, dynamic table, Huffman encode/decode |
 | RFC 6455 (WebSocket) | Handshake (`Sec-WebSocket-Accept`), framing §5.2, mandatory masking, strict UTF-8 TEXT, bidirectional close handshake, auto-PONG |
