@@ -370,7 +370,7 @@ Served zero-copy by `StaticFileHandler.preferPrecompressed(true)`.
 
 | RFC 9110 (HTTP Semantics) | OK | Date, HEAD/204/304, 405+Allow, Host, 100-continue
 | RFC 9112 (HTTP/1.1)       | OK | request parsing, chunked (request and response trailers, §7.1.2), keep-alive, pipelining, lingering close (§9.6, plaintext and TLS) [.tag-new]#NEW#
-| RFC 9113 (HTTP/2)         | OK | framing, flow control, lifecycle, GOAWAY, SETTINGS, CONTINUATION, `RST_STREAM(NO_ERROR)` after an early response (§8.1), frames on reset streams ignored (§5.1) [.tag-new]#NEW#
+| RFC 9113 (HTTP/2)         | OK | framing, flow control, lifecycle, GOAWAY, SETTINGS, CONTINUATION, `RST_STREAM(NO_ERROR)` after an early response (§8.1), frames on reset streams ignored (§5.1), stream window reopened as the body is read (§6.9), a header block (HEADERS plus CONTINUATION) bounded at the advertised `SETTINGS_MAX_HEADER_LIST_SIZE` of 8 KiB, past which the connection ends with `GOAWAY(ENHANCE_YOUR_CALM)` (§10.5.1) [.tag-new]#NEW#
 | RFC 7541 (HPACK)          | OK | static table, dynamic table, Huffman encode/decode
 | RFC 6455 (WebSocket)      | OK | handshake, TEXT/BINARY framing, fragmentation, UTF-8 validation, client masking, close handshake, auto-PONG — over HTTP/1.1
 | gRPC over HTTP/2          | OK | transport framing (5-byte prefix), trailers, unary / server-stream / client-stream / bidi, gRPC-Web via `grpcWeb()`

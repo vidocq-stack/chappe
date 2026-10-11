@@ -8,8 +8,9 @@ cause hypothesis, and status.
 ## CHAPPE-024 — the HTTP/2 stream window reopened on receipt, so a stream's buffer was unbounded
 
 - **Date**: 2026-10-11
-- **Status**: FIXED (commit `fix(http): open the HTTP/2 stream window as the request body is read (CHAPPE-024)`,
-  branch `pr/ybl/chappe-request-body-bounds`)
+- **Status**: FIXED (commits `fix(http): open the HTTP/2 stream window as the request body is read (CHAPPE-024)`
+  and `fix(http): bound an HTTP/2 header block at the max header list size (CHAPPE-024)`, branch
+  `pr/ybl/chappe-request-body-bounds`)
 - **Module**: `chappe-http` (`h2/Http2Connection`, `h2/Http2Stream`, `h2/Http2BodyInputStream`)
 - **Symptom**: `handleData` sent the stream WINDOW_UPDATE as DATA arrived, not as the handler read it.
   A handler that did not read let the client push without limit into the stream's unbounded queue
@@ -31,6 +32,18 @@ cause hypothesis, and status.
   poll of the stream's queue, with no timer thread, and returns at once when a chunk is queued. A gRPC
   or gRPC-Web stream (`content-type: application/grpc*`) is exempt (ruling F-04): a client or bidi
   streaming call may pause for as long as it likes. A read of zero bytes returns 0 at once.
+- **Same class, header blocks (CONTINUATION flood, CVE-2024-27316 class)**: a header block (HEADERS
+  plus its CONTINUATION frames) was accumulated without bound until END_HEADERS; `HpackDecoder`
+  checks `maxHeaderListSize` only once the block is complete. A client that never set END_HEADERS
+  grew the heap at will, on a served stream and, since CHAPPE-023 decodes their blocks, on a refused
+  or reset stream too. Kept under this id rather than a new one: CHAPPE-026 and later are reserved for
+  the next PR. Reproduction: `chappe-tests/.../Http2HeaderBlockLimitTest` (no GOAWAY, the server kept
+  reading). Fix: before a fragment is buffered, a block that would pass the advertised
+  `SETTINGS_MAX_HEADER_LIST_SIZE` (8,192 bytes) is a connection error `ENHANCE_YOUR_CALM`. RFC 9113
+  §10.5.1 requires a block to be processed unless the connection is closed, and it cannot be decoded
+  piecemeal here, so the connection is closed; §10.5 names `ENHANCE_YOUR_CALM` for such abuse, and
+  the HPACK decoder already uses it for a decoded list past the same size. It is neither a
+  `COMPRESSION_ERROR` (the HPACK is not malformed) nor a `PROTOCOL_ERROR` (the framing is valid).
 
 ---
 

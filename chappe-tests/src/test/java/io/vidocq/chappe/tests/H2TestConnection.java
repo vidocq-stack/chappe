@@ -46,6 +46,7 @@ final class H2TestConnection implements AutoCloseable {
     static final int TYPE_SETTINGS = 0x4;
     static final int TYPE_GOAWAY = 0x7;
     static final int TYPE_WINDOW_UPDATE = 0x8;
+    static final int TYPE_CONTINUATION = 0x9;
     static final int FLAG_END_STREAM = 0x1;
     static final int FLAG_ACK = 0x1;
     static final int FLAG_END_HEADERS = 0x4;
@@ -56,6 +57,7 @@ final class H2TestConnection implements AutoCloseable {
     static final int STREAM_CLOSED = 0x5;
     static final int REFUSED_STREAM = 0x7;
     static final int CANCEL = 0x8;
+    static final int ENHANCE_YOUR_CALM = 0xb;
 
     private static final byte[] PREFACE = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
 

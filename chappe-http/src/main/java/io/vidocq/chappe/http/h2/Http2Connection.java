@@ -256,6 +256,7 @@ public final class Http2Connection {
                         Http2ErrorCode.PROTOCOL_ERROR,
                         "Trailers HEADERS frame without END_STREAM on stream " + streamId);
             }
+            boundHeaderBlock(0, frame.headerBlock().remaining());
             existing.markTrailers();
             existing.beginHeaders(frame.headerBlock(), true);
             if (frame.endHeaders()) {
@@ -299,6 +300,7 @@ public final class Http2Connection {
         streams.put(streamId, stream);
 
         // Begin header accumulation
+        boundHeaderBlock(0, frame.headerBlock().remaining());
         stream.beginHeaders(frame.headerBlock(), frame.endStream());
 
         if (frame.endHeaders()) {
@@ -314,12 +316,31 @@ public final class Http2Connection {
      * later block (RFC 7541 §2.3.2, RFC 9113 §4.3).
      */
     private void discardHeaderBlock(int streamId, Http2Frame.HeadersFrame frame) throws Http2ConnectionException {
+        boundHeaderBlock(0, frame.headerBlock().remaining());
         var discarded = new Http2Stream(streamId, 0, 0);
         discarded.beginHeaders(frame.headerBlock(), frame.endStream());
         if (frame.endHeaders()) {
             hpackDecoder.decode(discarded.completeHeaderBlock(), (name, value) -> {});
         } else {
             awaitContinuation(discarded);
+        }
+    }
+
+    /**
+     * Refuses a header block (HEADERS plus CONTINUATION) that would grow past the
+     * SETTINGS_MAX_HEADER_LIST_SIZE this endpoint advertises, before a byte of {@code fragment} is
+     * buffered, so a CONTINUATION flood never grows the heap past it (the CVE-2024-27316 class,
+     * CHAPPE-024). The block cannot be decoded piecemeal, and RFC 9113 §10.5.1 requires it be
+     * processed unless the connection is closed: the connection is closed, with ENHANCE_YOUR_CALM
+     * (§10.5, the code the HPACK decoder already uses for a decoded list past that size). An encoded
+     * block is not larger than the list it decodes to, unless Huffman coding is chosen where it
+     * lengthens a string, which no encoder does.
+     */
+    private void boundHeaderBlock(int accumulated, int fragment) throws Http2ConnectionException {
+        int limit = localSettings.maxHeaderListSize();
+        if (fragment > limit - accumulated) {
+            throw new Http2ConnectionException(
+                    Http2ErrorCode.ENHANCE_YOUR_CALM, "Header block exceeds max header list size " + limit);
         }
     }
 
@@ -332,6 +353,7 @@ public final class Http2Connection {
     private void handleContinuation(Http2Frame.ContinuationFrame frame) throws IOException {
         // frameLoop has checked that the frame continues the pending block, on its stream.
         var stream = pendingHeaderBlock;
+        boundHeaderBlock(stream.headerBlockSize(), frame.headerBlock().remaining());
         stream.appendHeaderFragment(frame.headerBlock());
         if (!frame.endHeaders()) return;
 

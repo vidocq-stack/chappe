@@ -269,6 +269,11 @@ public final class Http2Stream {
         headerBlockAccumulator.write(bytes, 0, bytes.length);
     }
 
+    /** The size of the header block accumulated so far (HEADERS plus CONTINUATION fragments). */
+    int headerBlockSize() {
+        return headerBlockAccumulator == null ? 0 : headerBlockAccumulator.size();
+    }
+
     public ByteBuffer completeHeaderBlock() {
         var result = ByteBuffer.wrap(headerBlockAccumulator.toByteArray());
         headerBlockAccumulator = null;
