@@ -19,10 +19,12 @@ cause hypothesis, and status.
 - **Cause**: body streams read the raw channel. `SO_TIMEOUT` does not apply to channel reads, and only
   the idle wait was bounded (CHAPPE-005).
 - **Fix**: body streams read their channel through `TimedReadChannel`, below the
-  `RequestBodyInputStream`, so the wire-byte drain budget of CHAPPE-021 still applies. A read that
-  finds bytes ready (non-blocking probe of the socket, or decrypted bytes held by the `SslHandler`)
-  takes no timer. A read that has to wait arms a deadline that one watchdog virtual thread per
-  connection follows; no thread is started per read. At the deadline the connection is closed and
+  `RequestBodyInputStream`, so the wire-byte drain budget of CHAPPE-021 still applies. Bytes chappe
+  already holds (the parse buffer, or decrypted bytes held by the `SslHandler`) take no timer. Any
+  other read arms a deadline (a compare-and-set) that one watchdog virtual thread per connection
+  follows; no thread is started per read, and the socket's blocking mode is never switched (that
+  would take the write lock: a body read would wait behind a blocked response write, full duplex).
+  A timeout too large for nanoseconds is saturated instead of failing the connection. At the deadline the connection is closed and
   the read throws `SocketTimeoutException`; zero or negative disables the bound. The HTTP/2
   counterpart is CHAPPE-024.
 - **Found while fixing**: over TLS, once the connection was closed under the handler,

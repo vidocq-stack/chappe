@@ -24,7 +24,6 @@ import java.io.IOException;
 import java.net.SocketTimeoutException;
 import java.nio.ByteBuffer;
 import java.nio.channels.ReadableByteChannel;
-import java.nio.channels.SocketChannel;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
@@ -33,13 +32,16 @@ import java.util.concurrent.locks.LockSupport;
  * The channel HTTP/1.1 request bodies are read from: each blocking read is bounded by {@code
  * readTimeout} (CHAPPE-022). At the deadline the connection is closed, which wakes the read; the
  * read then throws {@link SocketTimeoutException}. It bounds each read, not the whole body: an upload
- * that keeps sending, however slowly, is not cut.
+ * is not cut as long as each read makes progress within the timeout. Over plaintext a read returns
+ * as soon as one byte arrives; over TLS it returns only once a whole TLS record (up to 16 KiB) is
+ * received and decrypted, so a client must deliver each record within the timeout.
  *
- * <p>Cost on the hot path: a read that finds bytes ready (in the kernel buffer for a plain socket, or
- * already decrypted by the {@link SslHandler}) takes no timer at all. Only a read that has to wait
- * arms the deadline, which is a field write: one watchdog virtual thread per connection, started at
- * the first read that waits, follows the armed deadlines and parks in between. No thread is started
- * per read.
+ * <p>Cost on the hot path: bytes chappe already holds (the parse buffer, read by the body stream
+ * before it reaches this channel, or bytes the {@link SslHandler} already decrypted) take no timer at
+ * all. Any other read arms the deadline, which is a field write and a compare-and-set: one watchdog
+ * virtual thread per connection, started at the first armed read, follows the armed deadlines and
+ * parks in between. No thread is started per read. The socket's blocking mode is never switched: that
+ * would take the channel's write lock, and a body read would wait behind a blocked response write.
  *
  * <p>A read that completes and the watchdog that fires race on one {@link AtomicReference}: exactly
  * one of them wins, so a read that ends at the deadline either returns its bytes on an open
@@ -49,6 +51,12 @@ final class TimedReadChannel implements ReadableByteChannel {
 
     /** One armed wait: its own identity, so a stale deadline is never mistaken for a new one. */
     private record Deadline(long nanos) {}
+
+    /**
+     * Longest bound applied: a larger timeout (up to {@code ChronoUnit.FOREVER}) is saturated to it,
+     * about 73 years, so the deadline arithmetic in nanoseconds cannot overflow.
+     */
+    static final Duration MAX_TIMEOUT = Duration.ofNanos(Long.MAX_VALUE / 4);
 
     /** The watchdog fired and closed the connection: terminal. */
     private static final Deadline FIRED = new Deadline(0);
@@ -68,13 +76,14 @@ final class TimedReadChannel implements ReadableByteChannel {
     private TimedReadChannel(ReadableByteChannel delegate, Closeable closeable, Duration timeout) {
         this.delegate = delegate;
         this.closeable = closeable;
-        this.timeoutNanos = timeout.toNanos();
-        this.timeoutMillis = timeout.toMillis();
+        Duration bounded = timeout.compareTo(MAX_TIMEOUT) > 0 ? MAX_TIMEOUT : timeout;
+        this.timeoutNanos = bounded.toNanos();
+        this.timeoutMillis = bounded.toMillis();
     }
 
     /**
      * {@code delegate} bounded by {@code timeout}, or {@code delegate} itself when {@code timeout}
-     * is {@code null}, zero or negative (no bound).
+     * is {@code null}, zero or negative (no bound). A timeout above {@link #MAX_TIMEOUT} is saturated.
      *
      * @param closeable what is closed at the deadline: the connection
      */
@@ -92,7 +101,7 @@ final class TimedReadChannel implements ReadableByteChannel {
         if (ready != 0) return ready;
 
         var deadline = new Deadline(System.nanoTime() + timeoutNanos);
-        armed.set(deadline);
+        if (!armed.compareAndSet(null, deadline)) throw timedOut(null); // only FIRED is left
         wakeWatchdog();
         int n;
         try {
@@ -109,19 +118,10 @@ final class TimedReadChannel implements ReadableByteChannel {
     }
 
     /**
-     * Fast path: reads what is ready without waiting, {@code 0} when the read would have to wait. A
-     * plain socket is probed with a non-blocking read (as {@code HttpConnection.awaitNextRequest}
-     * does); a TLS channel is read directly when it holds decrypted bytes.
+     * Fast path: reads bytes chappe already holds, {@code 0} when there are none. Only the TLS
+     * channel's decrypted bytes qualify: probing the socket would mean switching its blocking mode.
      */
     private int readIfReady(ByteBuffer dst) throws IOException {
-        if (delegate instanceof SocketChannel sc) {
-            sc.configureBlocking(false);
-            try {
-                return sc.read(dst);
-            } finally {
-                sc.configureBlocking(true);
-            }
-        }
         if (delegate instanceof SslHandler ssl && ssl.hasDecryptedInput()) return ssl.read(dst);
         return 0;
     }

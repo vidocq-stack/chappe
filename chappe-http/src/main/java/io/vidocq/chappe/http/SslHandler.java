@@ -22,6 +22,7 @@ package io.vidocq.chappe.http;
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.channels.ClosedChannelException;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.channels.WritableByteChannel;
@@ -311,7 +312,7 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
         // nothing written ever will be. Returning 0 would make a "write until done" loop spin until
         // its write timeout (CHAPPE-022: a read timeout closes the connection under the handler).
         if (totalWritten == 0 && src.hasRemaining() && engine.isOutboundDone()) {
-            throw new java.nio.channels.ClosedChannelException();
+            throw new ClosedChannelException();
         }
         return totalWritten;
     }

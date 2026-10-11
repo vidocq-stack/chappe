@@ -38,6 +38,7 @@ import java.util.concurrent.TimeUnit;
 
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLException;
 import javax.net.ssl.SSLSocket;
 import javax.net.ssl.X509TrustManager;
 
@@ -251,13 +252,14 @@ class TlsLingeringCloseTest {
             // The timed-out connection is closed at once: the response write must fail fast, not
             // wait for writeTimeout (30 s) on a TLS engine whose outbound side is already closed.
             long start = System.nanoTime();
-            assertThrows(IOException.class, () -> {
-                InputStream in = socket.getInputStream();
+            InputStream in = socket.getInputStream();
+            try {
                 while (in.read() != -1) {
                     // nothing is expected but the end of the connection
                 }
-                throw new IOException("end of stream");
-            });
+            } catch (SocketException | SSLException _) {
+                // a reset or an abrupt close ends the connection too; SO_TIMEOUT is neither, and fails
+            }
             long elapsedMs = (System.nanoTime() - start) / 1_000_000;
             assertTrue(elapsedMs < 5_000, "the timed-out connection must close promptly, took " + elapsedMs + " ms");
 

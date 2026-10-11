@@ -28,9 +28,11 @@ import java.io.OutputStream;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.temporal.ChronoUnit;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
+import io.vidocq.chappe.api.Body;
 import io.vidocq.chappe.api.Request;
 import io.vidocq.chappe.api.Response;
 import io.vidocq.chappe.api.Server;
@@ -137,6 +139,63 @@ class RequestBodyReadTimeoutTest {
             send(socket, "defghij");
 
             assertEquals("body:abcdefghij", outcome.get(5, TimeUnit.SECONDS));
+        }
+    }
+
+    /** A timeout too large for a {@code long} of nanoseconds is saturated, not an error. */
+    @Test
+    void aReadTimeoutOfForeverIsAccepted() throws Exception {
+        int port = start(ChronoUnit.FOREVER.getDuration());
+        try (var socket = new Socket("127.0.0.1", port)) {
+            socket.setSoTimeout(5_000);
+            send(socket, "POST /read HTTP/1.1\r\nHost: localhost\r\nContent-Length: 5\r\n\r\n");
+            Thread.sleep(100); // the read waits: the deadline is armed
+            send(socket, "hello");
+
+            assertEquals("body:hello", outcome.get(5, TimeUnit.SECONDS));
+        }
+    }
+
+    /**
+     * Full duplex: a body read must not wait behind a response write that is blocked because the
+     * client does not read. The producer of a streamed response reads the request body on its own
+     * thread while the connection thread is stuck writing; switching the socket's blocking mode would
+     * take the write lock and wait for {@code writeTimeout}.
+     */
+    @Test
+    void aBodyReadDoesNotWaitBehindABlockedResponseWrite() throws Exception {
+        server = Server.builder()
+                .port(0)
+                .readTimeout(Duration.ofSeconds(20))
+                .writeTimeout(Duration.ofSeconds(20))
+                .handler(req -> Response.builder()
+                        .body(Body.ofOutputStream(out -> {
+                            Thread.ofVirtual().start(() -> {
+                                try {
+                                    Thread.sleep(1_000); // by then the response write is blocked
+                                    byte[] body = req.body().asInputStream().readAllBytes();
+                                    outcome.complete("body:" + new String(body, StandardCharsets.US_ASCII));
+                                } catch (Exception e) {
+                                    outcome.complete(e.getClass().getSimpleName());
+                                }
+                            });
+                            byte[] block = new byte[64 * 1024];
+                            try {
+                                for (int i = 0; i < 4096; i++) out.write(block); // 256 MiB, never read
+                            } catch (IOException _) {
+                                // the client closed the connection: expected
+                            }
+                        }))
+                        .build())
+                .build();
+        server.start();
+        try (var socket = new Socket("127.0.0.1", server.port())) {
+            socket.setSoTimeout(5_000);
+            send(socket, "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 10\r\n\r\n");
+            Thread.sleep(200); // the body arrives apart from the head: it is not in the parse buffer
+            send(socket, "abcdefghij");
+
+            assertEquals("body:abcdefghij", outcome.get(8, TimeUnit.SECONDS));
         }
     }
 
