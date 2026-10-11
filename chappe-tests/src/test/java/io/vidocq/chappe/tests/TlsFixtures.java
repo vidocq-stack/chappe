@@ -63,14 +63,71 @@ final class TlsFixtures {
      *     {@code null} for none
      */
     static KeyStore selfSigned(String alias, String dname, String san) throws Exception {
+        return generateSelfSigned(alias, dname, san == null ? List.of() : List.of("-ext", "san=" + san));
+    }
+
+    /** A PKCS12 key store holding one self-signed RSA CA key pair ({@code BasicConstraints: CA}) under {@code alias}. */
+    static KeyStore selfSignedCa(String alias, String dname) throws Exception {
+        return generateSelfSigned(alias, dname, List.of("-ext", "bc:c"));
+    }
+
+    /**
+     * A PKCS12 key store holding an RSA key pair under {@code alias} whose certificate is issued
+     * by the key pair {@code caAlias} of {@code caKeys} ({@code keytool -gencert}). The entry's
+     * chain is {@code [leaf, CA]}, so a client using it sends both certificates.
+     */
+    static KeyStore issuedBy(KeyStore caKeys, String caAlias, String alias, String dname) throws Exception {
+        Path dir = Files.createTempDirectory("chappe-chain-");
+        Path caFile = dir.resolve("ca.p12");
+        Path leafFile = dir.resolve("leaf.p12");
+        Path caCert = dir.resolve("ca.pem");
+        Path request = dir.resolve("leaf.csr");
+        Path issued = dir.resolve("leaf.pem");
+        try {
+            try (var out = Files.newOutputStream(caFile)) {
+                caKeys.store(out, PASSWORD);
+            }
+            var leafStore = List.of("-storetype", "PKCS12", "-keystore", leafFile.toString(), "-storepass", "changeit");
+            var caStore = List.of("-storetype", "PKCS12", "-keystore", caFile.toString(), "-storepass", "changeit");
+            keytool(concat(
+                    List.of("-genkeypair", "-alias", alias, "-keyalg", "RSA", "-keysize", "2048", "-validity", "1"),
+                    List.of("-dname", dname, "-keypass", "changeit"),
+                    leafStore));
+            keytool(concat(List.of("-certreq", "-alias", alias, "-file", request.toString()), leafStore));
+            keytool(concat(
+                    List.of("-gencert", "-alias", caAlias, "-validity", "1", "-rfc"),
+                    List.of("-infile", request.toString(), "-outfile", issued.toString()),
+                    caStore));
+            keytool(concat(List.of("-exportcert", "-alias", caAlias, "-rfc", "-file", caCert.toString()), caStore));
+            // The CA first, as a trusted entry, so keytool can chain the reply to it.
+            keytool(concat(
+                    List.of("-importcert", "-noprompt", "-alias", caAlias, "-file", caCert.toString()), leafStore));
+            keytool(concat(List.of("-importcert", "-alias", alias, "-file", issued.toString()), leafStore));
+
+            var keyStore = KeyStore.getInstance("PKCS12");
+            try (var in = Files.newInputStream(leafFile)) {
+                keyStore.load(in, PASSWORD);
+            }
+            return keyStore;
+        } finally {
+            for (Path file : List.of(caFile, leafFile, caCert, request, issued, dir)) {
+                Files.deleteIfExists(file);
+            }
+        }
+    }
+
+    @SafeVarargs
+    private static List<String> concat(List<String>... parts) {
+        var all = new ArrayList<String>();
+        for (List<String> part : parts) all.addAll(part);
+        return all;
+    }
+
+    private static KeyStore generateSelfSigned(String alias, String dname, List<String> extensions) throws Exception {
         Path file = Files.createTempFile("chappe-" + alias + "-", ".p12");
         Files.delete(file); // keytool refuses to overwrite an existing file
         try {
-            // The keytool of the JDK running the tests, not whichever one PATH resolves.
-            String keytool =
-                    Path.of(System.getProperty("java.home"), "bin", "keytool").toString();
             var command = new ArrayList<>(List.of(
-                    keytool,
                     "-genkeypair",
                     "-alias",
                     alias,
@@ -90,23 +147,8 @@ final class TlsFixtures {
                     "changeit",
                     "-keypass",
                     "changeit"));
-            if (san != null) {
-                command.add("-ext");
-                command.add("san=" + san);
-            }
-            // stdin from the null device: any unexpected prompt reads EOF instead of blocking.
-            var nullDevice = new File(System.getProperty("os.name").startsWith("Windows") ? "NUL" : "/dev/null");
-            var process = new ProcessBuilder(command)
-                    .redirectInput(ProcessBuilder.Redirect.from(nullDevice))
-                    .redirectErrorStream(true)
-                    .start();
-            // keytool prints little; reading after the exit cannot fill the pipe and stall it.
-            if (!process.waitFor(KEYTOOL_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-                process.destroyForcibly();
-                fail("keytool did not finish within " + KEYTOOL_TIMEOUT_SECONDS + " s");
-            }
-            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-            assertEquals(0, process.exitValue(), "keytool failed: " + output);
+            command.addAll(extensions);
+            keytool(command);
 
             var keyStore = KeyStore.getInstance("PKCS12");
             try (var in = Files.newInputStream(file)) {
@@ -116,6 +158,27 @@ final class TlsFixtures {
         } finally {
             Files.deleteIfExists(file);
         }
+    }
+
+    /** Runs the JDK {@code keytool} with {@code arguments}, bounded in time; fails the test on a non-zero exit. */
+    private static void keytool(List<String> arguments) throws Exception {
+        // The keytool of the JDK running the tests, not whichever one PATH resolves.
+        var command = new ArrayList<String>();
+        command.add(Path.of(System.getProperty("java.home"), "bin", "keytool").toString());
+        command.addAll(arguments);
+        // stdin from the null device: any unexpected prompt reads EOF instead of blocking.
+        var nullDevice = new File(System.getProperty("os.name").startsWith("Windows") ? "NUL" : "/dev/null");
+        var process = new ProcessBuilder(command)
+                .redirectInput(ProcessBuilder.Redirect.from(nullDevice))
+                .redirectErrorStream(true)
+                .start();
+        // keytool prints little; reading after the exit cannot fill the pipe and stall it.
+        if (!process.waitFor(KEYTOOL_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+            process.destroyForcibly();
+            fail("keytool did not finish within " + KEYTOOL_TIMEOUT_SECONDS + " s");
+        }
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertEquals(0, process.exitValue(), "keytool " + arguments.getFirst() + " failed: " + output);
     }
 
     static X509Certificate certificate(KeyStore keyStore, String alias) throws Exception {
@@ -156,6 +219,19 @@ final class TlsFixtures {
      * then send no certificate). Used to put an untrusted certificate on the wire.
      */
     static SSLContext contextAlwaysOffering(KeyStore keys, String alias, KeyStore trust) throws Exception {
+        return contextOffering(keys, alias, false, trust);
+    }
+
+    /**
+     * A TLS client context that presents the key pair {@code alias} of {@code keys} but sends
+     * only its leaf certificate, without the issuers stored in its chain.
+     */
+    static SSLContext contextOfferingLeafOnly(KeyStore keys, String alias, KeyStore trust) throws Exception {
+        return contextOffering(keys, alias, true, trust);
+    }
+
+    private static SSLContext contextOffering(KeyStore keys, String alias, boolean leafOnly, KeyStore trust)
+            throws Exception {
         var kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
         kmf.init(keys, PASSWORD);
         var delegate = (X509ExtendedKeyManager) kmf.getKeyManagers()[0];
@@ -187,7 +263,8 @@ final class TlsFixtures {
 
             @Override
             public X509Certificate[] getCertificateChain(String name) {
-                return delegate.getCertificateChain(name);
+                X509Certificate[] chain = delegate.getCertificateChain(name);
+                return leafOnly && chain != null && chain.length > 1 ? new X509Certificate[] {chain[0]} : chain;
             }
 
             @Override
