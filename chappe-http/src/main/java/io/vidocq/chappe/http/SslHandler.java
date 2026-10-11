@@ -65,9 +65,24 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
 
     private static final ByteBuffer EMPTY = ByteBuffer.allocate(0);
 
+    /** Bound on each blocking write of close_notify in {@link #close()}. */
+    private final java.time.Duration closeWriteTimeout;
+
+    /** A handler whose {@link #close()} bounds its close_notify write by the default write timeout. */
     public SslHandler(SocketChannel channel, SSLEngine engine) {
+        this(channel, engine, io.vidocq.chappe.api.ServerConfig.DEFAULT.writeTimeout());
+    }
+
+    /**
+     * @param writeTimeout bound on each blocking write of the close_notify sent by {@link #close()}
+     *                     (normally the server's {@code writeTimeout}); at the deadline the socket
+     *                     is closed without it
+     */
+    public SslHandler(SocketChannel channel, SSLEngine engine, java.time.Duration writeTimeout) {
         this.channel = channel;
         this.engine = engine;
+        this.closeWriteTimeout =
+                writeTimeout != null ? writeTimeout : io.vidocq.chappe.api.ServerConfig.DEFAULT.writeTimeout();
 
         int packetSize = engine.getSession().getPacketBufferSize();
         int appSize = engine.getSession().getApplicationBufferSize();
@@ -328,8 +343,10 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
      * close_notify needs {@code writeLock}. If another thread holds it for longer than
      * {@link #CLOSE_LOCK_WAIT_MS} — typically a writer stalled in {@code channel.write} because
      * the peer stopped reading — close_notify is skipped and the socket is closed at once, which
-     * wakes that writer (and any blocked reader) with an exception. {@code close()} therefore
-     * never blocks behind stalled I/O.
+     * wakes that writer (and any blocked reader) with an exception. Each write of close_notify
+     * itself is bounded by the write timeout given at construction: a peer that stopped reading
+     * leaves the send buffer full, and the socket is then closed without it. {@code close()}
+     * therefore never blocks behind stalled I/O.
      */
     @Override
     public void close() throws IOException {
@@ -346,11 +363,11 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
                 engine.wrap(EMPTY, netOutBuffer);
                 netOutBuffer.flip();
                 while (netOutBuffer.hasRemaining()) {
-                    channel.write(netOutBuffer);
+                    BoundedWrites.writeWithTimeout(channel, channel, netOutBuffer, closeWriteTimeout);
                 }
             }
         } catch (IOException _) {
-            // best-effort: flush outbound close_notify
+            // best-effort: flush outbound close_notify (a timed-out write closed the socket)
         } finally {
             if (locked) writeLock.unlock();
             try {

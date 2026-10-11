@@ -134,7 +134,8 @@ cause hypothesis, and status.
   `UpgradeAfterFailedBodyReadTest` stay green). A drain that fails now takes the same path instead
   of the "lost connection" one. Each close_notify write is bounded by `writeTimeout`
   (review follow-up): a client that keeps uploading but never reads fills the send buffer, and the
-  unbounded write could have held the virtual thread and the socket forever.
+  unbounded write could have held the virtual thread and the socket forever. `SslHandler.close()`,
+  used by the non-lingering close paths, bounds its close_notify writes the same way.
 - **Residual**: when an interrupt already closed the channel (`InterruptibleChannel` semantics),
   nothing can be done on that socket: it closes at once, as before. The fix for that case
   belongs to the caller: hand the body back without interrupting a thread blocked in a read

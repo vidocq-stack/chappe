@@ -381,7 +381,7 @@ final class ChappeServer implements Server {
         engine.setSSLParameters(sslParams);
 
         // Handshake
-        var sslHandler = new SslHandler(channel, engine);
+        var sslHandler = new SslHandler(channel, engine, config.writeTimeout());
         sslHandler.doHandshake();
 
         // Protocol negotiated via ALPN
