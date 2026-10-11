@@ -5,6 +5,34 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-023 — HTTP/2 frames that follow an early response tear the whole connection down
+
+- **Date**: 2026-10-11
+- **Status**: FIXED (commit `fix(http): reset an unread HTTP/2 request body and ignore late frames (CHAPPE-023)`,
+  branch `pr/ybl/chappe-request-body-bounds`)
+- **Module**: `chappe-http` (`h2/Http2Connection`, new `h2/ResetStreams`)
+- **Symptom**: when a handler answered before the end of its request body, the stream was removed
+  after the response and no RST_STREAM was sent. The client kept uploading, and its next DATA frame
+  (or its trailers) hit `DATA for unknown stream` / `Invalid stream ID`: `GOAWAY(PROTOCOL_ERROR)`,
+  every other stream of the connection cut. The same happened to DATA the client had sent on a stream
+  the server refused (`REFUSED_STREAM`) or reset for flow control. The header block of a refused stream
+  was never decoded, so a block inserting into the HPACK dynamic table desynchronised the connection.
+  DATA padding was not counted in flow control, so a long padded upload stalled.
+- **Minimal reproduction**: `chappe-tests/.../Http2EarlyResponseTest#lateDataOnTheResetStreamIsIgnoredButCountsAgainstTheConnectionWindow`
+  and `#aRefusedStreamKeepsTheConnectionAndTheHpackContext` (GOAWAY before the fix);
+  `Http2PaddedDataFlowControlTest#aPaddedUploadLargerThanTheWindowCompletes` (stall before the fix).
+- **Cause**: `dispatchStream` removed the stream without telling the client; every frame on a stream
+  missing from `streams` was a connection error.
+- **Fix**: after a complete response, a stream whose request END_STREAM has not arrived is reset with
+  `RST_STREAM(NO_ERROR)` (RFC 9113 §8.1). The ids of the last 256 streams the server reset or refused
+  are remembered: DATA on them is ignored but counted against the connection window, and their HEADERS
+  and CONTINUATION blocks are decoded and dropped (§5.1). DATA on another closed stream, or on a stream
+  whose request already ended (half-closed remote), is a stream error `STREAM_CLOSED` (§5.1, §6.1);
+  DATA on stream 0 or a stream never opened stays a connection error. The flow-controlled length of a
+  DATA frame now includes its padding.
+
+---
+
 ## CHAPPE-022 — ServerConfig.readTimeout is never applied
 
 - **Date**: 2026-10-11

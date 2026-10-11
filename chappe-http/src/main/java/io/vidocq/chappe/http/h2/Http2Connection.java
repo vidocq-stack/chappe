@@ -58,6 +58,10 @@ public final class Http2Connection {
     private static final int WRITE_BUFFER_SIZE = 16_384;
     private static final int DATA_CHUNK_SIZE = 8_192;
     private static final int WINDOW_UPDATE_THRESHOLD = 32_768;
+    private static final int CONNECTION_WINDOW = 65_535;
+
+    /** How many reset stream ids are remembered, so the frames the peer already sent on them are ignored. */
+    private static final int REMEMBERED_RESET_STREAMS = 256;
 
     // --- Connection ---
     private final ReadableByteChannel readChannel;
@@ -86,14 +90,21 @@ public final class Http2Connection {
     private volatile int lastStreamId = 0;
     private volatile boolean goawaySent = false;
 
+    // Streams this endpoint reset or refused: frames already in flight on them are ignored (RFC 9113 §5.1)
+    private final ResetStreams resetStreams = new ResetStreams(REMEMBERED_RESET_STREAMS);
+
     // --- Flow control (connection) ---
-    private final AtomicInteger connectionRecvWindow = new AtomicInteger(65_535);
+    private final AtomicInteger connectionRecvWindow = new AtomicInteger(CONNECTION_WINDOW);
     private final AtomicInteger connectionSendWindow = new AtomicInteger(65_535);
     private final ReentrantLock connectionSendLock = new ReentrantLock();
     private final Condition connectionSendWindowAvailable = connectionSendLock.newCondition();
 
     // --- CONTINUATION state ---
     private int expectingContinuationForStream = -1;
+
+    // The stream whose header block awaits CONTINUATION frames. A block of a stream that is not served
+    // (reset or refused, before or while the block arrives) is still decoded, for the HPACK context.
+    private Http2Stream pendingHeaderBlock;
 
     /**
      * Creates a new HTTP/2 connection.
@@ -214,9 +225,7 @@ public final class Http2Connection {
                 int newVal = stream.sendWindow() + delta;
                 if (newVal > Integer.MAX_VALUE / 2) {
                     // Overflow: send RST_STREAM with FLOW_CONTROL_ERROR per RFC 9113 §6.9.2
-                    frameWriter.writeRstStream(stream.streamId(), Http2ErrorCode.FLOW_CONTROL_ERROR);
-                    streams.remove(stream.streamId());
-                    stream.cancel(); // releases the body being sent and wakes its sender
+                    resetStream(stream, Http2ErrorCode.FLOW_CONTROL_ERROR);
                 } else {
                     stream.incrementSendWindow(delta);
                 }
@@ -253,8 +262,15 @@ public final class Http2Connection {
             if (frame.endHeaders()) {
                 completeHeaders(existing);
             } else {
-                expectingContinuationForStream = streamId;
+                awaitContinuation(existing);
             }
+            return;
+        }
+
+        // A stream this endpoint reset: the peer may have sent HEADERS (trailers) before it saw the
+        // RST_STREAM. Ignored, but decoded: the block may update the HPACK dynamic table (§5.1).
+        if (resetStreams.contains(streamId)) {
+            discardHeaderBlock(streamId, frame);
             return;
         }
 
@@ -267,7 +283,9 @@ public final class Http2Connection {
 
         // Check max concurrent streams (our limit, not the client's)
         if (streams.size() >= localSettings.maxConcurrentStreams()) {
+            resetStreams.add(streamId); // the DATA the client already sent on it is ignored
             frameWriter.writeRstStream(streamId, Http2ErrorCode.REFUSED_STREAM);
+            discardHeaderBlock(streamId, frame); // still decoded: it may update the HPACK dynamic table
             return;
         }
 
@@ -282,23 +300,46 @@ public final class Http2Connection {
         if (frame.endHeaders()) {
             completeHeaders(stream);
         } else {
-            expectingContinuationForStream = streamId;
+            awaitContinuation(stream);
         }
     }
 
-    private void handleContinuation(Http2Frame.ContinuationFrame frame) throws IOException {
-        int streamId = frame.streamId();
-        var stream = streams.get(streamId);
-        if (stream == null) {
-            throw new Http2ConnectionException(
-                    Http2ErrorCode.PROTOCOL_ERROR, "CONTINUATION for unknown stream " + streamId);
-        }
-
-        stream.appendHeaderFragment(frame.headerBlock());
-
+    /**
+     * Decodes and drops the header block of a stream that is not served (reset or refused). HPACK is
+     * connection state: skipping a block that inserts into the dynamic table would desynchronise every
+     * later block (RFC 7541 §2.3.2, RFC 9113 §4.3).
+     */
+    private void discardHeaderBlock(int streamId, Http2Frame.HeadersFrame frame) throws Http2ConnectionException {
+        var discarded = new Http2Stream(streamId, 0, 0);
+        discarded.beginHeaders(frame.headerBlock(), frame.endStream());
         if (frame.endHeaders()) {
-            expectingContinuationForStream = -1;
+            hpackDecoder.decode(discarded.completeHeaderBlock(), (name, value) -> {});
+        } else {
+            awaitContinuation(discarded);
+        }
+    }
+
+    /** The header block of {@code stream} continues in CONTINUATION frames (RFC 9113 §6.10). */
+    private void awaitContinuation(Http2Stream stream) {
+        pendingHeaderBlock = stream;
+        expectingContinuationForStream = stream.streamId();
+    }
+
+    private void handleContinuation(Http2Frame.ContinuationFrame frame) throws IOException {
+        // frameLoop has checked that the frame continues the pending block, on its stream.
+        var stream = pendingHeaderBlock;
+        stream.appendHeaderFragment(frame.headerBlock());
+        if (!frame.endHeaders()) return;
+
+        expectingContinuationForStream = -1;
+        pendingHeaderBlock = null;
+        if (streams.get(stream.streamId()) == stream) {
             completeHeaders(stream);
+        } else {
+            // Not served: refused or reset before its block began, or reset while it was arriving
+            // (an early response ending the stream between a trailer HEADERS and its CONTINUATION).
+            // Decoded all the same, for the HPACK context (§5.1, §4.3).
+            hpackDecoder.decode(stream.completeHeaderBlock(), (name, value) -> {});
         }
     }
 
@@ -345,18 +386,27 @@ public final class Http2Connection {
 
     private void handleData(Http2Frame.DataFrame frame) throws IOException {
         int streamId = frame.streamId();
+        int flowLength = flowControlledLength(frame);
         var stream = streams.get(streamId);
         if (stream == null) {
-            throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR, "DATA for unknown stream " + streamId);
+            discardData(streamId, flowLength);
+            return;
+        }
+        if (remoteEnded(stream)) {
+            // The request already ended: the stream is half-closed (remote), or closed and not yet
+            // dropped. DATA on it is a stream error STREAM_CLOSED (RFC 9113 §5.1, §6.1).
+            connectionRecvWindow.addAndGet(-flowLength);
+            resetStream(stream, Http2ErrorCode.STREAM_CLOSED);
+            replenishConnectionWindow();
+            return;
         }
 
-        int dataLength = frame.data().remaining();
-
         // Update flow control windows (atomic)
-        connectionRecvWindow.addAndGet(-dataLength);
-        stream.consumeRecvWindow(dataLength);
+        connectionRecvWindow.addAndGet(-flowLength);
+        stream.consumeRecvWindow(flowLength);
 
         // Copy data and offer to stream
+        int dataLength = frame.data().remaining();
         byte[] copy = new byte[dataLength];
         frame.data().get(copy);
         stream.offerData(ByteBuffer.wrap(copy));
@@ -366,17 +416,55 @@ public final class Http2Connection {
             stream.halfCloseRemote();
         }
 
-        // Auto WINDOW_UPDATE if recv window is getting low
-        int connRecv = connectionRecvWindow.get();
-        if (connRecv < WINDOW_UPDATE_THRESHOLD) {
-            int increment = 65_535 - connRecv;
-            connectionRecvWindow.addAndGet(increment);
-            frameWriter.writeWindowUpdate(0, increment);
-        }
+        replenishConnectionWindow();
+        // Auto WINDOW_UPDATE if the stream recv window is getting low
         if (stream.recvWindow() < WINDOW_UPDATE_THRESHOLD) {
             int increment = localSettings.initialWindowSize() - stream.recvWindow();
             stream.incrementRecvWindow(increment);
             frameWriter.writeWindowUpdate(streamId, increment);
+        }
+    }
+
+    /**
+     * Whether the peer ended its side of {@code stream}: END_STREAM on its HEADERS, its last DATA or
+     * its trailers. Read on the connection thread, which sets both flags.
+     */
+    private static boolean remoteEnded(Http2Stream stream) {
+        return stream.headersEndStream() || stream.isEndStreamReceived();
+    }
+
+    /**
+     * DATA for a stream that is not open. On a stream this endpoint reset (an early response, a refused
+     * or overrun stream) the peer may have sent it before it saw the RST_STREAM: ignored (RFC 9113
+     * §5.1). On another closed stream it is a stream error STREAM_CLOSED (§6.1). Either way it counts
+     * against the connection window, credited back like any received DATA (§6.9). DATA on stream 0 or
+     * on a stream never opened stays a connection error (§6.1, §5.1).
+     */
+    private void discardData(int streamId, int flowLength) throws IOException {
+        if (streamId == 0 || streamId % 2 == 0 || streamId > lastStreamId) {
+            throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR, "DATA for idle stream " + streamId);
+        }
+        connectionRecvWindow.addAndGet(-flowLength);
+        if (!resetStreams.contains(streamId)) {
+            resetStreams.add(streamId);
+            frameWriter.writeRstStream(streamId, Http2ErrorCode.STREAM_CLOSED);
+        }
+        replenishConnectionWindow();
+    }
+
+    /** The flow-controlled size of a DATA frame: its whole payload, padding included (RFC 9113 §6.9.1). */
+    private static int flowControlledLength(Http2Frame.DataFrame frame) {
+        boolean padded = (frame.flags() & Http2Frame.FLAG_PADDED) != 0;
+        return frame.data().remaining() + (padded ? frame.padding() + 1 : 0);
+    }
+
+    /** Credits the connection receive window back once it runs low: the connection level is credited on receipt. */
+    private void replenishConnectionWindow() throws IOException {
+        int connRecv = connectionRecvWindow.get();
+        if (connRecv < WINDOW_UPDATE_THRESHOLD) {
+            int increment = CONNECTION_WINDOW - connRecv;
+            connectionRecvWindow.addAndGet(increment);
+            frameWriter.writeWindowUpdate(0, increment);
         }
     }
 
@@ -407,9 +495,7 @@ public final class Http2Connection {
                 // Check overflow: stream send window must not exceed 2^31-1 (RFC 9113 §6.9.1)
                 int current = stream.sendWindow();
                 if (current > Integer.MAX_VALUE - increment) {
-                    frameWriter.writeRstStream(streamId, Http2ErrorCode.FLOW_CONTROL_ERROR);
-                    streams.remove(streamId);
-                    stream.cancel(); // releases the body being sent and wakes its sender
+                    resetStream(stream, Http2ErrorCode.FLOW_CONTROL_ERROR);
                     return;
                 }
                 stream.incrementSendWindow(increment);
@@ -437,7 +523,7 @@ public final class Http2Connection {
         }
     }
 
-    @SuppressWarnings("UnusedVariable") // payload GOAWAY non interprété (best-effort)
+    @SuppressWarnings("UnusedVariable") // GOAWAY payload not interpreted (best-effort)
     private void handleGoaway(Http2Frame.GoawayFrame frame) {
         goawaySent = true;
     }
@@ -448,6 +534,7 @@ public final class Http2Connection {
 
     private void dispatchStream(Http2Stream stream, boolean hasBody) {
         Response handled = null;
+        boolean completed = false;
         try {
             HttpRequestImpl request = stream.request();
 
@@ -475,6 +562,7 @@ public final class Http2Connection {
             if (response instanceof io.vidocq.chappe.api.GrpcDispatch gd) {
                 var call = new io.vidocq.chappe.http.grpc.GrpcCallImpl(stream, request, this);
                 io.vidocq.chappe.http.grpc.GrpcCallImpl.run(call, gd.handler());
+                completed = true;
                 return; // GrpcCallImpl handles initial headers, DATA, trailers, half-close
             }
 
@@ -482,6 +570,7 @@ public final class Http2Connection {
             if (response instanceof io.vidocq.chappe.api.GrpcWebDispatch gwd) {
                 var call = new io.vidocq.chappe.http.grpc.GrpcWebCallImpl(stream, request, this, gwd.mode());
                 io.vidocq.chappe.http.grpc.GrpcWebCallImpl.run(call, gwd.handler());
+                completed = true;
                 return;
             }
 
@@ -495,6 +584,7 @@ public final class Http2Connection {
             }
 
             sendResponse(stream, response);
+            completed = true;
         } catch (IOException | RuntimeException _) {
             // Connection lost, stream reset, or the response body failed mid-stream (a live body the
             // application aborted), or an unexpected failure such as a field the HPACK encoder refused.
@@ -502,6 +592,7 @@ public final class Http2Connection {
             // would wait forever for an END_STREAM that never comes (RFC 9113 §5.4.2).
             resetAbortedStream(stream);
         } finally {
+            if (completed && hasBody) stopUnreadRequestBody(stream);
             stream.close();
             streams.remove(stream.streamId());
             if (handled != null) releaseBody(handled);
@@ -519,11 +610,42 @@ public final class Http2Connection {
     /** Sends RST_STREAM(INTERNAL_ERROR) for a stream whose response failed, unless it was cancelled. */
     private void resetAbortedStream(Http2Stream stream) {
         if (stream.isCancelled()) return; // reset by the peer or connection gone: no frame (§5.4.2)
+        resetStreams.add(stream.streamId()); // the request DATA still in flight is ignored (§5.1)
         try {
             frameWriter.writeRstStream(stream.streamId(), Http2ErrorCode.INTERNAL_ERROR);
         } catch (IOException _) {
             // connection lost: nothing more to tell the peer
         }
+    }
+
+    /**
+     * The response is complete, the request body is not: RFC 9113 §8.1 lets the server ask the client
+     * to stop sending it with RST_STREAM(NO_ERROR). The id is remembered first, so the DATA already in
+     * flight is ignored instead of failing the whole connection (§5.1) (CHAPPE-023).
+     */
+    private void stopUnreadRequestBody(Http2Stream stream) {
+        if (stream.isCancelled() || stream.isEndStreamReceived()) return;
+        resetStreams.add(stream.streamId());
+        streams.remove(stream.streamId());
+        stream.cancel(); // a reader still waiting for the body fails instead of waiting forever
+        try {
+            frameWriter.writeRstStream(stream.streamId(), Http2ErrorCode.NO_ERROR);
+        } catch (IOException _) {
+            // connection lost: nothing more to tell the peer
+        }
+    }
+
+    /**
+     * Resets {@code stream} with {@code error} (a stream error, RFC 9113 §5.4.2): remembers its id so
+     * the frames the peer already sent on it are ignored, cancels it (its body reader fails, the body it
+     * was sending is released, its sender stops waiting), then sends RST_STREAM.
+     */
+    private void resetStream(Http2Stream stream, Http2ErrorCode error) throws IOException {
+        resetStreams.add(stream.streamId());
+        streams.remove(stream.streamId());
+        stream.cancel();
+        wakeConnectionWindowWaiters();
+        frameWriter.writeRstStream(stream.streamId(), error);
     }
 
     /** {@link Body#release() Releases} the body of a response the handler returned; never throws. */
