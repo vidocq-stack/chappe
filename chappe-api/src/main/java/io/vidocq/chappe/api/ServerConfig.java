@@ -21,6 +21,7 @@ package io.vidocq.chappe.api;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Objects;
 
 import javax.net.ssl.SSLContext;
 
@@ -63,6 +64,7 @@ import javax.net.ssl.SSLContext;
  *     chunked body counts its framing and trailers too. Past it the connection is closed instead,
  *     and an upgrade is refused. Must be zero or positive
  * @param sslContext SSL/TLS context ({@code null} = cleartext)
+ * @param clientAuth whether TLS clients are asked for a certificate (default: {@link ClientAuth#NONE}); anything but {@code NONE} requires an {@code sslContext}
  * @param alpnProtocols negotiated ALPN protocols (default: {@code ["h2", "http/1.1"]})
  * @param shutdownGracePeriod drain timeout before forced shutdown (default: 30s)
  */
@@ -77,15 +79,22 @@ public record ServerConfig(
         int maxHeaderSize,
         long maxDrainSize,
         SSLContext sslContext,
+        ClientAuth clientAuth,
         List<String> alpnProtocols,
         Duration shutdownGracePeriod) {
 
     /**
      * Validates the components the server cannot run with.
      *
-     * @throws IllegalArgumentException when {@code maxDrainSize} is negative
+     * @throws NullPointerException when {@code clientAuth} is {@code null}
+     * @throws IllegalArgumentException when {@code clientAuth} is not {@link ClientAuth#NONE} and
+     *     {@code sslContext} is {@code null}, or when {@code maxDrainSize} is negative
      */
     public ServerConfig {
+        Objects.requireNonNull(clientAuth, "clientAuth");
+        if (sslContext == null && clientAuth != ClientAuth.NONE) {
+            throw new IllegalArgumentException("clientAuth " + clientAuth + " requires TLS: configure an SSLContext");
+        }
         if (maxDrainSize < 0) throw new IllegalArgumentException("maxDrainSize must be >= 0, got " + maxDrainSize);
     }
 
@@ -101,6 +110,7 @@ public record ServerConfig(
             8192,
             1024L * 1024,
             null,
+            ClientAuth.NONE,
             List.of("h2", "http/1.1"),
             Duration.ofSeconds(30));
 

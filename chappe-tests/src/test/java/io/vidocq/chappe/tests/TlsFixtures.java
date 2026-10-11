@@ -23,10 +23,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.fail;
 
 import java.io.File;
+import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.KeyStore;
+import java.security.Principal;
+import java.security.PrivateKey;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.List;
@@ -35,7 +38,9 @@ import java.util.concurrent.TimeUnit;
 import javax.net.ssl.KeyManager;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLEngine;
 import javax.net.ssl.TrustManagerFactory;
+import javax.net.ssl.X509ExtendedKeyManager;
 
 /**
  * Test certificates generated at test time with the JDK {@code keytool} (as {@code TlsTest}
@@ -142,6 +147,58 @@ final class TlsFixtures {
         tmf.init(trust);
         var context = SSLContext.getInstance("TLS");
         context.init(keyManagers, tmf.getTrustManagers(), null);
+        return context;
+    }
+
+    /**
+     * A TLS client context that always presents the key pair {@code alias} of {@code keys}, even
+     * when the server's CertificateRequest does not list its issuer (the JDK key manager would
+     * then send no certificate). Used to put an untrusted certificate on the wire.
+     */
+    static SSLContext contextAlwaysOffering(KeyStore keys, String alias, KeyStore trust) throws Exception {
+        var kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+        kmf.init(keys, PASSWORD);
+        var delegate = (X509ExtendedKeyManager) kmf.getKeyManagers()[0];
+        var forcing = new X509ExtendedKeyManager() {
+            @Override
+            public String[] getClientAliases(String keyType, Principal[] issuers) {
+                return new String[] {alias};
+            }
+
+            @Override
+            public String chooseClientAlias(String[] keyType, Principal[] issuers, Socket socket) {
+                return alias;
+            }
+
+            @Override
+            public String chooseEngineClientAlias(String[] keyType, Principal[] issuers, SSLEngine engine) {
+                return alias;
+            }
+
+            @Override
+            public String[] getServerAliases(String keyType, Principal[] issuers) {
+                return delegate.getServerAliases(keyType, issuers);
+            }
+
+            @Override
+            public String chooseServerAlias(String keyType, Principal[] issuers, Socket socket) {
+                return delegate.chooseServerAlias(keyType, issuers, socket);
+            }
+
+            @Override
+            public X509Certificate[] getCertificateChain(String name) {
+                return delegate.getCertificateChain(name);
+            }
+
+            @Override
+            public PrivateKey getPrivateKey(String name) {
+                return delegate.getPrivateKey(name);
+            }
+        };
+        var tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+        tmf.init(trust);
+        var context = SSLContext.getInstance("TLS");
+        context.init(new KeyManager[] {forcing}, tmf.getTrustManagers(), null);
         return context;
     }
 }

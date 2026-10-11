@@ -295,6 +295,7 @@ class UnreadBodyDrainTest {
                         d.maxHeaderSize(),
                         -1L,
                         d.sslContext(),
+                        d.clientAuth(),
                         d.alpnProtocols(),
                         d.shutdownGracePeriod()));
     }

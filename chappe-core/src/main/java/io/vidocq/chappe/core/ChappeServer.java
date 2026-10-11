@@ -376,9 +376,14 @@ final class ChappeServer implements Server {
         SSLEngine engine = sslContext.createSSLEngine();
         engine.setUseClientMode(false);
 
-        // Configure ALPN
+        // Configure ALPN and client authentication (per listener, decided at the handshake)
         var sslParams = engine.getSSLParameters();
         sslParams.setApplicationProtocols(config.alpnProtocols().toArray(String[]::new));
+        switch (config.clientAuth()) {
+            case NEED -> sslParams.setNeedClientAuth(true);
+            case WANT -> sslParams.setWantClientAuth(true);
+            case NONE -> sslParams.setNeedClientAuth(false); // clears "want" too
+        }
         engine.setSSLParameters(sslParams);
 
         // Handshake

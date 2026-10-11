@@ -154,7 +154,8 @@ public interface Request {
      * <p>Read once per connection, when the TLS handshake completes, and shared by every
      * request of that connection (HTTP/1.1 keep-alive, HTTP/2 streams).
      * {@link TlsInfo#peerCertificates()} holds the client's chain when the listener asked for
-     * one (see {@code Server.Builder.tls(SSLContext, ClientAuth)}) and the client sent it.
+     * one (see {@link Server.Builder#tls(javax.net.ssl.SSLContext, ClientAuth)}) and the client
+     * sent it.
      */
     default Optional<TlsInfo> tls() {
         return Optional.empty();

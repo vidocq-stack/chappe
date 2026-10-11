@@ -115,8 +115,24 @@ public interface Server extends AutoCloseable {
          */
         Builder maxDrainSize(long bytes);
 
-        /** Configures TLS with the given {@link SSLContext}. */
-        Builder tls(SSLContext sslContext);
+        /**
+         * Configures TLS with the given {@link SSLContext}; clients are not asked for a
+         * certificate. Same as {@code tls(sslContext, ClientAuth.NONE)}.
+         */
+        default Builder tls(SSLContext sslContext) {
+            return tls(sslContext, ClientAuth.NONE);
+        }
+
+        /**
+         * Configures TLS with the given {@link SSLContext} and client certificate mode. The
+         * mode applies to every connection of this listener; the context's trust managers
+         * validate the client certificate. {@link #build()} fails with an
+         * {@link IllegalArgumentException} when {@code clientAuth} is not {@link ClientAuth#NONE}
+         * and {@code sslContext} is {@code null}.
+         *
+         * @throws NullPointerException if {@code clientAuth} is {@code null}
+         */
+        Builder tls(SSLContext sslContext, ClientAuth clientAuth);
 
         /** ALPN protocols to negotiate (default: {@code ["h2", "http/1.1"]}). */
         Builder alpnProtocols(String... protocols);

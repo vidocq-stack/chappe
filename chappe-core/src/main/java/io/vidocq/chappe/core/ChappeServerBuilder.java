@@ -21,9 +21,11 @@ package io.vidocq.chappe.core;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Objects;
 
 import javax.net.ssl.SSLContext;
 
+import io.vidocq.chappe.api.ClientAuth;
 import io.vidocq.chappe.api.Handler;
 import io.vidocq.chappe.api.Server;
 import io.vidocq.chappe.api.ServerConfig;
@@ -44,6 +46,7 @@ final class ChappeServerBuilder implements Server.Builder {
     private int maxHeaderSize = ServerConfig.DEFAULT.maxHeaderSize();
     private long maxDrainSize = ServerConfig.DEFAULT.maxDrainSize();
     private SSLContext sslContext;
+    private ClientAuth clientAuth = ServerConfig.DEFAULT.clientAuth();
     private List<String> alpnProtocols = ServerConfig.DEFAULT.alpnProtocols();
     private Duration shutdownGracePeriod = ServerConfig.DEFAULT.shutdownGracePeriod();
     private Handler handler;
@@ -110,8 +113,9 @@ final class ChappeServerBuilder implements Server.Builder {
     }
 
     @Override
-    public Server.Builder tls(SSLContext sslContext) {
+    public Server.Builder tls(SSLContext sslContext, ClientAuth clientAuth) {
         this.sslContext = sslContext;
+        this.clientAuth = Objects.requireNonNull(clientAuth, "clientAuth");
         return this;
     }
 
@@ -143,6 +147,7 @@ final class ChappeServerBuilder implements Server.Builder {
                 maxHeaderSize,
                 maxDrainSize,
                 sslContext,
+                clientAuth,
                 alpnProtocols,
                 shutdownGracePeriod);
         return new ChappeServer(config, handler);
