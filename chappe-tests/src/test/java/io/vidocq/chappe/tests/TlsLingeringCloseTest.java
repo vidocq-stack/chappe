@@ -38,7 +38,6 @@ import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSocket;
 import javax.net.ssl.X509TrustManager;
 
-import io.vidocq.chappe.api.Response;
 import io.vidocq.chappe.api.Server;
 
 import org.junit.jupiter.api.AfterAll;
@@ -121,7 +120,7 @@ class TlsLingeringCloseTest {
                 .port(0)
                 .tls(serverSslContext)
                 .maxHeaderSize(8192)
-                .handler(_ -> Response.ok("pong"))
+                .handler(LingeringCloseTest::handle)
                 .build();
         server.start();
         port = server.port();
@@ -130,6 +129,27 @@ class TlsLingeringCloseTest {
     @AfterEach
     void tearDown() {
         if (server != null) server.stop();
+    }
+
+    /**
+     * CHAPPE-014 over TLS: after a failed body read the response must be followed by close_notify
+     * and a FIN, not a reset.
+     */
+    @Test
+    void responseSurvivesAFailedBodyReadWithUnreadUploadBytes() throws Exception {
+        String response = sendThenRead(LingeringCloseTest.failingChunkedUpload("/read"));
+
+        assertTrue(response.startsWith("HTTP/1.1 200"), "expected the 200 response, got: " + head(response));
+        assertTrue(response.endsWith("read failed"), "expected the whole body, got: " + head(response));
+    }
+
+    /** Same when the handler ignores the body and the connection's own drain of it fails. */
+    @Test
+    void responseSurvivesAFailedBodyDrainWithUnreadUploadBytes() throws Exception {
+        String response = sendThenRead(LingeringCloseTest.failingChunkedUpload("/"));
+
+        assertTrue(response.startsWith("HTTP/1.1 200"), "expected the 200 response, got: " + head(response));
+        assertTrue(response.endsWith("pong"), "expected the whole body, got: " + head(response));
     }
 
     /** The 431 must reach a client that sent more than the server reads before rejecting. */

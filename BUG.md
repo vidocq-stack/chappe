@@ -61,7 +61,8 @@ cause hypothesis, and status.
 ## CHAPPE-014 — a connection closed after a failed body read skips the lingering close
 
 - **Date**: 2026-10-10
-- **Status**: OPEN (deferred)
+- **Status**: FIXED (commit `fix(http): close gracefully after a failed request body read`, branch
+  `pr/ybl/chappe-008-014`)
 - **Module**: `chappe-http` (`HttpConnection`)
 - **Symptom**: after a request body read fails, the connection closes with `lingerOnClose = false`
   (CHAPPE-013). The failure can be a truncated body, a reset, or an interrupt that closed the
@@ -69,12 +70,31 @@ cause hypothesis, and status.
   written. A client still uploading can then get a TCP RST, and the RST may discard the response
   it has not read yet (RFC 9112 §9.6). Over TLS, close_notify is not sent either. When an
   interrupt closed the channel, a half-close and a linger are no longer possible on it.
-- **Minimal reproduction**: not written yet. Shape: a client uploading a large body slowly, a
-  handler that answers early, and a body read interrupted after the response is written.
-- **Cause hypothesis**: the close after a failed body read does not linger, and an interrupt closes
-  the channel outright.
-- **Fix**: none yet. Options: a reader that stops without closing the channel (no interrupt), or a
-  linger on a still-open channel when only the body framing failed.
+- **Minimal reproduction**: `chappe-tests/.../LingeringCloseTest` and `TlsLingeringCloseTest`:
+  a `POST` with a chunked body that fails on its first byte (`Z0\r\n\r\n`) followed by 64 KiB
+  the server never reads.
+  - `#responseSurvivesAFailedBodyReadWithUnreadUploadBytes`: the handler reads the body, catches
+    the failure and answers `read failed`.
+  - `#responseSurvivesAFailedBodyDrainWithUnreadUploadBytes`: the handler ignores the body, and the
+    connection's own drain of it fails. That drain failure went to the "lost connection" catch,
+    with no linger either.
+  - `#anUploaderStillSendingAfterAFailedBodyReadGetsTheResponseAndAnOrderlyClose` (plaintext): the
+    client keeps sending for 500 ms (each chunk holds a whole `GET /smuggled` request), then reads.
+  Before the fix the plaintext client read failed with "Connection reset", and the TLS client
+  write failed with "Broken pipe".
+- **Cause**: the failed-body-read paths (after the response, before an upgrade, and a failing
+  drain) closed the socket outright with request bytes still unread.
+- **Fix**: those paths set `lingerOnClose = readChannel.isOpen()`. The existing lingering close
+  then runs: the response is written first, then a half-close (plaintext) or close_notify and a
+  half-close (TLS), then input is read and discarded for at most 2 s or 1 MiB, then the socket is
+  closed. The lingering drain only discards bytes, so CHAPPE-013 still holds: no next request is
+  ever parsed, no upgrade head is written (`InterruptedBodyReadTest` and
+  `UpgradeAfterFailedBodyReadTest` stay green). A drain that fails now takes the same path instead
+  of the "lost connection" one.
+- **Residual**: when an interrupt already closed the channel (`InterruptibleChannel` semantics),
+  nothing can be done on that socket: it closes at once, as before. The fix for that case
+  belongs to the caller: hand the body back without interrupting a thread blocked in a read
+  (Foy's ReadListener pump).
 
 ---
 

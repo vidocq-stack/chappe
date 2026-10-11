@@ -28,6 +28,7 @@ import java.io.OutputStream;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 
+import io.vidocq.chappe.api.Request;
 import io.vidocq.chappe.api.Response;
 import io.vidocq.chappe.api.Server;
 
@@ -52,7 +53,7 @@ class LingeringCloseTest {
         server = Server.builder()
                 .port(0)
                 .maxHeaderSize(8192)
-                .handler(_ -> Response.ok("pong"))
+                .handler(LingeringCloseTest::handle)
                 .build();
         server.start();
         port = server.port();
@@ -61,6 +62,82 @@ class LingeringCloseTest {
     @AfterEach
     void tearDown() {
         if (server != null) server.stop();
+    }
+
+    /** {@code /read} reads the request body and answers even when that read fails; else {@code pong}. */
+    static Response handle(Request request) {
+        if ("/read".equals(request.path())) {
+            try {
+                request.body().asInputStream().readAllBytes();
+                return Response.ok("read ok");
+            } catch (IOException e) {
+                return Response.ok("read failed");
+            }
+        }
+        return Response.ok("pong");
+    }
+
+    /** A request whose chunked body fails on its first byte, followed by 64 KiB the server never reads. */
+    static String failingChunkedUpload(String path) {
+        return "POST " + path + " HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n" + "Z0\r\n\r\n"
+                + "Z".repeat(64 * 1024);
+    }
+
+    /**
+     * CHAPPE-014: a body read that fails closes the connection (no next request, CHAPPE-013), but
+     * gracefully: the response written after the failure must not be destroyed by a reset.
+     */
+    @Test
+    void responseSurvivesAFailedBodyReadWithUnreadUploadBytes() throws Exception {
+        String response = sendThenRead(failingChunkedUpload("/read"));
+
+        assertTrue(response.startsWith("HTTP/1.1 200"), "expected the 200 response, got: " + head(response));
+        assertTrue(response.endsWith("read failed"), "expected the whole body, got: " + head(response));
+    }
+
+    /** Same when the handler ignores the body and the connection's own drain of it fails. */
+    @Test
+    void responseSurvivesAFailedBodyDrainWithUnreadUploadBytes() throws Exception {
+        String response = sendThenRead(failingChunkedUpload("/"));
+
+        assertTrue(response.startsWith("HTTP/1.1 200"), "expected the 200 response, got: " + head(response));
+        assertTrue(response.endsWith("pong"), "expected the whole body, got: " + head(response));
+    }
+
+    /**
+     * An uploader that keeps sending after its body read failed: the server answers, half-closes,
+     * drains what keeps coming, and the client reads the whole response then a clean end of stream.
+     * Never a second request parsed from the upload (it holds one).
+     */
+    @Test
+    void anUploaderStillSendingAfterAFailedBodyReadGetsTheResponseAndAnOrderlyClose() throws Exception {
+        try (var socket = new Socket("127.0.0.1", port)) {
+            socket.setSoTimeout(5_000);
+            OutputStream out = socket.getOutputStream();
+            out.write(("POST /read HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\nZ0\r\n\r\n")
+                    .getBytes(StandardCharsets.US_ASCII));
+            out.flush();
+            var sender = Thread.ofVirtual().start(() -> {
+                byte[] chunk = ("GET /smuggled HTTP/1.1\r\nHost: localhost\r\n\r\n" + "Z".repeat(4096))
+                        .getBytes(StandardCharsets.US_ASCII);
+                long end = System.nanoTime() + 500_000_000L;
+                try {
+                    while (System.nanoTime() < end) {
+                        out.write(chunk);
+                        out.flush();
+                        Thread.sleep(5);
+                    }
+                    socket.shutdownOutput();
+                } catch (IOException | InterruptedException _) {
+                    // the main thread reports what the client saw
+                }
+            });
+            String response = readToEof(socket.getInputStream());
+            sender.join();
+
+            assertTrue(response.startsWith("HTTP/1.1 200"), "expected the 200 response, got: " + head(response));
+            assertTrue(response.endsWith("read failed"), "expected one whole response, got: " + head(response));
+        }
     }
 
     /** The 431 must reach a client that sent more than the server reads before rejecting. */

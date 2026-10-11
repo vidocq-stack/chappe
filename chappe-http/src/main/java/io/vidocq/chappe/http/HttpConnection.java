@@ -211,11 +211,12 @@ public final class HttpConnection {
 
                     // An upgrade drains the request body before taking the connection over; after a
                     // failed body read (or a closed read channel) the byte stream position is
-                    // unknown: close the connection, no drain, no upgrade head (CHAPPE-013).
+                    // unknown: close the connection, no drain, no upgrade head (CHAPPE-013), but
+                    // gracefully while the channel is still open (CHAPPE-014).
                     if ((response instanceof WebSocketUpgrade || response instanceof ConnectionUpgrade)
                             && bodyStream != null
                             && (bodyReadFailed(bodyStream) || !readChannel.isOpen())) {
-                        lingerOnClose = false;
+                        lingerOnClose = readChannel.isOpen();
                         break;
                     }
 
@@ -268,15 +269,24 @@ public final class HttpConnection {
 
                 // 5. A body read that failed (truncated, reset, an interrupt that closed the
                 // channel) leaves the byte stream at an unknown position: never drain it nor parse
-                // a next request from it, close the connection (CHAPPE-013).
+                // a next request from it, close the connection (CHAPPE-013). Close it gracefully
+                // while the channel is still open (CHAPPE-014): the client may still be uploading,
+                // and a close with its bytes unread would reset the connection and could destroy
+                // the response it has not read yet. The lingering close only discards input.
                 if (bodyStream != null && (bodyReadFailed(bodyStream) || !readChannel.isOpen())) {
-                    lingerOnClose = false;
+                    lingerOnClose = readChannel.isOpen();
                     break;
                 }
 
-                // 6. Drain unread body (for keep-alive)
+                // 6. Drain unread body (for keep-alive). A drain that fails (bad framing, a body
+                // cut short) is a failed body read too: same graceful close, no next request.
                 if (bodyStream != null) {
-                    HttpBodyReader.drain(bodyStream);
+                    try {
+                        HttpBodyReader.drain(bodyStream);
+                    } catch (IOException _) {
+                        lingerOnClose = readChannel.isOpen();
+                        break;
+                    }
                 }
 
                 // 7. Check keep-alive
