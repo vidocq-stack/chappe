@@ -95,7 +95,8 @@ The builder is the nested `Server.Builder` interface:
 * `backlog(int)`
 * `readTimeout(Duration)` / `writeTimeout(Duration)` / `idleTimeout(Duration)`
 * `maxRequestSize(long)` / `maxHeaderSize(int)` / `maxDrainSize(long)` [.tag-new]#NEW#
-* `tls(SSLContext)`
+* `tls(SSLContext)` — TLS, no client certificate (`ClientAuth.NONE`)
+* `tls(SSLContext, ClientAuth)` [.tag-new]#NEW# — TLS with a client certificate mode, see xref:usage.adoc#client-certificates[Usage — client certificates]; the last `tls(...)` call wins for both context and mode
 * `alpnProtocols(String...)`
 * `shutdownGracePeriod(Duration)`
 * `build()` returns a `Server`
@@ -233,6 +234,54 @@ public final class RequestContext {
     public static Request currentRequest();
 }
 ----
+
+=== `ClientAuth` [.tag-new]#NEW#
+
+[source,java]
+----
+public enum ClientAuth { NONE, WANT, NEED }
+----
+
+The client certificate mode of a TLS listener, set with `Server.Builder.tls(SSLContext, ClientAuth)` and read back as `ServerConfig.clientAuth()` (default `NONE`). See xref:usage.adoc#client-certificates[Usage — client certificates].
+
+[cols="1,2,2,2"]
+|===
+| Mode | No certificate | Trusted certificate | Untrusted certificate
+
+| `NONE` | accepted | not requested | not requested
+| `WANT` | accepted, empty `peerCertificates()` | accepted, chain in `peerCertificates()` | handshake fails (JSSE), TLS alert sent
+| `NEED` | handshake fails, TLS alert sent | accepted, chain in `peerCertificates()` | handshake fails, TLS alert sent
+|===
+
+The mode is applied at the handshake only. A TLS 1.2 client-initiated renegotiation is refused and the connection closed without an alert; TLS 1.3 KeyUpdate is still supported. `Request.tls()` therefore describes the session for the whole connection.
+
+[#connection-metadata]
+=== Connection metadata on `Request`
+
+[cols="2,3"]
+|===
+| Method | Value
+
+| `remoteAddress()` / `localAddress()`
+| The client and server socket addresses, over cleartext and TLS, HTTP/1.1 and HTTP/2.
+
+| `isSecure()`
+| `true` on a TLS connection.
+
+| `scheme()`
+| `"https"` on a TLS connection, `"http"` otherwise.
+
+| `tls()` [.tag-new]#NEW#
+| `Optional<TlsInfo>`: the TLS session, present exactly when `isSecure()` is `true`, empty on cleartext. All HTTP/2 streams of a connection share it.
+|===
+
+[source,java]
+----
+public record TlsInfo(String protocol, String cipherSuite, byte[] sessionId,
+                      List<X509Certificate> peerCertificates) { }
+----
+
+`TlsInfo` is immutable: the constructor copies `sessionId` and `peerCertificates`, `sessionId()` returns a copy, and `equals`/`hashCode` compare the session id by content. `peerCertificates()` is empty under `NONE`. Wrappers built on `ForwardingRequest` forward `tls()`.
 
 == `chappe serve` CLI configuration
 

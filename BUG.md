@@ -26,6 +26,10 @@ cause hypothesis, and status.
   the alert, and rethrows; the server closes the socket as before. In the same commit, `SslHandler`
   refuses TLS 1.2 client-initiated renegotiation, so the `TlsInfo` read at the handshake cannot go
   stale.
+- **Follow-up (OPEN, pre-existing, not fixed here)**: the TLS handshake itself has no timeout.
+  `SslHandler.doHandshake()` reads without a bound, so a client that connects and never completes
+  the handshake holds its virtual thread (same class as CHAPPE-005). `readTimeout` and
+  `idleTimeout` do not cover it.
 
 ---
 

@@ -161,6 +161,16 @@ Server.builder()
     .build()
 ```
 
+Client certificates, per listener (`NONE` by default, `WANT` optional, `NEED` required):
+```java
+Server.builder()
+    .port(8443)
+    .tls(sslContext, ClientAuth.NEED)   // the SSLContext's trust managers validate the client
+    .handler(req -> Response.ok(req.tls().orElseThrow().peerCertificates().getFirst()
+            .getSubjectX500Principal().getName()))
+    .build()
+```
+
 ### Middlewares (Filters)
 ```java
 Filter logging = next -> request -> {
@@ -271,6 +281,7 @@ The mounted handler has access to all connection metadata:
 | `request.localAddress()` | Server address |
 | `request.isSecure()` | `true` if TLS |
 | `request.scheme()` | `"http"` or `"https"` |
+| `request.tls()` | `Optional<TlsInfo>`: protocol, cipher suite, session id, client certificate chain |
 | `Body.ofOutputStream(writer)` | Streaming body (Servlet OutputStream compatibility) |
 | `Body.ofFile(path)` | Zero-copy via `FileChannel.transferTo()` |
 

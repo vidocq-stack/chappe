@@ -233,6 +233,36 @@ class TlsClientAuthTest {
     }
 
     @Test
+    void theLastTlsCallWinsForBothContextAndMode() {
+        server = Server.builder()
+                .port(0)
+                .tls(serverContext, ClientAuth.NEED)
+                .tls(serverContext)
+                .handler(_ -> Response.ok())
+                .build();
+        assertEquals(ClientAuth.NONE, server.config().clientAuth());
+        server.stop();
+
+        server = Server.builder()
+                .port(0)
+                .tls(serverContext)
+                .tls(serverContext, ClientAuth.WANT)
+                .handler(_ -> Response.ok())
+                .build();
+        assertEquals(ClientAuth.WANT, server.config().clientAuth());
+        server.stop();
+
+        server = Server.builder()
+                .port(0)
+                .tls(serverContext, ClientAuth.NEED)
+                .tls(null)
+                .handler(_ -> Response.ok())
+                .build();
+        assertNull(server.config().sslContext());
+        assertEquals(ClientAuth.NONE, server.config().clientAuth());
+    }
+
+    @Test
     void clientAuthWithoutSslContextFailsAtBuild() {
         for (ClientAuth mode : new ClientAuth[] {ClientAuth.WANT, ClientAuth.NEED}) {
             var builder = Server.builder().port(0).tls(null, mode).handler(_ -> Response.ok());
