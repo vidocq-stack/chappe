@@ -5,6 +5,35 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-024 — the HTTP/2 stream window reopened on receipt, so a stream's buffer was unbounded
+
+- **Date**: 2026-10-11
+- **Status**: FIXED (commit `fix(http): open the HTTP/2 stream window as the request body is read (CHAPPE-024)`,
+  branch `pr/ybl/chappe-request-body-bounds`)
+- **Module**: `chappe-http` (`h2/Http2Connection`, `h2/Http2Stream`, `h2/Http2BodyInputStream`)
+- **Symptom**: `handleData` sent the stream WINDOW_UPDATE as DATA arrived, not as the handler read it.
+  A handler that did not read let the client push without limit into the stream's unbounded queue
+  (heap). The stream window was not enforced either: DATA past it was accepted. DATA padding was never
+  credited back, and `readTimeout` did not bound an HTTP/2 body read. Found on the way:
+  `Http2BodyInputStream.read(b, off, 0)` blocked until the next DATA frame instead of returning 0, so
+  `InputStream.readNBytes(n)`, which asks for zero bytes once its buffer is full, hung on a body that
+  had not ended.
+- **Minimal reproduction**: `chappe-tests/.../Http2RequestFlowControlTest#theStreamWindowReopensOnlyAsTheHandlerReadsTheBody`
+  (a WINDOW_UPDATE for the stream came before any read).
+- **Cause**: flow control was written for throughput (credit on receipt), with no back-pressure.
+- **Fix**: `Http2BodyInputStream` reports what it consumes; `Http2Stream.bodyBytesConsumed` sends the
+  stream WINDOW_UPDATE once half the window is pending. Padding is credited at receipt. DATA past the
+  stream window is a stream error `FLOW_CONTROL_ERROR`; DATA past the connection window, on any stream
+  (served, reset or closed), is a connection error `FLOW_CONTROL_ERROR`. The connection window is still
+  credited on receipt, so an unread stream never blocks the others; a connection buffers at most
+  `MAX_CONCURRENT_STREAMS` (100) × 64 KiB. A body read waits at most `readTimeout` for the next DATA
+  frame, then throws `SocketTimeoutException` (the HTTP/2 side of CHAPPE-022); the wait is a timed
+  poll of the stream's queue, with no timer thread, and returns at once when a chunk is queued. A gRPC
+  or gRPC-Web stream (`content-type: application/grpc*`) is exempt (ruling F-04): a client or bidi
+  streaming call may pause for as long as it likes. A read of zero bytes returns 0 at once.
+
+---
+
 ## CHAPPE-023 — HTTP/2 frames that follow an early response tear the whole connection down
 
 - **Date**: 2026-10-11

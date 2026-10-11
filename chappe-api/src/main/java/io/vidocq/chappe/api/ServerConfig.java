@@ -30,13 +30,17 @@ import javax.net.ssl.SSLContext;
  * @param host listen address (default: {@code "0.0.0.0"})
  * @param port listen port (default: {@code 8080}, {@code 0} for an ephemeral port)
  * @param backlog TCP backlog size (default: {@code 1024})
- * @param readTimeout bound on each blocking read of an HTTP/1.1 request body (default: 30s),
- *     including the drain of a body the handler left unread: when no byte arrives for that long, the
- *     read throws {@link java.net.SocketTimeoutException} and the connection is closed. It bounds
- *     each read, not the whole body; over TLS a read waits for a whole TLS record (up to 16 KiB),
- *     so each record must arrive within it. Zero or negative disables it; a value too large for
- *     nanoseconds in a {@code long} is saturated (about 73 years). The wait for a next request is
- *     bounded by {@code idleTimeout} instead.
+ * @param readTimeout bound on each blocking read of a request body (default: 30s). Over HTTP/1.1
+ *     it bounds each socket read, including the drain of a body the handler left unread: when no
+ *     byte arrives for that long, the read throws {@link java.net.SocketTimeoutException} and the
+ *     connection is closed; over TLS a read waits for a whole TLS record (up to 16 KiB), so each
+ *     record must arrive within it. Over HTTP/2 it bounds the wait for the stream's next DATA frame:
+ *     the read throws {@link java.net.SocketTimeoutException}, and the stream is reset once the
+ *     response is sent. A gRPC or gRPC-Web stream ({@code content-type: application/grpc*}) is
+ *     exempt, so a client or bidi streaming call may pause. It bounds each read, not the whole body.
+ *     Zero or negative disables it; a value too large for nanoseconds in a {@code long} is saturated
+ *     (about 73 years). The wait for a next request is bounded by {@code idleTimeout}
+ *     instead.
  * @param writeTimeout bound on a single blocking {@code channel.write()} call — how
  *     long the socket may refuse to accept bytes we are trying to send before the
  *     connection is considered dead (default: 30s). This is <strong>not</strong> an

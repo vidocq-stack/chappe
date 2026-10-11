@@ -21,13 +21,17 @@ package io.vidocq.chappe.http.h2;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.SocketTimeoutException;
 import java.nio.ByteBuffer;
+import java.util.Objects;
 
 /**
  * InputStream fed by the DATA frame queue of an HTTP/2 stream.
  * <p>
- * Blocks on {@link Http2Stream#takeData()} when no data is available
- * (natural on virtual threads).
+ * Blocks on {@link Http2Stream#pollData()} when no data is available (natural on virtual
+ * threads), at most {@code readTimeout} per wait: the queue is fed by the connection thread, so the
+ * wait is a timed park, without a timer thread. Every byte consumed is reported to the stream, which
+ * reopens the peer's stream window as the body is read (CHAPPE-024).
  */
 final class Http2BodyInputStream extends InputStream {
 
@@ -41,14 +45,19 @@ final class Http2BodyInputStream extends InputStream {
     @Override
     public int read() throws IOException {
         if (!ensureBuffer()) return -1;
-        return current.get() & 0xFF;
+        int b = current.get() & 0xFF;
+        stream.bodyBytesConsumed(1);
+        return b;
     }
 
     @Override
     public int read(byte[] b, int off, int len) throws IOException {
+        Objects.checkFromIndexSize(off, len, b.length);
+        if (len == 0) return 0; // InputStream contract: never block for zero bytes (InputStream.readNBytes asks)
         if (!ensureBuffer()) return -1;
         int toRead = Math.min(len, current.remaining());
         current.get(b, off, toRead);
+        stream.bodyBytesConsumed(toRead);
         return toRead;
     }
 
@@ -60,7 +69,8 @@ final class Http2BodyInputStream extends InputStream {
     /**
      * Makes bytes available, or returns {@code false} at a clean end of the body (END_STREAM).
      * A stream reset by the peer, or cut by the end of its connection, before its END_STREAM
-     * fails the read: a truncated body must never pass for a complete one.
+     * fails the read: a truncated body must never pass for a complete one. A wait for the next
+     * DATA frame longer than {@code readTimeout} fails it too (CHAPPE-024).
      */
     private boolean ensureBuffer() throws IOException {
         while (current == null || !current.hasRemaining()) {
@@ -69,17 +79,23 @@ final class Http2BodyInputStream extends InputStream {
                 if (stream.isCancelled()) throw streamReset();
             }
             try {
-                current = stream.takeData();
+                current = stream.pollData();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new IOException("Interrupted while reading HTTP/2 body", e);
             }
+            if (current == null) throw readTimedOut();
             if (!current.hasRemaining()) {
                 if (stream.isEndStreamReceived()) return false;
                 if (stream.isCancelled()) throw streamReset();
             }
         }
         return true;
+    }
+
+    private SocketTimeoutException readTimedOut() {
+        return new SocketTimeoutException("HTTP/2 request body read on stream " + stream.streamId()
+                + " timed out after " + stream.bodyReadTimeout().toMillis() + " ms");
     }
 
     private IOException streamReset() {

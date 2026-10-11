@@ -68,7 +68,6 @@ public final class Http2Connection {
     private final WritableByteChannel writeChannel;
     private final Handler handler;
 
-    @SuppressWarnings("UnusedVariable") // Reserved for H2 limits (maxStreams, timeouts) — to be wired later
     private final ServerConfig config;
 
     // --- Buffers ---
@@ -290,7 +289,12 @@ public final class Http2Connection {
         }
 
         // Create and register the stream
-        var stream = new Http2Stream(streamId, localSettings.initialWindowSize(), remoteSettings.initialWindowSize());
+        var stream = new Http2Stream(
+                streamId,
+                localSettings.initialWindowSize(),
+                remoteSettings.initialWindowSize(),
+                config.readTimeout(),
+                increment -> creditStreamWindow(streamId, increment));
         stream.open();
         streams.put(streamId, stream);
 
@@ -371,6 +375,10 @@ public final class Http2Connection {
         // Extract pseudo-headers
         extractPseudoHeaders(req);
 
+        // A gRPC call may stream its request for as long as it lives (client or bidi streaming), with
+        // pauses of any length: readTimeout does not bound it, as maxRequestSize does not (ruling F-04).
+        if (isGrpc(req)) stream.bodyReadTimeout(null);
+
         // Half-close remote if END_STREAM was set on HEADERS
         boolean hasBody = !stream.headersEndStream();
         if (!hasBody) {
@@ -384,6 +392,12 @@ public final class Http2Connection {
         Thread.ofVirtual().name("chappe-h2-stream-" + streamId).start(() -> dispatchStream(stream, hasBody));
     }
 
+    /** Whether the request is a gRPC or gRPC-Web call: a {@code content-type} of {@code application/grpc*}. */
+    private static boolean isGrpc(HttpRequestImpl request) {
+        String contentType = request.headers().firstOrNull("content-type");
+        return contentType != null && contentType.regionMatches(true, 0, "application/grpc", 0, 16);
+    }
+
     private void handleData(Http2Frame.DataFrame frame) throws IOException {
         int streamId = frame.streamId();
         int flowLength = flowControlledLength(frame);
@@ -392,37 +406,64 @@ public final class Http2Connection {
             discardData(streamId, flowLength);
             return;
         }
+        // Every DATA frame counts against the connection window, whatever its stream (§6.9).
+        consumeConnectionWindow(flowLength);
         if (remoteEnded(stream)) {
             // The request already ended: the stream is half-closed (remote), or closed and not yet
             // dropped. DATA on it is a stream error STREAM_CLOSED (RFC 9113 §5.1, §6.1).
-            connectionRecvWindow.addAndGet(-flowLength);
             resetStream(stream, Http2ErrorCode.STREAM_CLOSED);
             replenishConnectionWindow();
             return;
         }
 
-        // Update flow control windows (atomic)
-        connectionRecvWindow.addAndGet(-flowLength);
+        // The connection window is credited back on receipt (replenishConnectionWindow), the stream
+        // window only as the body is read (Http2Stream.bodyBytesConsumed): what a stream buffers is
+        // bounded by its window, and a stream nobody reads never blocks the others (CHAPPE-024).
+        if (flowLength > stream.recvWindow()) {
+            // The peer overran the stream window (RFC 9113 §6.9.1): a stream error, the connection lives on.
+            resetStream(stream, Http2ErrorCode.FLOW_CONTROL_ERROR);
+            replenishConnectionWindow();
+            return;
+        }
         stream.consumeRecvWindow(flowLength);
 
-        // Copy data and offer to stream
         int dataLength = frame.data().remaining();
-        byte[] copy = new byte[dataLength];
-        frame.data().get(copy);
-        stream.offerData(ByteBuffer.wrap(copy));
+        if (dataLength > 0) {
+            byte[] copy = new byte[dataLength];
+            frame.data().get(copy);
+            stream.offerData(ByteBuffer.wrap(copy));
+        }
+        // Padding is flow-controlled but never read: give it back to the stream at once.
+        stream.bodyBytesConsumed(flowLength - dataLength);
 
         if (frame.endStream()) {
             stream.signalEndStream();
             stream.halfCloseRemote();
         }
-
         replenishConnectionWindow();
-        // Auto WINDOW_UPDATE if the stream recv window is getting low
-        if (stream.recvWindow() < WINDOW_UPDATE_THRESHOLD) {
-            int increment = localSettings.initialWindowSize() - stream.recvWindow();
-            stream.incrementRecvWindow(increment);
+    }
+
+    /** Sends the stream WINDOW_UPDATE the body reader earned by consuming bytes, unless the stream is gone. */
+    private void creditStreamWindow(int streamId, int increment) {
+        if (!streams.containsKey(streamId)) return;
+        try {
             frameWriter.writeWindowUpdate(streamId, increment);
+        } catch (IOException _) {
+            // connection lost: the reader fails when the connection cancels its stream
         }
+    }
+
+    /**
+     * Counts {@code flowLength} against the connection receive window. A peer sending past it is a
+     * connection error FLOW_CONTROL_ERROR (RFC 9113 §6.9.1): the window is credited on receipt, so a
+     * peer that honours its WINDOW_UPDATEs never gets there.
+     */
+    private void consumeConnectionWindow(int flowLength) throws Http2ConnectionException {
+        if (flowLength > connectionRecvWindow.get()) {
+            throw new Http2ConnectionException(
+                    Http2ErrorCode.FLOW_CONTROL_ERROR, "DATA past the connection flow-control window");
+        }
+        connectionRecvWindow.addAndGet(-flowLength);
     }
 
     /**
@@ -444,7 +485,7 @@ public final class Http2Connection {
         if (streamId == 0 || streamId % 2 == 0 || streamId > lastStreamId) {
             throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR, "DATA for idle stream " + streamId);
         }
-        connectionRecvWindow.addAndGet(-flowLength);
+        consumeConnectionWindow(flowLength);
         if (!resetStreams.contains(streamId)) {
             resetStreams.add(streamId);
             frameWriter.writeRstStream(streamId, Http2ErrorCode.STREAM_CLOSED);
@@ -624,7 +665,7 @@ public final class Http2Connection {
      * flight is ignored instead of failing the whole connection (§5.1) (CHAPPE-023).
      */
     private void stopUnreadRequestBody(Http2Stream stream) {
-        if (stream.isCancelled() || stream.isEndStreamReceived()) return;
+        if (stream.isCancelled() || remoteEnded(stream)) return;
         resetStreams.add(stream.streamId());
         streams.remove(stream.streamId());
         stream.cancel(); // a reader still waiting for the body fails instead of waiting forever
