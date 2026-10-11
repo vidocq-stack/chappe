@@ -21,16 +21,29 @@ cause hypothesis, and status.
   request behind the body was answered).
 - **Cause**: `setupBody()` passed no limit to `HttpBodyReader.chunked`, and `ChunkedInputStream` had
   no counter.
-- **Fix**: `ChunkedInputStream` counts the chunk sizes it reads. A chunk that would take the body past
-  `maxRequestSize` fails the read with the new `RequestBodyTooLargeException` (an `IOException`
-  carrying `limit()`), before any of its data is read. The body stream is then `failed()`, so the
-  connection closes with a lingering close and reads no other request (CHAPPE-013, CHAPPE-014). A
+- **Fix**: `ChunkedInputStream` counts the body as it is on the wire against `maxRequestSize`: chunk
+  data (counted when its size line is read), size lines with their leading zeros and extensions,
+  CRLFs and the trailer section. A chunk that would take the body past the cap fails the read with
+  the new `RequestBodyTooLargeException` (an `IOException` carrying `limit()`), before any of its
+  data is read; so does a framing byte past the cap, which bounds an endless extension or trailer
+  (`ChunkedBodyLimitTest#chunkFramingOverheadAloneCanExceedTheLimit`,
+  `#anEndlessChunkExtensionIsCountedAgainstTheLimit`, `#anEndlessTrailerLineIsCountedAgainstTheLimit`).
+  Whatever the cap, one chunk-size line (extensions included) or one trailer line is bounded by
+  `ChunkedInputStream.MAX_CHUNK_LINE_LENGTH` = 8192 bytes, the default `maxHeaderSize` (chappe has no
+  per-line header limit to reuse), so the trailer parser never buffers a line without bound
+  (`#aChunkExtensionLongerThanTheLineLimitFailsTheRead`, `#aTrailerLineLongerThanTheLineLimitFailsTheRead`).
+  A failed read is final: every later read rethrows the same exception instead of parsing the refused
+  chunk's data as size lines (`#aReadAfterTheCapFailureRethrowsIt`). The body stream is then
+  `failed()`, so the connection closes with a lingering close and reads no other request
+  (CHAPPE-013, CHAPPE-014). A
   `Content-Length` above `maxRequestSize` is now answered `413` instead of `400`
   (`ChunkedBodyLimitTest#aContentLengthOverTheLimitIsAnswered413BeforeTheHandlerRuns`,
   `Http11StatusCodesTest#payloadTooLarge413`). The body is now set up before `Expect: 100-continue`
   is answered, so a refused `Content-Length` gets its `413` (or `400`) instead of `100 Continue`
   first (RFC 9110 §10.1.1;
   `ChunkedBodyLimitTest#anExpectContinueWithAContentLengthOverTheLimitGets413Without100Continue`).
+  Cost: a body near the cap with heavy chunk overhead trips slightly earlier than its data alone
+  would.
 
 ---
 

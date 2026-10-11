@@ -55,9 +55,13 @@ class ChunkedBodyLimitTest {
 
     @BeforeEach
     void setUp() {
+        start(LIMIT);
+    }
+
+    private void start(long maxRequestSize) {
         server = Server.builder()
                 .port(0)
-                .maxRequestSize(LIMIT)
+                .maxRequestSize(maxRequestSize)
                 .handler(this::handle)
                 .build();
         server.start();
@@ -69,8 +73,13 @@ class ChunkedBodyLimitTest {
         if (server != null) server.stop();
     }
 
-    /** {@code /read} reads the whole body and reports how the read ended; anything else answers {@code pong}. */
+    /**
+     * {@code /read} reads the whole body and reports how the read ended; {@code /reread} reads again
+     * after the cap failure and reports whether the same exception came back; anything else answers
+     * {@code pong}.
+     */
     private Response handle(Request request) {
+        if ("/reread".equals(request.path())) return rereadAfterTheCap(request);
         if (!"/read".equals(request.path())) return Response.ok("pong");
         try {
             byte[] body = request.body().asInputStream().readAllBytes();
@@ -83,6 +92,28 @@ class ChunkedBodyLimitTest {
             outcome.complete("failed:" + e.getClass().getSimpleName());
             return Response.ok("failed");
         }
+    }
+
+    private Response rereadAfterTheCap(Request request) {
+        InputStream in = request.body().asInputStream();
+        RequestBodyTooLargeException first;
+        try {
+            in.readAllBytes();
+            outcome.complete("no failure");
+            return Response.ok("no failure");
+        } catch (RequestBodyTooLargeException e) {
+            first = e;
+        } catch (IOException e) {
+            outcome.complete("failed:" + e.getClass().getSimpleName());
+            return Response.ok("failed");
+        }
+        try {
+            int b = in.read();
+            outcome.complete("read again:" + b);
+        } catch (IOException again) {
+            outcome.complete(again == first ? "sticky" : "other:" + again);
+        }
+        return Response.ok("done");
     }
 
     @Test
@@ -112,17 +143,105 @@ class ChunkedBodyLimitTest {
         }
     }
 
+    /**
+     * The cap counts the body as it is on the wire: {@code chunk(1012)} is 1,019 bytes and the last
+     * chunk with the empty trailer section {@code 0\r\n\r\n} is 5, so the body is exactly 1,024 bytes.
+     */
     @Test
     void aChunkedBodyAtTheLimitIsReadWholeAndKeepsTheConnection() throws Exception {
         String request = "POST /read HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n"
-                + chunk(1000) + chunk(24) + "0\r\n\r\n"
+                + chunk(1012) + "0\r\n\r\n"
                 + "GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
 
         String response = sendThenRead(request);
 
-        assertEquals("read:1024", outcome.get(5, TimeUnit.SECONDS));
-        assertTrue(response.contains("read:1024"), head(response));
+        assertEquals("read:1012", outcome.get(5, TimeUnit.SECONDS));
+        assertTrue(response.contains("read:1012"), head(response));
         assertTrue(response.endsWith("pong"), "the keep-alive request must be answered: " + head(response));
+    }
+
+    /** One byte more than {@link #aChunkedBodyAtTheLimitIsReadWholeAndKeepsTheConnection}: 1,025 wire bytes. */
+    @Test
+    void aChunkedBodyOneByteOverTheLimitFails() throws Exception {
+        String response = sendThenRead("POST /read HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n"
+                + chunk(1013) + "0\r\n\r\n"
+                + "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+
+        assertEquals("too large:1024", outcome.get(5, TimeUnit.SECONDS));
+        assertFalse(response.contains("pong"), "no request may be read after an over-limit body");
+    }
+
+    /** The {@code ;} branch of the size line: a chunk extension does not hide the chunk from the cap. */
+    @Test
+    void aChunkWithAnExtensionIsCountedAgainstTheLimit() throws Exception {
+        sendThenRead("POST /read HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n"
+                + "401;name=value\r\n" + "x".repeat(0x401) + "\r\n0\r\n\r\n");
+
+        assertEquals("too large:1024", outcome.get(5, TimeUnit.SECONDS));
+    }
+
+    /** A chunk extension within the cap is skipped and its chunk read. */
+    @Test
+    void aChunkWithAnExtensionWithinTheLimitIsRead() throws Exception {
+        sendThenRead("POST /read HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nTransfer-Encoding: chunked\r\n\r\n"
+                + "a;name=value\r\n" + "x".repeat(10) + "\r\n0\r\n\r\n");
+
+        assertEquals("read:10", outcome.get(5, TimeUnit.SECONDS));
+    }
+
+    /** Twenty 1-byte chunks, each with a 66-byte extension: 20 data bytes, 1,420 wire bytes. */
+    @Test
+    void chunkFramingOverheadAloneCanExceedTheLimit() throws Exception {
+        String oneByteChunk = "1;ext=" + "e".repeat(60) + "\r\nx\r\n";
+        sendThenRead("POST /read HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n"
+                + oneByteChunk.repeat(20) + "0\r\n\r\n");
+
+        assertEquals("too large:1024", outcome.get(5, TimeUnit.SECONDS));
+    }
+
+    @Test
+    void anEndlessChunkExtensionIsCountedAgainstTheLimit() throws Exception {
+        sendWithoutEnd("1;" + "e".repeat(4_000));
+
+        assertEquals("too large:1024", outcome.get(5, TimeUnit.SECONDS));
+    }
+
+    @Test
+    void anEndlessTrailerLineIsCountedAgainstTheLimit() throws Exception {
+        sendWithoutEnd(chunk(10) + "0\r\nX-Trailer: " + "a".repeat(4_000));
+
+        assertEquals("too large:1024", outcome.get(5, TimeUnit.SECONDS));
+    }
+
+    /** Under a large cap, one chunk-size line is still bounded by {@code MAX_CHUNK_LINE_LENGTH} (8 KiB). */
+    @Test
+    void aChunkExtensionLongerThanTheLineLimitFailsTheRead() throws Exception {
+        server.stop();
+        start(1024 * 1024);
+
+        sendWithoutEnd("1;" + "e".repeat(10_000));
+
+        assertEquals("failed:IOException", outcome.get(5, TimeUnit.SECONDS));
+    }
+
+    /** Under a large cap, one trailer line is still bounded by {@code MAX_CHUNK_LINE_LENGTH} (8 KiB). */
+    @Test
+    void aTrailerLineLongerThanTheLineLimitFailsTheRead() throws Exception {
+        server.stop();
+        start(1024 * 1024);
+
+        sendWithoutEnd(chunk(10) + "0\r\nX-Trailer: " + "a".repeat(10_000));
+
+        assertEquals("failed:IOException", outcome.get(5, TimeUnit.SECONDS));
+    }
+
+    /** A read after the cap failure rethrows it instead of parsing the refused chunk's data as size lines. */
+    @Test
+    void aReadAfterTheCapFailureRethrowsIt() throws Exception {
+        sendThenRead("POST /reread HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n" + chunk(400)
+                + chunk(400) + chunk(400) + "0\r\n\r\n");
+
+        assertEquals("sticky", outcome.get(5, TimeUnit.SECONDS));
     }
 
     /** RFC 9110 §15.5.14: a Content-Length above the cap is answered 413, without running the handler. */
@@ -151,6 +270,23 @@ class ChunkedBodyLimitTest {
     /** One chunk of {@code size} bytes, framed (RFC 9112 §7.1). */
     static String chunk(int size) {
         return Integer.toHexString(size) + "\r\n" + "x".repeat(size) + "\r\n";
+    }
+
+    /**
+     * Sends a chunked {@code /read} request whose body never ends, then waits for the handler's
+     * outcome with the connection still open: only a bound in the server can end the read.
+     */
+    private void sendWithoutEnd(String bodyStart) throws Exception {
+        try (var socket = new Socket("127.0.0.1", port)) {
+            socket.setSoTimeout(5_000);
+            OutputStream out = socket.getOutputStream();
+            out.write(("POST /read HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n" + bodyStart)
+                    .getBytes(StandardCharsets.US_ASCII));
+            out.flush();
+            outcome.get(5, TimeUnit.SECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            // the caller's assertion reports it
+        }
     }
 
     private String sendThenRead(String request) throws Exception {

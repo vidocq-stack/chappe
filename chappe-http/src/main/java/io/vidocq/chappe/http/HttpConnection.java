@@ -179,7 +179,7 @@ public final class HttpConnection {
                 }
                 bodyPending = bodyStream != null;
 
-                // 3. Dispatch to handler with ScopedValue binding
+                // 5. Dispatch to handler with ScopedValue binding
                 boolean keepAlive = isKeepAlive();
                 Response response;
                 try {
@@ -221,7 +221,7 @@ public final class HttpConnection {
                         break;
                     }
 
-                    // 4a. WebSocket upgrade: switch to frame mode and end HTTP loop.
+                    // 6a. WebSocket upgrade: switch to frame mode and end HTTP loop.
                     if (response instanceof WebSocketUpgrade upgrade) {
                         if (bodyStream != null) HttpBodyReader.drain(bodyStream);
                         var key = request.headers().firstOrNull("Sec-WebSocket-Key");
@@ -240,14 +240,14 @@ public final class HttpConnection {
                         return; // closeable already closed by WebSocketConnection
                     }
 
-                    // 4b. Generic connection upgrade: write the application's head, then hand the
+                    // 6b. Generic connection upgrade: write the application's head, then hand the
                     // raw streams over and park until the application closes the connection.
                     if (response instanceof ConnectionUpgrade upgrade) {
                         runUpgrade(upgrade, bodyStream);
                         return; // the finally block closes the connection (idempotent)
                     }
 
-                    // 4. Write response. A head that cannot be written as is (a custom Response
+                    // 6c. Write response. A head that cannot be written as is (a custom Response
                     // bypassing the builder's checks) is refused before any byte: answer 500 and
                     // close instead of a truncated or injected head (CHAPPE-008).
                     try {
@@ -268,7 +268,7 @@ public final class HttpConnection {
                     releaseBody(handled);
                 }
 
-                // 5. A body read that failed (truncated, reset, an interrupt that closed the
+                // 7. A body read that failed (truncated, reset, an interrupt that closed the
                 // channel) leaves the byte stream at an unknown position: never drain it nor parse
                 // a next request from it, close the connection (CHAPPE-013). Close it gracefully
                 // while the channel is still open (CHAPPE-014): the client may still be uploading,
@@ -279,7 +279,7 @@ public final class HttpConnection {
                     break;
                 }
 
-                // 6. Drain unread body (for keep-alive). A drain that fails (bad framing, a body
+                // 8. Drain unread body (for keep-alive). A drain that fails (bad framing, a body
                 // cut short) is a failed body read too: same graceful close, no next request.
                 if (bodyStream != null) {
                     try {
@@ -290,7 +290,7 @@ public final class HttpConnection {
                     }
                 }
 
-                // 7. Check keep-alive
+                // 9. Check keep-alive
                 if (!keepAlive) {
                     lingerOnClose = true;
                     break;

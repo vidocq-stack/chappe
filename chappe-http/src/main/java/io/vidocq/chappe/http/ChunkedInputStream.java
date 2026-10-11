@@ -34,8 +34,22 @@ import io.vidocq.chappe.api.RequestBodyTooLargeException;
  * Trailer fields after the terminal chunk (RFC 9112 §7.1.2) are parsed and
  * delivered to the optional consumer, mirroring the HTTP/2 trailers path
  * ({@code Request.trailers()}).
+ * <p>
+ * The body is counted as it is on the wire against {@code maxBodySize} (CHAPPE-020): chunk data,
+ * size lines with their extensions, CRLFs and the trailer section. A chunk's data is counted when
+ * its size line is read, so a chunk that would take the body past the cap fails before any of its
+ * data is read. One chunk-size line and one trailer line are each bounded by
+ * {@link #MAX_CHUNK_LINE_LENGTH}, whatever the cap. A failed read is final: every later read
+ * rethrows the same exception.
  */
 final class ChunkedInputStream extends RequestBodyInputStream {
+
+    /**
+     * Longest chunk-size line (size, extensions, CRLF) or trailer line accepted, in bytes. It matches
+     * the default {@code maxHeaderSize}: no legitimate line comes close, and the trailer parser must
+     * not buffer a line without bound under a large {@code maxRequestSize}.
+     */
+    static final int MAX_CHUNK_LINE_LENGTH = 8192;
 
     private enum ChunkState {
         READ_SIZE,
@@ -50,8 +64,10 @@ final class ChunkedInputStream extends RequestBodyInputStream {
     private final long maxBodySize;
     private ChunkState chunkState = ChunkState.READ_SIZE;
     private long chunkRemaining;
-    /** Sum of the chunk sizes announced so far (CHAPPE-020). */
-    private long announcedBytes;
+    /** Body bytes counted so far: framing bytes read and chunk sizes announced (CHAPPE-020). */
+    private long wireBytes;
+    /** The failure of an earlier read, rethrown by every later read. */
+    private IOException failure;
 
     ChunkedInputStream(ByteBuffer buffer, ReadableByteChannel channel) {
         this(buffer, channel, null, Long.MAX_VALUE);
@@ -67,6 +83,27 @@ final class ChunkedInputStream extends RequestBodyInputStream {
 
     @Override
     int readByte() throws IOException {
+        if (failure != null) throw failure;
+        try {
+            return decodeByte();
+        } catch (IOException e) {
+            failure = e;
+            throw e;
+        }
+    }
+
+    @Override
+    int readBytes(byte[] b, int off, int len) throws IOException {
+        if (failure != null) throw failure;
+        try {
+            return decodeBytes(b, off, len);
+        } catch (IOException e) {
+            failure = e;
+            throw e;
+        }
+    }
+
+    private int decodeByte() throws IOException {
         if (chunkState == ChunkState.DONE) return -1;
 
         while (true) {
@@ -94,8 +131,7 @@ final class ChunkedInputStream extends RequestBodyInputStream {
         }
     }
 
-    @Override
-    int readBytes(byte[] b, int off, int len) throws IOException {
+    private int decodeBytes(byte[] b, int off, int len) throws IOException {
         if (chunkState == ChunkState.DONE) return -1;
 
         int totalRead = 0;
@@ -148,36 +184,28 @@ final class ChunkedInputStream extends RequestBodyInputStream {
     private void readChunkSize() throws IOException {
         long size = 0;
         boolean started = false;
+        int lineLength = 0;
 
         while (true) {
             if (!ensureData()) {
                 throw new IOException("Unexpected end of chunked stream");
             }
-            int b = buffer.get() & 0xFF;
+            int b = nextFramingByte();
+            lineLength = countLineByte(lineLength);
 
             if (b == '\r') {
                 continue;
             }
-            if (b == '\n') {
-                if (!started) {
+            if (b == '\n' || b == ';') {
+                if (b == ';') {
+                    // Chunk extension — ignore until LF, still counted and bounded
+                    skipUntilLf(lineLength);
+                } else if (!started) {
                     throw new IOException("Empty chunk size");
                 }
                 chunkRemaining = size;
                 if (size == 0) {
-                    // Terminal chunk — consume final trailer CRLF
-                    consumeTrailers();
-                    chunkState = ChunkState.DONE;
-                } else {
-                    countChunk(size);
-                    chunkState = ChunkState.READ_DATA;
-                }
-                return;
-            }
-            if (b == ';') {
-                // Chunk extension — ignore until CRLF
-                skipUntilLf();
-                chunkRemaining = size;
-                if (size == 0) {
+                    // Terminal chunk — consume the trailer section and its final CRLF
                     consumeTrailers();
                     chunkState = ChunkState.DONE;
                 } else {
@@ -200,20 +228,38 @@ final class ChunkedInputStream extends RequestBodyInputStream {
     }
 
     /**
-     * Counts a chunk against {@code maxBodySize} as soon as its size line is read: a chunk that would
-     * take the body past the cap fails before any of its data is read (CHAPPE-020). The stream is then
-     * {@link #failed()}, so the connection closes instead of draining it.
+     * Counts a chunk's data against {@code maxBodySize} as soon as its size line is read: a chunk that
+     * would take the body past the cap fails before any of its data is read (CHAPPE-020). The stream is
+     * then {@link #failed()}, so the connection closes instead of draining it.
      */
     private void countChunk(long size) throws RequestBodyTooLargeException {
-        if (size > maxBodySize - announcedBytes) throw new RequestBodyTooLargeException(maxBodySize);
-        announcedBytes += size;
+        if (size > maxBodySize - wireBytes) throw new RequestBodyTooLargeException(maxBodySize);
+        wireBytes += size;
+    }
+
+    /**
+     * Takes one framing byte (size line, extension, CRLF, trailer section) from the buffer, which the
+     * caller made non-empty, and counts it against {@code maxBodySize} (CHAPPE-020).
+     */
+    private int nextFramingByte() throws RequestBodyTooLargeException {
+        int b = buffer.get() & 0xFF;
+        if (++wireBytes > maxBodySize) throw new RequestBodyTooLargeException(maxBodySize);
+        return b;
+    }
+
+    /** Counts one more byte of the current line against {@link #MAX_CHUNK_LINE_LENGTH}. */
+    private static int countLineByte(int lineLength) throws IOException {
+        if (lineLength >= MAX_CHUNK_LINE_LENGTH) {
+            throw new IOException("Chunked body line exceeds " + MAX_CHUNK_LINE_LENGTH + " bytes");
+        }
+        return lineLength + 1;
     }
 
     private void consumeCrlf() throws IOException {
         // Consume CRLF after chunk data
         while (true) {
             if (!ensureData()) return;
-            int b = buffer.get() & 0xFF;
+            int b = nextFramingByte();
             if (b == '\r') continue;
             if (b == '\n') return;
             // Unexpected byte — tolerate it (some servers only send LF)
@@ -225,10 +271,12 @@ final class ChunkedInputStream extends RequestBodyInputStream {
         // Trailers are "name: value" lines terminated by an empty line.
         // Parsed (not just skipped) so Request.trailers() can expose them.
         StringBuilder line = new StringBuilder();
+        int lineLength = 0;
         Headers.Builder trailers = null;
         while (true) {
             if (!ensureData()) break; // EOF — deliver what was parsed so far
-            int b = buffer.get() & 0xFF;
+            int b = nextFramingByte();
+            lineLength = countLineByte(lineLength);
             if (b == '\r') continue;
             if (b == '\n') {
                 if (line.isEmpty()) break; // empty line = end of trailers
@@ -240,6 +288,7 @@ final class ChunkedInputStream extends RequestBodyInputStream {
                     trailers.add(name, value);
                 }
                 line.setLength(0);
+                lineLength = 0;
             } else {
                 line.append((char) b); // header field bytes, latin-1
             }
@@ -249,10 +298,12 @@ final class ChunkedInputStream extends RequestBodyInputStream {
         }
     }
 
-    private void skipUntilLf() throws IOException {
+    /** Skips a chunk extension to the end of its size line, {@code lineLength} bytes into the line. */
+    private void skipUntilLf(int lineLength) throws IOException {
         while (true) {
             if (!ensureData()) return;
-            int b = buffer.get() & 0xFF;
+            int b = nextFramingByte();
+            lineLength = countLineByte(lineLength);
             if (b == '\n') return;
         }
     }

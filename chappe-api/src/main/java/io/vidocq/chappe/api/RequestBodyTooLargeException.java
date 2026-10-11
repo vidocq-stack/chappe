@@ -25,8 +25,8 @@ import java.io.Serial;
 /**
  * Thrown by a request body read that would go past the server's {@link ServerConfig#maxRequestSize()
  * maxRequestSize}. A handler can tell it from a cut or malformed body and answer {@code 413}. The
- * body is unusable afterwards: over HTTP/1.1 the connection is closed after the response, over
- * HTTP/2 the stream is reset.
+ * body is unusable afterwards: every later read of it throws the same exception, and over HTTP/1.1
+ * the connection is closed after the response.
  */
 public final class RequestBodyTooLargeException extends IOException {
 
@@ -35,13 +35,21 @@ public final class RequestBodyTooLargeException extends IOException {
 
     private final long limit;
 
-    /** @param limit the cap the body went past, in bytes */
+    /**
+     * Creates the exception for a body that went past {@code limit}.
+     *
+     * @param limit the cap the body went past, in bytes
+     */
     public RequestBodyTooLargeException(long limit) {
         super("Request body exceeds the limit of " + limit + " bytes");
         this.limit = limit;
     }
 
-    /** The cap the body went past, in bytes. */
+    /**
+     * The cap the body went past.
+     *
+     * @return the cap, in bytes
+     */
     public long limit() {
         return limit;
     }
