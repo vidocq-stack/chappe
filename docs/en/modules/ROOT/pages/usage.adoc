@@ -63,6 +63,8 @@ Server.builder()
         .build();
 ----
 
+WARNING: Always pass trust managers built from your own client CA (or the client certificates you accept). `sslContext.init(keyManagers, null, null)` does not mean "trust nothing": a `null` trust manager array makes JSSE fall back to the JDK default trust store (the public CAs of `cacerts`, or `javax.net.ssl.trustStore`), so `WANT` and `NEED` would then accept any client certificate issued by a public CA.
+
 [cols="1,3"]
 |===
 | Mode | Behaviour
@@ -79,7 +81,7 @@ Server.builder()
 
 The mode is set per listener and applies at the TLS handshake, for HTTP/1.1 and for HTTP/2 alike. The last `tls(...)` call wins for both the context and the mode: `tls(sslContext)` sets the mode back to `NONE`, and `tls(null)` builds a cleartext server. `NONE` is applied for real: it clears any need or want flag that the engines of a custom `SSLContext` would set.
 
-Chappe never asks for a certificate later in the connection: TLS 1.3 servers in the JDK cannot request one after the handshake, and HTTP/2 forbids TLS 1.2 renegotiation (RFC 9113 §9.2.1). A TLS 1.2 client that tries to renegotiate is disconnected: Chappe closes the connection without sending an alert, so the session a handler sees cannot change during the connection. TLS 1.3 KeyUpdate is not a renegotiation and is still supported. If only part of an application needs client certificates, serve it from its own listener in `WANT` or `NEED` mode.
+Chappe never asks for a certificate later in the connection: TLS 1.3 servers in the JDK cannot request one after the handshake, and HTTP/2 forbids TLS 1.2 renegotiation (RFC 9113 §9.2.1). A TLS 1.2 client that tries to renegotiate is disconnected: Chappe closes the connection with a `close_notify`, but sends no alert saying why (no `no_renegotiation` or `handshake_failure`), so the session a handler sees cannot change during the connection. TLS 1.3 KeyUpdate is not a renegotiation and is still supported. If only part of an application needs client certificates, serve it from its own listener in `WANT` or `NEED` mode.
 
 When the server rejects a handshake, it sends the TLS alert that says why, then half-closes and drains what the client still sends for at most 2 s or 1 MiB before closing, so a TCP reset cannot destroy the alert (CHAPPE-027). The handshake itself has no timeout yet: a client that never completes it holds its virtual thread (see `BUG.md`).
 
@@ -93,7 +95,7 @@ A `ClientAuth` other than `NONE` without an `SSLContext` fails at `build()` with
 * `protocol()`: for example `TLSv1.3`.
 * `cipherSuite()`: for example `TLS_AES_128_GCM_SHA256`.
 * `sessionId()`: a copy of the session id bytes, empty when the session has none.
-* `peerCertificates()`: the client's chain, its own certificate first, empty unless the listener asked for one and the client sent it. Always empty under `NONE`.
+* `peerCertificates()`: the chain as the client sent it, its own certificate first, then its issuers. A client that sends only its leaf certificate yields a one-element list: the CA the server validated it against is not added. Empty unless the listener asked for one and the client sent it. Always empty under `NONE`.
 
 Chappe reads the session once, when the handshake completes, and every request of the connection sees the same value: HTTP/1.1 keep-alive requests and all HTTP/2 streams.
 

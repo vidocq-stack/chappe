@@ -26,6 +26,13 @@ package io.vidocq.chappe.api;
  * connection, and HTTP/2 forbids it). The trust material that validates the certificate
  * comes from the listener's {@link javax.net.ssl.SSLContext}.
  *
+ * <p><strong>Pass explicit trust managers.</strong> Build the context with a
+ * {@link javax.net.ssl.TrustManager} from your own client CA (or the client certificates you
+ * accept). {@code SSLContext.init(keyManagers, null, random)} does not mean "trust nothing": a
+ * {@code null} trust manager array makes JSSE fall back to the JDK default trust store (the
+ * public CAs of {@code cacerts}, or {@code javax.net.ssl.trustStore}), so {@link #WANT} and
+ * {@link #NEED} would then accept any client certificate issued by a public CA.
+ *
  * <p>The chain the client sent is exposed through {@link Request#tls()}
  * ({@link TlsInfo#peerCertificates()}).
  */

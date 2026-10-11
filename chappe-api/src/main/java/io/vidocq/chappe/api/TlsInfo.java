@@ -39,8 +39,9 @@ import java.util.Objects;
  * @param protocol the negotiated protocol, for example {@code "TLSv1.3"}
  * @param cipherSuite the negotiated cipher suite, for example {@code "TLS_AES_128_GCM_SHA256"}
  * @param sessionId the session id; empty when the session has none ({@code null} is read as empty)
- * @param peerCertificates the client's certificate chain, the client's own certificate first;
- *     empty when the listener did not ask for one or the client sent none ({@code null} is read
+ * @param peerCertificates the certificate chain as the client sent it, the client's own
+ *     certificate first, then its issuers (the CA the server validated it against is not added
+ *     when the client omits it); empty when the listener did not ask for one or the client sent none ({@code null} is read
  *     as empty)
  */
 public record TlsInfo(String protocol, String cipherSuite, byte[] sessionId, List<X509Certificate> peerCertificates) {
