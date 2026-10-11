@@ -112,6 +112,10 @@ public final class HttpResponseWriter {
     // parameter threaded through every private helper) is safe.
     private Duration writeTimeout = Duration.ZERO;
 
+    // Whether a flush happened since the status line of the current write() was started: an
+    // invalid header found after that can no longer be answered with a 500 (CHAPPE-008).
+    private boolean headFlushed;
+
     // Fast path: pre-encoded headers for 200 OK keep-alive (without Date, without body)
     private static final byte[] FAST_200_KA_PREFIX = ("HTTP/1.1 200 OK\r\n"
                     + "Connection: keep-alive\r\n"
@@ -151,18 +155,26 @@ public final class HttpResponseWriter {
             return;
         }
 
-        // Nothing is buffered yet: an invalid head is refused before a byte is written (CHAPPE-008).
-        checkHead(response.status(), response.headers());
-
-        // Status line
-        putStatusLine(response.status(), buffer, channel);
+        // Status line. Each field is read once, checked, then written from that same read: a
+        // custom Response or Headers cannot hand back other text after the check (CHAPPE-008).
+        StatusCode status = response.status();
+        int code = status.code();
+        String reason = status.reason();
+        checkStatusLine(code, reason);
+        headFlushed = false;
+        putStatusLine(code, reason, buffer, channel);
 
         // Headers — direct write without allocating byte[]
         for (var entry : response.headers()) {
-            putAsciiString(entry.name(), buffer, channel);
+            String name = entry.name();
+            String value = entry.value();
+            if (!HeaderFields.isValid(name, value)) {
+                refuseHeader(name);
+            }
+            putAsciiString(name, buffer, channel);
             putByte(COLON, buffer, channel);
             putByte(SPACE, buffer, channel);
-            putAsciiString(entry.value(), buffer, channel);
+            putAsciiString(value, buffer, channel);
             putBytes(CRLF, buffer, channel);
         }
 
@@ -304,14 +316,19 @@ public final class HttpResponseWriter {
     // --- Status line ---
 
     private void putStatusLine(StatusCode status, ByteBuffer buffer, WritableByteChannel channel) throws IOException {
-        byte[] preEncoded = preEncodedStatusLine(status.code());
+        putStatusLine(status.code(), status.reason(), buffer, channel);
+    }
+
+    private void putStatusLine(int code, String reason, ByteBuffer buffer, WritableByteChannel channel)
+            throws IOException {
+        byte[] preEncoded = preEncodedStatusLine(code);
         if (preEncoded != null) {
             putBytes(preEncoded, buffer, channel);
         } else {
             putAsciiString("HTTP/1.1 ", buffer, channel);
-            putAsciiLong(status.code(), buffer, channel);
+            putAsciiLong(code, buffer, channel);
             putByte(SPACE, buffer, channel);
-            putAsciiString(status.reason(), buffer, channel);
+            putAsciiString(reason, buffer, channel);
             putBytes(CRLF, buffer, channel);
         }
     }
@@ -338,26 +355,33 @@ public final class HttpResponseWriter {
     }
 
     /**
-     * Refuses a head that cannot be written as is (CHAPPE-008): a header name that is not an
-     * RFC 9110 token, a value or a custom reason phrase holding CR, LF, NUL, another control or a
-     * char above {@code U+00FF}. The builder already refuses such fields; this catches a response
-     * built without it. Called before anything is buffered, so the connection can still answer 500.
-     *
-     * @throws InvalidResponseHeadException naming the field, never echoing its value
+     * Refuses a custom status line that cannot be written as is (CHAPPE-008): a code outside
+     * {@code 100-999}, or a reason phrase holding CR, LF, NUL, another control or a char above
+     * {@code U+00FF}. Called before anything is buffered, so the connection can still answer 500.
      */
-    static void checkHead(StatusCode status, Headers headers) {
-        if (preEncodedStatusLine(status.code()) == null
-                && (status.code() < 100 || status.code() > 999 || !HeaderFields.isFieldValue(status.reason()))) {
-            throw new InvalidResponseHeadException("Invalid status line for status " + status.code());
+    private static void checkStatusLine(int code, String reason) {
+        if (preEncodedStatusLine(code) == null && (code < 100 || code > 999 || !HeaderFields.isFieldValue(reason))) {
+            throw new InvalidResponseHeadException("Invalid status line for status " + code);
         }
-        for (var entry : headers) {
-            if (!HeaderFields.isValid(entry.name(), entry.value())) {
-                throw new InvalidResponseHeadException(
-                        HeaderFields.isToken(entry.name())
-                                ? "Invalid value for response header " + entry.name()
-                                : "Invalid response header name: " + HeaderFields.printable(entry.name()));
-            }
+    }
+
+    /**
+     * A header that cannot be written as is (CHAPPE-008): a name that is not an RFC 9110 token, or
+     * a value holding CR, LF, NUL, another control or a char above {@code U+00FF}. The builder
+     * already refuses such fields; this catches a response built without it. Nothing of the
+     * invalid field is written. While no byte of the head has left the buffer, it throws an
+     * {@link InvalidResponseHeadException} and the connection answers 500 instead; once part of a
+     * very large head was flushed, it throws an {@link IOException} and the connection is dropped.
+     * The message names the field and never echoes its value.
+     */
+    private void refuseHeader(String name) throws IOException {
+        String message = HeaderFields.isToken(name)
+                ? "Invalid value for response header " + name
+                : "Invalid response header name: " + HeaderFields.printable(name);
+        if (!headFlushed) {
+            throw new InvalidResponseHeadException(message);
         }
+        throw new IOException(message + " (head partly sent)");
     }
 
     // --- Body writers ---
@@ -583,6 +607,7 @@ public final class HttpResponseWriter {
      * something to send.
      */
     private void flush(ByteBuffer buffer, WritableByteChannel channel) throws IOException {
+        headFlushed = true;
         buffer.flip();
         while (buffer.hasRemaining()) {
             BoundedWrites.writeWithTimeout(channel, channel, buffer, writeTimeout);

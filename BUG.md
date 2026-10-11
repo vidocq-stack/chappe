@@ -5,6 +5,48 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-019 — Filter.addHeaderIf and Filter.gzip drop the response trailers
+
+- **Date**: 2026-10-11
+- **Status**: OPEN (pre-existing, found in the CHAPPE-008 review)
+- **Module**: `chappe-api` (`Filter`)
+- **Symptom**: `Filter.addHeaderIf` (so `addHeader` and `addHeaderIfEnv`) and `Filter.gzip` rebuild
+  the response with `Response.builder().status().headers().body()`. The rebuilt response has no
+  trailers, so a handler's `Response.trailers()` (gRPC-style status trailers, Servlet trailer
+  fields) is silently lost behind these filters. A trailer supplier computed after the body is lost
+  too, since the builder only takes static trailers.
+- **Minimal reproduction**: not written yet. Shape: `Filter.addHeader("X", "1")` around a handler
+  returning a chunked body with `.trailer("t", "v")`; the HTTP/1.1 trailer section is empty.
+- **Cause hypothesis**: the filters copy status, headers and body only.
+- **Fix**: none yet. Option: wrap the inner response (a delegating `Response` overriding
+  `headers()`, and `body()` for gzip) instead of rebuilding it, so `trailers()` is still called
+  lazily on the original.
+
+---
+
+## CHAPPE-018 — HTTP/2 responses keep connection-specific headers and padded values
+
+- **Date**: 2026-10-11
+- **Status**: OPEN (found in the CHAPPE-008 review)
+- **Module**: `chappe-http` (`h2/Http2Connection`, `h2/HpackEncoder`)
+- **Symptom**: on the response side, HTTP/2 sends whatever header fields the application set:
+  - connection-specific fields (`Connection`, `Keep-Alive`, `Proxy-Connection`,
+    `Transfer-Encoding`, `Upgrade`) are encoded as is. RFC 9113 §8.2.2 makes a message carrying
+    them malformed, and strict clients reset the stream;
+  - a value with leading or trailing SP or HTAB is sent as is; RFC 9113 §8.2.1 makes it
+    malformed too.
+  `FORBIDDEN_HEADERS` in `Http2Connection` is applied to requests only. CHAPPE-008 made the
+  values one byte per char without CR, LF or NUL, but not these two rules.
+- **Minimal reproduction**: not written yet. Shape: a handler returning
+  `Response.builder().header("Connection", "close").header("X", " padded ").build()` over h2c;
+  the HEADERS frame carries `connection: close` and `x:  padded `.
+- **Cause hypothesis**: the encoder was written for well-formed HTTP/1.1-style headers.
+- **Fix**: none yet. Options: drop the connection-specific fields when encoding a response (and
+  `te` unless it is `trailers`), and trim (or refuse with a 500) values with surrounding
+  whitespace.
+
+---
+
 ## CHAPPE-017 — an HTTP/2 response body failing mid-stream left the client stream hanging
 
 - **Date**: 2026-10-10
@@ -90,7 +132,9 @@ cause hypothesis, and status.
   closed. The lingering drain only discards bytes, so CHAPPE-013 still holds: no next request is
   ever parsed, no upgrade head is written (`InterruptedBodyReadTest` and
   `UpgradeAfterFailedBodyReadTest` stay green). A drain that fails now takes the same path instead
-  of the "lost connection" one.
+  of the "lost connection" one. Each close_notify write is bounded by `writeTimeout`
+  (review follow-up): a client that keeps uploading but never reads fills the send buffer, and the
+  unbounded write could have held the virtual thread and the socket forever.
 - **Residual**: when an interrupt already closed the channel (`InterruptibleChannel` semantics),
   nothing can be done on that socket: it closes at once, as before. The fix for that case
   belongs to the caller: hand the body back without interrupting a thread blocked in a read
@@ -269,9 +313,14 @@ cause hypothesis, and status.
   - **HTTP/1.1 writer**: `checkHead` checks every header and a custom reason phrase before a byte
     is buffered. On failure `HttpConnection` logs a warning, answers `500` and closes. Trailers
     are still dropped. `putAsciiString` refuses a char above U+00FF with an `IOException` instead of
-    truncating it.
+    truncating it. Each field is read once, checked and written from that same read (review
+    follow-up): a custom `Headers` returning other text on a second iteration cannot slip CR LF
+    through (`ResponseHeaderValidationTest#http11WritesTheFieldsItChecked`). A field found invalid
+    after part of a very large head was flushed drops the connection instead of answering 500.
   - **HTTP/2**: `Http2Connection` answers `500` for an invalid header. `HpackEncoder.encode` checks
-    every field before encoding the first one, so a refusal leaves the dynamic table untouched.
+    every field of a one-read snapshot before encoding the first one, so a refusal leaves the
+    dynamic table untouched and the encoded fields are the checked ones
+    (`#http2EncodesTheFieldsItChecked`).
     `encodeTrailers` drops invalid trailers, as HTTP/1.1 does. A `RuntimeException` while sending
     now resets the stream instead of leaving it open.
   - There is no HTTP/3 (QPACK) code in chappe yet: nothing to fix there.

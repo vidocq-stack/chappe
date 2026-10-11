@@ -21,6 +21,7 @@ package io.vidocq.chappe.http.h2;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Locale;
 
 import io.vidocq.chappe.api.Headers;
@@ -62,9 +63,12 @@ public final class HpackEncoder {
      */
     public byte[] encode(int statusCode, Headers headers) {
         // All fields are checked before the first one is encoded: a failure must leave the dynamic
-        // table untouched, or it would no longer match the peer's (CHAPPE-008).
+        // table untouched, or it would no longer match the peer's (CHAPPE-008). The fields are read
+        // once into a snapshot, so a custom Headers cannot hand back other text after the check.
+        var fields = new ArrayList<Headers.Entry>(Math.max(0, headers.size()));
         for (var entry : headers) {
             HeaderFields.requireValid("response header", entry.name(), entry.value());
+            fields.add(entry);
         }
         var out = new ByteArrayOutputStream(256);
 
@@ -73,7 +77,7 @@ public final class HpackEncoder {
         encodeHeader(out, ":status", statusValue);
 
         // Regular headers
-        for (var entry : headers) {
+        for (var entry : fields) {
             encodeHeader(out, entry.name().toLowerCase(Locale.ROOT), entry.value());
         }
 

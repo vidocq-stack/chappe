@@ -243,6 +243,71 @@ class ResponseHeaderValidationTest {
         assertFalse(last.containsKey("bad name"), last.toString());
     }
 
+    // --- a Headers that changes between iterations: the checked fields are the written ones ---
+
+    @Test
+    void http11WritesTheFieldsItChecked() throws IOException {
+        start(_ -> rawResponse(StatusCode.OK, new ShiftingHeaders(1), Headers.empty()));
+
+        String raw = http11Exchange();
+
+        assertFalse(raw.contains("Set-Cookie"), raw);
+    }
+
+    @Test
+    void http2EncodesTheFieldsItChecked() throws IOException {
+        start(_ -> rawResponse(StatusCode.OK, new ShiftingHeaders(2), Headers.empty()));
+
+        Map<String, String> head;
+        try {
+            head = http2Exchange().headers.getFirst();
+        } catch (IOException reset) {
+            return; // a reset stream is fine: nothing was injected
+        }
+        assertFalse(String.valueOf(head.get("x-shift")).contains("\n"), head.toString());
+    }
+
+    /**
+     * One header whose value is valid for the first {@code validIterations} iterations, then
+     * carries CR LF and a forged header line: a transport that checks one iteration and writes
+     * another would inject it.
+     */
+    private static final class ShiftingHeaders implements Headers {
+        private final int validIterations;
+        private final java.util.concurrent.atomic.AtomicInteger iterations =
+                new java.util.concurrent.atomic.AtomicInteger();
+
+        ShiftingHeaders(int validIterations) {
+            this.validIterations = validIterations;
+        }
+
+        @Override
+        public java.util.Iterator<Entry> iterator() {
+            String value = iterations.incrementAndGet() <= validIterations ? "ok" : "a\r\nSet-Cookie: a=b";
+            return List.of(new Entry("X-Shift", value)).iterator();
+        }
+
+        @Override
+        public java.util.Optional<String> first(String name) {
+            return java.util.Optional.empty();
+        }
+
+        @Override
+        public List<String> all(String name) {
+            return List.of();
+        }
+
+        @Override
+        public boolean contains(String name) {
+            return false;
+        }
+
+        @Override
+        public int size() {
+            return 1;
+        }
+    }
+
     // --- helpers ---
 
     private void start(Handler handler) {

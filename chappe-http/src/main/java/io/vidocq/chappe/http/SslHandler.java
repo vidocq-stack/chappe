@@ -299,8 +299,12 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
      * First half of a lingering close over TLS (see {@link LingeringClose}): sends
      * close_notify, then half-closes the socket and drains the ciphertext the peer
      * still sends. {@link #close()} completes it.
+     * <p>
+     * Each write of close_notify is bounded by {@code writeTimeout}, as response writes are: a
+     * client that keeps uploading but never reads leaves the send buffer full, and an unbounded
+     * write would then hold the connection forever. At the deadline the socket is closed.
      */
-    void closeNotifyAndDrain(ByteBuffer buffer) {
+    void closeNotifyAndDrain(ByteBuffer buffer, java.time.Duration writeTimeout) {
         writeLock.lock();
         try {
             engine.closeOutbound();
@@ -308,7 +312,7 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
             engine.wrap(EMPTY, netOutBuffer);
             netOutBuffer.flip();
             while (netOutBuffer.hasRemaining()) {
-                channel.write(netOutBuffer);
+                BoundedWrites.writeWithTimeout(channel, channel, netOutBuffer, writeTimeout);
             }
         } catch (IOException _) {
             return; // the connection is gone: nothing left to drain
