@@ -137,6 +137,20 @@ class TlsHandshakeHardeningTest {
     }
 
     @Test
+    void tls13KeyUpdateDoesNotCloseTheConnection() throws Exception {
+        start(ClientAuth.NONE);
+        try (var socket = connect("TLSv1.3")) {
+            assertTrue(exchange(socket).startsWith("HTTP/1.1 200"));
+            // On an established TLS 1.3 connection the JDK sends a KeyUpdate (update_requested):
+            // a post-handshake message, not a renegotiation, so it must keep the connection open.
+            socket.startHandshake();
+            assertTrue(exchange(socket).startsWith("HTTP/1.1 200"), "a TLS 1.3 KeyUpdate must not be refused");
+            assertFalse(socket.isClosed());
+        }
+        assertEquals(2, handled.get());
+    }
+
+    @Test
     void tls12NeedRejectionSendsTheAlert() throws Exception {
         start(ClientAuth.NEED);
         try (var socket = connect("TLSv1.2")) {

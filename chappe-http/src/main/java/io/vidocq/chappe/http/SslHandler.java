@@ -131,9 +131,12 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
      * Best-effort: wraps and writes what the engine still has to send (the alert of a rejected
      * handshake), each write bounded by the write timeout.
      *
-     * @return whether the alert was written and the connection is still usable for a lingering close
+     * @return whether bytes were written and the connection is still open, so a lingering close
+     *         protects them; {@code false} when there was nothing to send (for example, the
+     *         handshake failed on the client's own fatal alert) or the write failed
      */
     private boolean sendPendingAlert() {
+        boolean wrote = false;
         try {
             for (int i = 0; i < 4 && !engine.isOutboundDone(); i++) {
                 netOutBuffer.clear();
@@ -145,8 +148,9 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
                 if (result.bytesProduced() == 0) {
                     break;
                 }
+                wrote = true;
             }
-            return channel.isOpen();
+            return wrote && channel.isOpen();
         } catch (IOException _) {
             return false; // the connection is gone; the caller closes it anyway
         }
