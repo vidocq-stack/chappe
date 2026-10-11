@@ -20,7 +20,6 @@
 package io.vidocq.chappe.http;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.ReadableByteChannel;
 import java.util.function.Consumer;
@@ -37,7 +36,7 @@ public final class HttpBodyReader {
     /**
      * Creates an InputStream for a fixed-size body (Content-Length).
      */
-    static InputStream fixedLength(ByteBuffer buffer, ReadableByteChannel channel, long contentLength) {
+    static RequestBodyInputStream fixedLength(ByteBuffer buffer, ReadableByteChannel channel, long contentLength) {
         return new FixedLengthInputStream(buffer, channel, contentLength);
     }
 
@@ -47,7 +46,7 @@ public final class HttpBodyReader {
      * (RFC 9112 §7.1.2). A body announcing more than {@code maxBodySize} bytes
      * fails the read with {@link io.vidocq.chappe.api.RequestBodyTooLargeException}.
      */
-    static InputStream chunked(
+    static RequestBodyInputStream chunked(
             ByteBuffer buffer, ReadableByteChannel channel, Consumer<Headers> trailersConsumer, long maxBodySize) {
         return new ChunkedInputStream(buffer, channel, trailersConsumer, maxBodySize);
     }
@@ -56,15 +55,17 @@ public final class HttpBodyReader {
      * Reads and discards what is left of a request body, at most {@code maxBytes} bytes on the wire:
      * a handler that did not read its body leaves the rest on the connection, ahead of the next
      * request. A chunked body counts its framing and trailers too, so endless framing cannot outlast
-     * the budget (CHAPPE-021).
+     * the budget (CHAPPE-021). The parameter is a {@link RequestBodyInputStream} so that no stream
+     * can reach the drain without the wire-byte hook: a wrapper (such as the read timeout of
+     * CHAPPE-022) sits below the stream, on its channel, never around it.
      *
      * @return {@code true} when the body ended within the budget; {@code false} when more than
      *     {@code maxBytes} bytes were left, and the caller closes the connection instead (CHAPPE-021)
      * @throws IOException when the body cannot be read (bad framing, a body cut short, an earlier
      *     failed read): the caller closes the connection too
      */
-    static boolean drain(InputStream bodyStream, long maxBytes) throws IOException {
-        if (bodyStream instanceof RequestBodyInputStream body) body.limitRemainingWireBytes(maxBytes);
+    static boolean drain(RequestBodyInputStream bodyStream, long maxBytes) throws IOException {
+        bodyStream.limitRemainingWireBytes(maxBytes);
         byte[] buf = new byte[4096];
         long left = maxBytes;
         try {

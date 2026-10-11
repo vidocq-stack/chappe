@@ -32,12 +32,16 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.KeyStore;
 import java.security.cert.X509Certificate;
+import java.time.Duration;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSocket;
 import javax.net.ssl.X509TrustManager;
 
+import io.vidocq.chappe.api.Response;
 import io.vidocq.chappe.api.Server;
 
 import org.junit.jupiter.api.AfterAll;
@@ -212,6 +216,58 @@ class TlsLingeringCloseTest {
                     "the server must eventually close a connection that keeps sending after an error");
             long elapsedMs = (System.nanoTime() - start) / 1_000_000;
             assertTrue(elapsedMs < 8_000, "lingering must be bounded, took " + elapsedMs + " ms");
+        }
+    }
+
+    /** CHAPPE-022 over TLS: readTimeout bounds a body read through the SslHandler too. */
+    @Test
+    void aStalledBodyOverTlsFailsTheReadAfterTheReadTimeout() throws Exception {
+        var outcome = new CompletableFuture<String>();
+        var timed = Server.builder()
+                .port(0)
+                .tls(serverSslContext)
+                .readTimeout(Duration.ofMillis(300))
+                .handler(req -> {
+                    try {
+                        req.body().asInputStream().readAllBytes();
+                        outcome.complete("read");
+                    } catch (IOException e) {
+                        outcome.complete(e.getClass().getSimpleName());
+                    }
+                    return Response.ok("done");
+                })
+                .build();
+        timed.start();
+        try (var socket = (SSLSocket) trustAllContext.getSocketFactory().createSocket("127.0.0.1", timed.port())) {
+            socket.setSoTimeout(10_000);
+            socket.startHandshake();
+            OutputStream out = socket.getOutputStream();
+            out.write("POST /read HTTP/1.1\r\nHost: localhost\r\nContent-Length: 10\r\n\r\nabc"
+                    .getBytes(StandardCharsets.US_ASCII));
+            out.flush();
+
+            assertEquals("SocketTimeoutException", outcome.get(5, TimeUnit.SECONDS));
+
+            // The timed-out connection is closed at once: the response write must fail fast, not
+            // wait for writeTimeout (30 s) on a TLS engine whose outbound side is already closed.
+            long start = System.nanoTime();
+            assertThrows(IOException.class, () -> {
+                InputStream in = socket.getInputStream();
+                while (in.read() != -1) {
+                    // nothing is expected but the end of the connection
+                }
+                throw new IOException("end of stream");
+            });
+            long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+            assertTrue(elapsedMs < 5_000, "the timed-out connection must close promptly, took " + elapsedMs + " ms");
+
+            // Nor may the server's connection thread stay behind: stop() waits for it (grace 30 s).
+            start = System.nanoTime();
+            timed.stop();
+            elapsedMs = (System.nanoTime() - start) / 1_000_000;
+            assertTrue(elapsedMs < 5_000, "the connection thread outlived the timeout by " + elapsedMs + " ms");
+        } finally {
+            timed.stop();
         }
     }
 

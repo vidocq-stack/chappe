@@ -21,7 +21,6 @@ package io.vidocq.chappe.http;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.channels.SocketChannel;
@@ -45,6 +44,9 @@ public final class HttpConnection {
     private static final int BUFFER_SIZE = 16 * 1024; // 16 KB
 
     private final ReadableByteChannel readChannel;
+    /** {@link #readChannel} bounded by {@code readTimeout}: request bodies are read from it (CHAPPE-022). */
+    private final ReadableByteChannel bodyChannel;
+
     private final WritableByteChannel writeChannel;
     private final Closeable closeable;
     private final Handler handler;
@@ -90,6 +92,7 @@ public final class HttpConnection {
         this.closeable = closeable;
         this.handler = handler;
         this.config = config;
+        this.bodyChannel = TimedReadChannel.of(readChannel, closeable, config.readTimeout());
         if (prefilledBuffer != null) {
             this.readBuffer = prefilledBuffer;
         } else {
@@ -157,7 +160,7 @@ public final class HttpConnection {
 
                 // 3. Setup body. It reads nothing yet, so a refused body (a bad or oversized
                 // Content-Length) is answered with its final status instead of 100 Continue.
-                InputStream bodyStream;
+                RequestBodyInputStream bodyStream;
                 try {
                     bodyStream = setupBody();
                 } catch (BadBodyException e) {
@@ -321,8 +324,8 @@ public final class HttpConnection {
     }
 
     /** Whether reading the request body failed (a truncated or broken body leaves the stream unusable). */
-    private static boolean bodyReadFailed(InputStream bodyStream) {
-        return bodyStream instanceof RequestBodyInputStream body && body.failed();
+    private static boolean bodyReadFailed(RequestBodyInputStream bodyStream) {
+        return bodyStream.failed();
     }
 
     /**
@@ -330,7 +333,7 @@ public final class HttpConnection {
      * (CHAPPE-021). {@code false} when the budget ran out or the read failed: the connection must
      * then close instead of reading a next request or switching protocols.
      */
-    private boolean drained(InputStream bodyStream) {
+    private boolean drained(RequestBodyInputStream bodyStream) {
         try {
             return HttpBodyReader.drain(bodyStream, config.maxDrainSize());
         } catch (IOException _) {
@@ -352,6 +355,7 @@ public final class HttpConnection {
     public void close() {
         open = false;
         disarmDisconnectProbe();
+        if (bodyChannel instanceof TimedReadChannel timed) timed.stop();
         try {
             closeable.close();
         } catch (IOException _) {
@@ -519,14 +523,14 @@ public final class HttpConnection {
      * @return the body InputStream, or null if there is no body
      * @throws BadBodyException if Content-Length is invalid or exceeds the limit
      */
-    private InputStream setupBody() throws BadBodyException {
+    private RequestBodyInputStream setupBody() throws BadBodyException {
         var headers = request.headers();
         var transferEncoding = headers.firstOrNull("Transfer-Encoding");
         var contentLengthStr = headers.firstOrNull("Content-Length");
 
         // Transfer-Encoding: chunked wins over Content-Length (RFC 9112 §6.3)
         if ("chunked".equalsIgnoreCase(transferEncoding)) {
-            return HttpBodyReader.chunked(readBuffer, readChannel, request::setTrailers, config.maxRequestSize());
+            return HttpBodyReader.chunked(readBuffer, bodyChannel, request::setTrailers, config.maxRequestSize());
         }
 
         if (contentLengthStr != null) {
@@ -546,7 +550,7 @@ public final class HttpConnection {
                         StatusCode.PAYLOAD_TOO_LARGE,
                         "Content-Length " + cl + " exceeds max " + config.maxRequestSize());
             }
-            return HttpBodyReader.fixedLength(readBuffer, readChannel, cl);
+            return HttpBodyReader.fixedLength(readBuffer, bodyChannel, cl);
         }
 
         return null;

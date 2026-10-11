@@ -176,6 +176,19 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
         }
     }
 
+    /**
+     * Whether a {@link #read} would return decrypted bytes without touching the socket: the fast
+     * path of {@link TimedReadChannel}, which then takes no timer (CHAPPE-022).
+     */
+    boolean hasDecryptedInput() {
+        readLock.lock();
+        try {
+            return appInBuffer.hasRemaining();
+        } finally {
+            readLock.unlock();
+        }
+    }
+
     private int readInternal(ByteBuffer dst) throws IOException {
         if (appInBuffer.hasRemaining()) {
             return drain(dst);
@@ -293,6 +306,12 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
             }
 
             if (result.getStatus() == Status.CLOSED) break;
+        }
+        // The engine's outbound side is closed (close() or a peer close_notify) and refused bytes:
+        // nothing written ever will be. Returning 0 would make a "write until done" loop spin until
+        // its write timeout (CHAPPE-022: a read timeout closes the connection under the handler).
+        if (totalWritten == 0 && src.hasRemaining() && engine.isOutboundDone()) {
+            throw new java.nio.channels.ClosedChannelException();
         }
         return totalWritten;
     }

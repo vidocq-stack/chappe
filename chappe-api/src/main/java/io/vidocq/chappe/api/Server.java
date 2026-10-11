@@ -86,6 +86,10 @@ public interface Server extends AutoCloseable {
 
         Builder backlog(int backlog);
 
+        /**
+         * Bound on each blocking read of an HTTP/1.1 request body (default: 30s); see {@link
+         * ServerConfig#readTimeout()}. {@link Duration#ZERO} or a negative value disables it.
+         */
         Builder readTimeout(Duration timeout);
 
         /**

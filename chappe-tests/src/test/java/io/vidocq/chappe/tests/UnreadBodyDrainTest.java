@@ -30,10 +30,14 @@ import java.util.concurrent.CountDownLatch;
 import io.vidocq.chappe.api.ConnectionUpgrade;
 import io.vidocq.chappe.api.Handler;
 import io.vidocq.chappe.api.Headers;
+import io.vidocq.chappe.api.Request;
 import io.vidocq.chappe.api.Response;
 import io.vidocq.chappe.api.Server;
 import io.vidocq.chappe.api.ServerConfig;
 import io.vidocq.chappe.api.StatusCode;
+import io.vidocq.chappe.api.WebSocket;
+import io.vidocq.chappe.api.WebSocketHandler;
+import io.vidocq.chappe.api.WebSocketUpgrade;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -201,9 +205,103 @@ class UnreadBodyDrainTest {
     }
 
     @Test
+    void aWebSocketUpgradeWithABodyPastTheBudgetIsRefused() throws Exception {
+        var opened = new CountDownLatch(1);
+        server = Server.builder()
+                .port(0)
+                .maxDrainSize(16)
+                .handler(_ -> new WebSocketUpgrade(new WebSocketHandler() {
+                    @Override
+                    public void onOpen(WebSocket ws, Request handshake) {
+                        opened.countDown();
+                    }
+                }))
+                .build();
+        server.start();
+
+        String response = sendThenRead(
+                server.port(),
+                "POST /ws HTTP/1.1\r\nHost: h\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                        + "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n"
+                        + "Content-Length: 1024\r\n\r\n" + "x".repeat(1024));
+
+        assertEquals("", response, "the connection must close without any head");
+        assertEquals(1, opened.getCount(), "the WebSocket must not be opened");
+    }
+
+    @Test
+    void aZeroBudgetClosesTheConnectionWhenABodyWasLeftUnread() throws Exception {
+        int port = start(0);
+        String response =
+                sendThenRead(port, "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 1\r\n\r\nx" + NEXT_REQUEST);
+
+        assertEquals(1, count(response, "pong"), "the pipelined request must not be read: " + response);
+    }
+
+    @Test
+    void aZeroBudgetKeepsTheConnectionWhenTheHandlerReadTheWholeBody() throws Exception {
+        int port = start(0, req -> {
+            req.body().asInputStream().readAllBytes();
+            return Response.ok("pong");
+        });
+        String response = sendThenRead(
+                port,
+                "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 10\r\n\r\n" + "x".repeat(10) + NEXT_REQUEST);
+
+        assertEquals(2, count(response, "pong"), ChunkedBodyLimitTest.head(response));
+    }
+
+    @Test
+    void theUnreadRestOfAPartlyReadContentLengthBodyIsDrainedWithinTheBudget() throws Exception {
+        // The handler reads 10 of 200 bytes: the 190 it left fit a 190-byte budget.
+        int port = start(190, UnreadBodyDrainTest::readTenBytes);
+        String response = sendThenRead(
+                port,
+                "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 200\r\n\r\n" + "x".repeat(200) + NEXT_REQUEST);
+
+        assertEquals(2, count(response, "pong"), ChunkedBodyLimitTest.head(response));
+    }
+
+    @Test
+    void theUnreadRestOfAPartlyReadContentLengthBodyPastTheBudgetClosesTheConnection() throws Exception {
+        // The handler reads 10 of 200 bytes: the 190 it left exceed a 189-byte budget.
+        int port = start(189, UnreadBodyDrainTest::readTenBytes);
+        String response = sendThenRead(
+                port,
+                "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 200\r\n\r\n" + "x".repeat(200) + NEXT_REQUEST);
+
+        assertEquals(1, count(response, "pong"), "the pipelined request must not be read: " + response);
+    }
+
+    @Test
     void theDrainBudgetDefaultsToOneMebibyteAndRefusesANegativeValue() {
         assertEquals(1024L * 1024, ServerConfig.DEFAULT.maxDrainSize());
         assertThrows(IllegalArgumentException.class, () -> Server.builder().maxDrainSize(-1));
+    }
+
+    @Test
+    void aServerConfigBuiltDirectlyRefusesANegativeDrainBudget() {
+        var d = ServerConfig.DEFAULT;
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new ServerConfig(
+                        d.host(),
+                        d.port(),
+                        d.backlog(),
+                        d.readTimeout(),
+                        d.writeTimeout(),
+                        d.idleTimeout(),
+                        d.maxRequestSize(),
+                        d.maxHeaderSize(),
+                        -1L,
+                        d.sslContext(),
+                        d.alpnProtocols(),
+                        d.shutdownGracePeriod()));
+    }
+
+    private static Response readTenBytes(Request request) throws IOException {
+        request.body().asInputStream().readNBytes(10);
+        return Response.ok("pong");
     }
 
     private static String sendThenRead(int port, String request) throws Exception {

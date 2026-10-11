@@ -105,7 +105,7 @@ The executor is not configurable: every connection is handled on its own virtual
 [#timeouts]
 ==== Timeouts
 
-* `readTimeout` (default 30 s) bounds a blocking read of the request.
+* `readTimeout` (default 30 s) [.tag-new]#NEW# bounds *each* blocking read of an HTTP/1.1 request body, over plaintext and TLS, including the drain of a body the handler left unread. When no byte arrives for that long, the read throws `java.net.SocketTimeoutException` and Chappe closes the connection. It bounds each read, not the whole body: an upload that keeps sending, however slowly, is not cut. `Duration.ZERO` or a negative value disables it. Until 0.3.0 the value was accepted by the builder and never applied.
 * `idleTimeout` (default 60 s) bounds inactivity on the read side: a connection that sends nothing for that long is closed.
 * `writeTimeout` (default 30 s) [.tag-new]#NEW# bounds *one* blocking write of an HTTP/1.1 response: how long the socket may refuse the bytes Chappe is sending, because the client does not read. When it expires, Chappe closes the connection, and the client gets a truncated body. It is not an inactivity bound on the response: nothing is timed while there is nothing to send, so a Server-Sent Events stream with long gaps between events is never cut by it. Until 0.3.0 the value was accepted by the builder and never applied.
 

@@ -5,6 +5,37 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-022 — ServerConfig.readTimeout is never applied
+
+- **Date**: 2026-10-11
+- **Status**: FIXED (commit `fix(http): apply readTimeout to HTTP/1.1 request body reads (CHAPPE-022)`,
+  branch `pr/ybl/chappe-request-body-bounds`)
+- **Module**: `chappe-http` (`HttpConnection`, new `TimedReadChannel`, `SslHandler`), `chappe-api` (Javadoc)
+- **Symptom**: `Server.Builder.readTimeout(Duration)` was stored and never read. A request body read
+  blocked for as long as the client sent nothing: a stalled upload pinned the handler, and the drain
+  of an unread body held the connection until the client closed it.
+- **Minimal reproduction**: `chappe-tests/.../RequestBodyReadTimeoutTest#aStalledContentLengthBodyFailsTheReadAfterTheReadTimeout`
+  (`Content-Length: 10`, 3 bytes sent: the handler waited forever).
+- **Cause**: body streams read the raw channel. `SO_TIMEOUT` does not apply to channel reads, and only
+  the idle wait was bounded (CHAPPE-005).
+- **Fix**: body streams read their channel through `TimedReadChannel`, below the
+  `RequestBodyInputStream`, so the wire-byte drain budget of CHAPPE-021 still applies. A read that
+  finds bytes ready (non-blocking probe of the socket, or decrypted bytes held by the `SslHandler`)
+  takes no timer. A read that has to wait arms a deadline that one watchdog virtual thread per
+  connection follows; no thread is started per read. At the deadline the connection is closed and
+  the read throws `SocketTimeoutException`; zero or negative disables the bound. The HTTP/2
+  counterpart is CHAPPE-024.
+- **Found while fixing**: over TLS, once the connection was closed under the handler,
+  `SslHandler.write` returned `0` (the engine's outbound side is done) instead of failing, so the
+  response writer looped until `writeTimeout` (30 s) and the connection thread outlived the close.
+  It now throws `ClosedChannelException` when the closed engine refuses bytes
+  (`TlsLingeringCloseTest#aStalledBodyOverTlsFailsTheReadAfterTheReadTimeout` asserts a prompt stop).
+- **Also in this commit (CHAPPE-021 follow-ups)**: `ServerConfig` refuses a negative `maxDrainSize`
+  in its canonical constructor too; `HttpBodyReader.drain` takes a `RequestBodyInputStream`, so no
+  body stream reaches the drain without the wire-byte hook.
+
+---
+
 ## CHAPPE-021 — the drain of an unread request body has no bound
 
 - **Date**: 2026-10-11
