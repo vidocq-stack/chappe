@@ -155,7 +155,17 @@ public final class HttpConnection {
                     }
                 }
 
-                // 3. Expect: 100-continue (RFC 9110 §10.1.1)
+                // 3. Setup body. It reads nothing yet, so a refused body (a bad or oversized
+                // Content-Length) is answered with its final status instead of 100 Continue.
+                InputStream bodyStream;
+                try {
+                    bodyStream = setupBody();
+                } catch (BadBodyException e) {
+                    sendError(e.status(), e.getMessage());
+                    break;
+                }
+
+                // 4. Expect: 100-continue (RFC 9110 §10.1.1)
                 if ("100-continue".equalsIgnoreCase(request.headers().firstOrNull("Expect"))) {
                     // Send 100 Continue before reading the body
                     var continueBytes = "HTTP/1.1 100 Continue\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
@@ -163,15 +173,6 @@ public final class HttpConnection {
                     while (buf.hasRemaining()) {
                         writeChannel.write(buf);
                     }
-                }
-
-                // 4. Setup body
-                InputStream bodyStream;
-                try {
-                    bodyStream = setupBody();
-                } catch (BadBodyException e) {
-                    sendError(StatusCode.BAD_REQUEST, e.getMessage());
-                    break;
                 }
                 if (bodyStream != null) {
                     request.body = Body.of(bodyStream, contentLength());
@@ -516,7 +517,7 @@ public final class HttpConnection {
 
         // Transfer-Encoding: chunked wins over Content-Length (RFC 9112 §6.3)
         if ("chunked".equalsIgnoreCase(transferEncoding)) {
-            return HttpBodyReader.chunked(readBuffer, readChannel, request::setTrailers);
+            return HttpBodyReader.chunked(readBuffer, readChannel, request::setTrailers, config.maxRequestSize());
         }
 
         if (contentLengthStr != null) {
@@ -531,7 +532,10 @@ public final class HttpConnection {
             }
             if (cl == 0) return null;
             if (cl > config.maxRequestSize()) {
-                throw new BadBodyException("Content-Length " + cl + " exceeds max " + config.maxRequestSize());
+                // RFC 9110 §15.5.14: the body is refused for its size, not for its framing.
+                throw new BadBodyException(
+                        StatusCode.PAYLOAD_TOO_LARGE,
+                        "Content-Length " + cl + " exceeds max " + config.maxRequestSize());
             }
             return HttpBodyReader.fixedLength(readBuffer, readChannel, cl);
         }
@@ -540,8 +544,19 @@ public final class HttpConnection {
     }
 
     private static final class BadBodyException extends Exception {
+        private final StatusCode status;
+
         BadBodyException(String message) {
+            this(StatusCode.BAD_REQUEST, message);
+        }
+
+        BadBodyException(StatusCode status, String message) {
             super(message);
+            this.status = status;
+        }
+
+        StatusCode status() {
+            return status;
         }
     }
 

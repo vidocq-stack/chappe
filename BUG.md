@@ -5,6 +5,35 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-020 — a chunked request body is not capped by maxRequestSize
+
+- **Date**: 2026-10-11
+- **Status**: FIXED (commit `fix(http): cap chunked request bodies at maxRequestSize (CHAPPE-020)`,
+  branch `pr/ybl/chappe-request-body-bounds`)
+- **Module**: `chappe-http` (`ChunkedInputStream`, `HttpConnection`), `chappe-api`
+  (`RequestBodyTooLargeException`)
+- **Symptom**: `maxRequestSize` refused a `Content-Length` above it with a `400` (RFC 9110 §15.5.14
+  calls for `413 Content Too Large`), and a chunked body was decoded to its end whatever its size. A
+  handler reading it (`readAllBytes`) buffered all of it, and chappe's own drain of an unread body
+  read all of it before the next request.
+- **Minimal reproduction**: `chappe-tests/.../ChunkedBodyLimitTest#aChunkedBodyOverTheLimitFailsTheReadAndClosesTheConnection`
+  (`maxRequestSize(1024)`, three 400-byte chunks: the handler read 1,200 bytes and the pipelined
+  request behind the body was answered).
+- **Cause**: `setupBody()` passed no limit to `HttpBodyReader.chunked`, and `ChunkedInputStream` had
+  no counter.
+- **Fix**: `ChunkedInputStream` counts the chunk sizes it reads. A chunk that would take the body past
+  `maxRequestSize` fails the read with the new `RequestBodyTooLargeException` (an `IOException`
+  carrying `limit()`), before any of its data is read. The body stream is then `failed()`, so the
+  connection closes with a lingering close and reads no other request (CHAPPE-013, CHAPPE-014). A
+  `Content-Length` above `maxRequestSize` is now answered `413` instead of `400`
+  (`ChunkedBodyLimitTest#aContentLengthOverTheLimitIsAnswered413BeforeTheHandlerRuns`,
+  `Http11StatusCodesTest#payloadTooLarge413`). The body is now set up before `Expect: 100-continue`
+  is answered, so a refused `Content-Length` gets its `413` (or `400`) instead of `100 Continue`
+  first (RFC 9110 §10.1.1;
+  `ChunkedBodyLimitTest#anExpectContinueWithAContentLengthOverTheLimitGets413Without100Continue`).
+
+---
+
 ## CHAPPE-019 — Filter.addHeaderIf and Filter.gzip drop the response trailers
 
 - **Date**: 2026-10-11

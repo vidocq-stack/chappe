@@ -44,10 +44,12 @@ public final class HttpBodyReader {
     /**
      * Creates an InputStream for a chunked-transfer-encoded body. Trailer
      * fields after the terminal chunk are delivered to {@code trailersConsumer}
-     * (RFC 9112 §7.1.2).
+     * (RFC 9112 §7.1.2). A body announcing more than {@code maxBodySize} bytes
+     * fails the read with {@link io.vidocq.chappe.api.RequestBodyTooLargeException}.
      */
-    static InputStream chunked(ByteBuffer buffer, ReadableByteChannel channel, Consumer<Headers> trailersConsumer) {
-        return new ChunkedInputStream(buffer, channel, trailersConsumer);
+    static InputStream chunked(
+            ByteBuffer buffer, ReadableByteChannel channel, Consumer<Headers> trailersConsumer, long maxBodySize) {
+        return new ChunkedInputStream(buffer, channel, trailersConsumer, maxBodySize);
     }
 
     /**

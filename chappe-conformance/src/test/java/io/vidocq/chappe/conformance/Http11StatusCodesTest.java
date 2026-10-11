@@ -89,9 +89,8 @@ class Http11StatusCodesTest {
                 2_000);
 
         int status = RawHttp.extractStatusCode(response);
-        // Server should reject with 413 Content Too Large or similar error
-        assertTrue(
-                status == 413 || status == 404 || status >= 400, "Oversized payload should be handled, got: " + status);
+        // RFC 9110 §15.5.14: 413 Content Too Large
+        assertEquals(413, status, "Oversized payload must be answered 413");
     }
 
     @Test

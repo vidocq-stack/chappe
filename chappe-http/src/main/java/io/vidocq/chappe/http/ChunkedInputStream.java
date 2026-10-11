@@ -25,6 +25,7 @@ import java.nio.channels.ReadableByteChannel;
 import java.util.function.Consumer;
 
 import io.vidocq.chappe.api.Headers;
+import io.vidocq.chappe.api.RequestBodyTooLargeException;
 
 /**
  * InputStream decoding chunked transfer encoding (RFC 9112, Section 7.1).
@@ -46,17 +47,22 @@ final class ChunkedInputStream extends RequestBodyInputStream {
     private final ByteBuffer buffer;
     private final ReadableByteChannel channel;
     private final Consumer<Headers> trailersConsumer;
+    private final long maxBodySize;
     private ChunkState chunkState = ChunkState.READ_SIZE;
     private long chunkRemaining;
+    /** Sum of the chunk sizes announced so far (CHAPPE-020). */
+    private long announcedBytes;
 
     ChunkedInputStream(ByteBuffer buffer, ReadableByteChannel channel) {
-        this(buffer, channel, null);
+        this(buffer, channel, null, Long.MAX_VALUE);
     }
 
-    ChunkedInputStream(ByteBuffer buffer, ReadableByteChannel channel, Consumer<Headers> trailersConsumer) {
+    ChunkedInputStream(
+            ByteBuffer buffer, ReadableByteChannel channel, Consumer<Headers> trailersConsumer, long maxBodySize) {
         this.buffer = buffer;
         this.channel = channel;
         this.trailersConsumer = trailersConsumer;
+        this.maxBodySize = maxBodySize;
     }
 
     @Override
@@ -162,6 +168,7 @@ final class ChunkedInputStream extends RequestBodyInputStream {
                     consumeTrailers();
                     chunkState = ChunkState.DONE;
                 } else {
+                    countChunk(size);
                     chunkState = ChunkState.READ_DATA;
                 }
                 return;
@@ -174,6 +181,7 @@ final class ChunkedInputStream extends RequestBodyInputStream {
                     consumeTrailers();
                     chunkState = ChunkState.DONE;
                 } else {
+                    countChunk(size);
                     chunkState = ChunkState.READ_DATA;
                 }
                 return;
@@ -189,6 +197,16 @@ final class ChunkedInputStream extends RequestBodyInputStream {
             }
             size = (size << 4) | digit;
         }
+    }
+
+    /**
+     * Counts a chunk against {@code maxBodySize} as soon as its size line is read: a chunk that would
+     * take the body past the cap fails before any of its data is read (CHAPPE-020). The stream is then
+     * {@link #failed()}, so the connection closes instead of draining it.
+     */
+    private void countChunk(long size) throws RequestBodyTooLargeException {
+        if (size > maxBodySize - announcedBytes) throw new RequestBodyTooLargeException(maxBodySize);
+        announcedBytes += size;
     }
 
     private void consumeCrlf() throws IOException {
