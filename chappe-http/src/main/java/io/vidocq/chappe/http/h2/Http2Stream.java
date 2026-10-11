@@ -85,6 +85,19 @@ public final class Http2Stream {
     private volatile boolean endStreamReceived;
     private volatile boolean cancelled;
 
+    // Request body limit (maxRequestSize) and its race with the response (CHAPPE-025). The DATA of a
+    // stream passes the limit before or after the router chose its handler: until the reader, the
+    // response or the gRPC route decides, a body over the limit stays BODY_OVER_LIMIT, still buffered
+    // (the stream window bounds it).
+    private static final int RESPONSE_PENDING = 0;
+    private static final int RESPONSE_STARTED = 1;
+    private static final int BODY_OVER_LIMIT = 2;
+    private static final int BODY_TOO_LARGE = 3;
+    private static final int BODY_LIMIT_EXEMPT = 4;
+    private final AtomicInteger bodyPhase = new AtomicInteger(RESPONSE_PENDING);
+    private volatile long bodyLimit = Long.MAX_VALUE;
+    private long bodyBytesReceived; // connection thread only
+
     public Http2Stream(int streamId, int initialRecvWindow, int initialSendWindow) {
         this(streamId, initialRecvWindow, initialSendWindow, null, _ -> {});
     }
@@ -149,10 +162,19 @@ public final class Http2Stream {
      * received END_STREAM ends it cleanly.
      */
     public void cancel() {
+        cancelKeepingResponseBody();
+        releaseResponseBody();
+    }
+
+    /**
+     * {@link #cancel() Cancels} the stream but leaves the release of its response body to the caller,
+     * which runs {@link #releaseResponseBody()} once it holds no lock: {@link Body#release()} is
+     * application code, and one that blocks must not stall the threads waiting on that lock.
+     */
+    void cancelKeepingResponseBody() {
         cancelled = true;
         dataQueue.add(ByteBuffer.allocate(0)); // sentinel to unblock pollData(); not an END_STREAM
         close();
-        releaseResponseBody();
         sendLock.lock();
         try {
             sendWindowAvailable.signalAll();
@@ -208,7 +230,7 @@ public final class Http2Stream {
      * §6.9, CHAPPE-024).
      */
     void bodyBytesConsumed(int n) {
-        if (n <= 0 || endStreamReceived || cancelled) return;
+        if (n <= 0 || endStreamReceived || cancelled || bodyTooLarge()) return;
         if (consumedSinceUpdate.addAndGet(n) < windowUpdateThreshold) return;
         int increment = consumedSinceUpdate.getAndSet(0);
         if (increment <= 0) return;
@@ -235,8 +257,8 @@ public final class Http2Stream {
     }
 
     /**
-     * Sets the bound on a body read waiting for the next DATA frame. Called on the connection thread
-     * once the request headers are decoded, before the stream is dispatched: a gRPC stream clears it.
+     * Sets the bound on a body read waiting for the next DATA frame. Called on the handler thread, in
+     * the dispatch, once the router sent the call to a gRPC handler: that clears it (ruling F-04).
      */
     void bodyReadTimeout(Duration timeout) {
         this.bodyReadTimeout = timeout;
@@ -340,6 +362,73 @@ public final class Http2Stream {
 
     boolean isDataQueueEmpty() {
         return dataQueue.isEmpty();
+    }
+
+    // --- Request body limit (CHAPPE-025) ---
+
+    void bodyLimit(long limit) {
+        this.bodyLimit = limit;
+    }
+
+    long bodyLimit() {
+        return bodyLimit;
+    }
+
+    /**
+     * Counts {@code n} received body bytes (DATA payload, padding excluded); {@code true} once the body
+     * went past its limit. Connection thread only.
+     */
+    boolean exceedsBodyLimit(int n) {
+        bodyBytesReceived += n;
+        return bodyBytesReceived > bodyLimit;
+    }
+
+    /**
+     * Records that the body went past its limit. {@code true} when the response has already started:
+     * the caller resets the stream with CANCEL. Otherwise the body stays buffered until the reader, the
+     * response or a gRPC route decides: a reader fails, a response becomes a 413, a gRPC call reads on.
+     * Connection thread only.
+     */
+    boolean passBodyLimit() {
+        bodyPhase.compareAndSet(RESPONSE_PENDING, BODY_OVER_LIMIT);
+        return bodyPhase.get() == RESPONSE_STARTED;
+    }
+
+    /**
+     * Claims the response for the dispatch. {@code false} when the request body went past its limit
+     * first: the dispatch then answers 413 instead of the handler's response.
+     */
+    boolean startResponse() {
+        return bodyPhase.compareAndSet(RESPONSE_PENDING, RESPONSE_STARTED) || !rejectBody();
+    }
+
+    /**
+     * Turns a body over its limit into a rejected one: the buffered DATA is dropped and every read
+     * fails from then on. {@code true} when the body is rejected, {@code false} when it is within its
+     * limit, exempt, or its response already started.
+     */
+    boolean rejectBody() {
+        if (bodyPhase.compareAndSet(BODY_OVER_LIMIT, BODY_TOO_LARGE)) {
+            dataQueue.clear();
+            dataQueue.add(ByteBuffer.allocate(0)); // wakes a reader waiting on another thread
+        }
+        return bodyPhase.get() == BODY_TOO_LARGE;
+    }
+
+    /** Whether the body was rejected for going past its limit: its DATA is dropped and not credited. */
+    boolean bodyTooLarge() {
+        return bodyPhase.get() == BODY_TOO_LARGE;
+    }
+
+    /**
+     * Exempts the stream from the body limit: the router sent it to a gRPC handler, whose call carries
+     * a sequence of messages rather than one body (ruling P-1). Decided by the route, never by a client
+     * header. A body already over the limit but not yet rejected is read on.
+     */
+    void exemptFromBodyLimit() {
+        if (!bodyPhase.compareAndSet(RESPONSE_PENDING, BODY_LIMIT_EXEMPT)) {
+            bodyPhase.compareAndSet(BODY_OVER_LIMIT, BODY_LIMIT_EXEMPT);
+        }
     }
 
     /** Creates a Body fed by the data queue. */

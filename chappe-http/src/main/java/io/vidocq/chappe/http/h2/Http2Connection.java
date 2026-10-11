@@ -296,6 +296,8 @@ public final class Http2Connection {
                 remoteSettings.initialWindowSize(),
                 config.readTimeout(),
                 increment -> creditStreamWindow(streamId, increment));
+        // maxRequestSize caps the body; a call routed to a gRPC handler is exempted at dispatch (CHAPPE-025).
+        stream.bodyLimit(config.maxRequestSize());
         stream.open();
         streams.put(streamId, stream);
 
@@ -440,6 +442,22 @@ public final class Http2Connection {
         stream.consumeRecvWindow(flowLength);
 
         int dataLength = frame.data().remaining();
+        if (stream.bodyTooLarge()) {
+            // Rejected for going past maxRequestSize: dropped, and not credited back to the stream
+            // window, so the client stops at it (CHAPPE-025).
+            if (frame.endStream()) {
+                stream.signalEndStream();
+                stream.halfCloseRemote();
+            }
+            replenishConnectionWindow();
+            return;
+        }
+        if (stream.exceedsBodyLimit(dataLength) && stream.passBodyLimit()) {
+            // Past maxRequestSize once the response is on its way: too late for a 413 (CHAPPE-025).
+            resetStream(stream, Http2ErrorCode.CANCEL);
+            replenishConnectionWindow();
+            return;
+        }
         if (dataLength > 0) {
             byte[] copy = new byte[dataLength];
             frame.data().get(copy);
@@ -477,19 +495,24 @@ public final class Http2Connection {
     }
 
     /**
-     * Writes RST_STREAM for {@code stream} under its reset lock, after {@code beforeReset} (the
-     * cancellation, if any): a body reader crediting the window concurrently either wrote its
-     * WINDOW_UPDATE before, or sees the reset and writes none.
+     * Writes RST_STREAM for {@code stream} under its reset lock, after cancelling it if {@code cancel}:
+     * a body reader crediting the window concurrently either wrote its WINDOW_UPDATE before, or sees
+     * the reset and writes none. The response body of a cancelled stream is released once the lock is
+     * let go: {@link Body#release()} is application code, and one that blocks must not hold the lock.
      */
-    private void writeRstStream(Http2Stream stream, Http2ErrorCode error, Runnable beforeReset) throws IOException {
+    private void writeRstStream(Http2Stream stream, Http2ErrorCode error, boolean cancel) throws IOException {
         var lock = stream.resetLock();
         lock.lock();
         try {
-            beforeReset.run();
+            if (cancel) {
+                stream.cancelKeepingResponseBody();
+                wakeConnectionWindowWaiters();
+            }
             stream.markResetSent();
             frameWriter.writeRstStream(stream.streamId(), error);
         } finally {
             lock.unlock();
+            if (cancel) stream.releaseResponseBody();
         }
     }
 
@@ -645,6 +668,8 @@ public final class Http2Connection {
                 // lives (client or bidi streaming), with pauses of any length: readTimeout does not
                 // bound it (ruling F-04). Decided by the route, never by a client header.
                 stream.bodyReadTimeout(null);
+                // Nor does maxRequestSize: a stream of messages, each bounded by the gRPC layer (P-1).
+                stream.exemptFromBodyLimit();
                 var call = new io.vidocq.chappe.http.grpc.GrpcCallImpl(stream, request, this);
                 io.vidocq.chappe.http.grpc.GrpcCallImpl.run(call, gd.handler());
                 completed = true;
@@ -654,10 +679,17 @@ public final class Http2Connection {
             // gRPC-Web switch: trailers serialized inline as a 0x80 DATA frame.
             if (response instanceof io.vidocq.chappe.api.GrpcWebDispatch gwd) {
                 stream.bodyReadTimeout(null); // as for gRPC above (ruling F-04)
+                stream.exemptFromBodyLimit(); // as for gRPC above (P-1, CHAPPE-025)
                 var call = new io.vidocq.chappe.http.grpc.GrpcWebCallImpl(stream, request, this, gwd.mode());
                 io.vidocq.chappe.http.grpc.GrpcWebCallImpl.run(call, gwd.handler());
                 completed = true;
                 return;
+            }
+
+            // The request body went past maxRequestSize before the response started: 413 instead of the
+            // handler's response, which is still released in the finally block (CHAPPE-025).
+            if (!stream.startResponse()) {
+                response = Response.of(StatusCode.PAYLOAD_TOO_LARGE);
             }
 
             // A head HPACK cannot carry as is (a custom Response bypassing the builder's checks)
@@ -698,7 +730,7 @@ public final class Http2Connection {
         if (stream.isCancelled()) return; // reset by the peer or connection gone: no frame (§5.4.2)
         resetStreams.add(stream.streamId()); // the request DATA still in flight is ignored (§5.1)
         try {
-            writeRstStream(stream, Http2ErrorCode.INTERNAL_ERROR, () -> {});
+            writeRstStream(stream, Http2ErrorCode.INTERNAL_ERROR, false);
         } catch (IOException _) {
             // connection lost: nothing more to tell the peer
         }
@@ -715,7 +747,7 @@ public final class Http2Connection {
         streams.remove(stream.streamId());
         try {
             // the cancel fails a reader still waiting for the body instead of letting it wait forever
-            writeRstStream(stream, Http2ErrorCode.NO_ERROR, stream::cancel);
+            writeRstStream(stream, Http2ErrorCode.NO_ERROR, true);
         } catch (IOException _) {
             // connection lost: nothing more to tell the peer
         }
@@ -729,10 +761,7 @@ public final class Http2Connection {
     private void resetStream(Http2Stream stream, Http2ErrorCode error) throws IOException {
         resetStreams.add(stream.streamId());
         streams.remove(stream.streamId());
-        writeRstStream(stream, error, () -> {
-            stream.cancel();
-            wakeConnectionWindowWaiters();
-        });
+        writeRstStream(stream, error, true);
     }
 
     /** {@link Body#release() Releases} the body of a response the handler returned; never throws. */

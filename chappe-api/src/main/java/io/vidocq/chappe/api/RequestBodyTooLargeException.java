@@ -25,8 +25,13 @@ import java.io.Serial;
 /**
  * Thrown by a request body read that would go past the server's {@link ServerConfig#maxRequestSize()
  * maxRequestSize}. A handler can tell it from a cut or malformed body and answer {@code 413}. The
- * body is unusable afterwards: every later read of it throws the same exception, and over HTTP/1.1
- * the connection is closed after the response.
+ * body is unusable afterwards: every later read of it throws the same exception.
+ *
+ * <p>Over HTTP/1.1 the connection is closed after the response. Over HTTP/2 the read throws once the
+ * DATA payload of the stream passes the cap; while the response has not started, the server then
+ * answers {@code 413} in place of the handler's response and resets the rest of the upload with
+ * {@code RST_STREAM(NO_ERROR)}. Once the response has started, the stream is reset with {@code
+ * RST_STREAM(CANCEL)} instead. A call routed to a gRPC handler is not capped.
  */
 public final class RequestBodyTooLargeException extends IOException {
 

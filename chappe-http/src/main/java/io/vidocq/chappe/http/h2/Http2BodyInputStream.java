@@ -25,6 +25,8 @@ import java.net.SocketTimeoutException;
 import java.nio.ByteBuffer;
 import java.util.Objects;
 
+import io.vidocq.chappe.api.RequestBodyTooLargeException;
+
 /**
  * InputStream fed by the DATA frame queue of an HTTP/2 stream.
  * <p>
@@ -70,10 +72,12 @@ final class Http2BodyInputStream extends InputStream {
      * Makes bytes available, or returns {@code false} at a clean end of the body (END_STREAM).
      * A stream reset by the peer, or cut by the end of its connection, before its END_STREAM
      * fails the read: a truncated body must never pass for a complete one. A wait for the next
-     * DATA frame longer than {@code readTimeout} fails it too (CHAPPE-024).
+     * DATA frame longer than {@code readTimeout} fails it too (CHAPPE-024), and so does a body past
+     * {@code maxRequestSize}, with {@link RequestBodyTooLargeException} (CHAPPE-025).
      */
     private boolean ensureBuffer() throws IOException {
         while (current == null || !current.hasRemaining()) {
+            failIfTooLarge();
             if (stream.isDataQueueEmpty()) {
                 if (stream.isEndStreamReceived()) return false;
                 if (stream.isCancelled()) throw streamReset();
@@ -84,6 +88,7 @@ final class Http2BodyInputStream extends InputStream {
                 Thread.currentThread().interrupt();
                 throw new IOException("Interrupted while reading HTTP/2 body", e);
             }
+            failIfTooLarge(); // the frame that passed the limit is never handed out
             if (current == null) throw readTimedOut();
             if (!current.hasRemaining()) {
                 if (stream.isEndStreamReceived()) return false;
@@ -91,6 +96,14 @@ final class Http2BodyInputStream extends InputStream {
             }
         }
         return true;
+    }
+
+    /** Fails the read once the body went past its limit, unless the stream is exempt (CHAPPE-025). */
+    private void failIfTooLarge() throws RequestBodyTooLargeException {
+        if (stream.rejectBody()) {
+            current = null;
+            throw new RequestBodyTooLargeException(stream.bodyLimit());
+        }
     }
 
     private SocketTimeoutException readTimedOut() {

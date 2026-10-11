@@ -5,6 +5,39 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-025 — HTTP/2 request bodies are not capped by maxRequestSize
+
+- **Date**: 2026-10-11
+- **Status**: FIXED (commit `fix(http): cap HTTP/2 request bodies at maxRequestSize (CHAPPE-025)`,
+  branch `pr/ybl/chappe-request-body-bounds`)
+- **Module**: `chappe-http` (`h2/Http2Connection`, `h2/Http2Stream`, `h2/Http2BodyInputStream`),
+  `chappe-api` (`RequestBodyTooLargeException` Javadoc)
+- **Symptom**: nothing in `h2/` read `maxRequestSize`: an HTTP/2 request body of any size was handed
+  to the handler.
+- **Minimal reproduction**: `chappe-tests/.../Http2RequestBodyLimitTest#aBodyOverTheLimitIsAnswered413WhenTheResponseHasNotStarted`
+  (`maxRequestSize(1000)`, 1,200 bytes: the handler kept waiting for more).
+- **Cause**: the limit was only wired in the HTTP/1.1 `setupBody()`.
+- **Fix**: each stream counts the payload of its DATA frames against `maxRequestSize` (padding
+  excluded: it is not body, and flow control already bounds it). A per-stream phase, changed by
+  compare-and-set, decides what passing the limit does:
+  - before the response starts, the body stays buffered (bounded by the stream window) until the
+    reader, the response or the route decides: the handler's read fails with
+    `RequestBodyTooLargeException` (the frame that passed the limit is never handed out), the
+    buffered DATA is dropped and no longer credited, and the dispatch answers `413` instead of the
+    handler's response, then resets the rest of the upload with `RST_STREAM(NO_ERROR)` (CHAPPE-023);
+  - once the response has started, the stream is reset with `RST_STREAM(CANCEL)` through
+    `resetStream`, so its id joins the remembered resets and the DATA in flight is ignored;
+  - a call the router sends to a gRPC handler (`GrpcDispatch` / `GrpcWebDispatch` in
+    `dispatchStream`, the hook of the readTimeout exemption) is exempt, even when its messages passed
+    the limit before the route was known. A client `content-type` exempts nothing
+    (`#aGrpcContentTypeDoesNotExemptAPlainHandlerFromTheLimit`).
+  Also: a stream reset no longer runs the application's `Body.release()` under the stream's reset
+  lock (the lock is released first), so a blocking `release()` cannot stall the connection thread.
+- **Related**: Foy BUG-20261011-11 (`foy/BUG.md`), which CHAPPE-020, CHAPPE-021 and this entry fix on
+  the chappe side. That entry is closed from Foy, once Foy builds against a chappe carrying them.
+
+---
+
 ## CHAPPE-024 — the HTTP/2 stream window reopened on receipt, so a stream's buffer was unbounded
 
 - **Date**: 2026-10-11
@@ -148,6 +181,7 @@ cause hypothesis, and status.
   rest of a chunk the handler started counts too, so framing alone cannot outlast it. A failed read
   during the drain ends it and closes the connection.
 
+- **Related**: Foy BUG-20261011-11 (`foy/BUG.md`), closed from Foy once it builds against this fix.
 ---
 
 ## CHAPPE-020 — a chunked request body is not capped by maxRequestSize
@@ -190,6 +224,7 @@ cause hypothesis, and status.
   Cost: a body near the cap with heavy chunk overhead trips slightly earlier than its data alone
   would.
 
+- **Related**: Foy BUG-20261011-11 (`foy/BUG.md`), closed from Foy once it builds against this fix.
 ---
 
 ## CHAPPE-019 — Filter.addHeaderIf and Filter.gzip drop the response trailers
