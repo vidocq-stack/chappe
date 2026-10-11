@@ -5,6 +5,30 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-027 — a TLS handshake the server rejected ended with a bare close, without its alert
+
+- **Date**: 2026-10-11
+- **Status**: FIXED (commit `fix(tls): refuse TLS 1.2 renegotiation and send the handshake alert (CHAPPE-027)`,
+  branch `pr/ybl/chappe-tls-client-auth`)
+- **Module**: `chappe-http` (`SslHandler`)
+- **Symptom**: when JSSE rejected a handshake (a client without a trusted certificate under
+  `ClientAuth.NEED`, no common protocol or cipher suite), the client saw the connection close
+  ("Broken pipe", "Connection reset", "Remote host terminated the handshake", or EOF on its first
+  read under TLS 1.3) instead of the alert that says why (`bad_certificate`, `certificate_required`,
+  `handshake_failure`).
+- **Minimal reproduction**: `chappe-tests/.../TlsHandshakeHardeningTest#tls12NeedRejectionSendsTheAlert`
+  and `#tls13NeedRejectionSendsTheAlert`.
+- **Cause**: `SslHandler.doHandshake()` rethrew the engine's `SSLException` without calling
+  `wrap()`, which the `SSLEngine` contract requires to emit the alert the engine queued.
+- **Fix**: on an `SSLException`, `doHandshake()` wraps and writes the pending alert (each write
+  bounded by the write timeout), then half-closes and drains the socket within the lingering-close
+  budget (`LingeringClose`, 2 s / 1 MiB), so a TCP reset caused by unread client bytes cannot destroy
+  the alert, and rethrows; the server closes the socket as before. In the same commit, `SslHandler`
+  refuses TLS 1.2 client-initiated renegotiation, so the `TlsInfo` read at the handshake cannot go
+  stale.
+
+---
+
 ## CHAPPE-026 — over TLS and HTTP/2, a request reported cleartext and no client address
 
 - **Date**: 2026-10-11

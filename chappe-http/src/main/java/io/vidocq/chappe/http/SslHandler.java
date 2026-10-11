@@ -36,6 +36,7 @@ import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLEngineResult;
 import javax.net.ssl.SSLEngineResult.HandshakeStatus;
 import javax.net.ssl.SSLEngineResult.Status;
+import javax.net.ssl.SSLException;
 import javax.net.ssl.SSLPeerUnverifiedException;
 import javax.net.ssl.SSLSession;
 
@@ -110,6 +111,48 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
     // -------------------------------------------------------------------------
 
     public void doHandshake() throws IOException {
+        try {
+            runHandshake();
+        } catch (SSLException e) {
+            // A rejected handshake (no or untrusted client certificate, no shared protocol...)
+            // leaves JSSE's fatal alert in the engine: send it, so the client learns why
+            // instead of seeing a bare close (CHAPPE-027). Then half-close and drain, bounded:
+            // closing with the client's flight still unread would answer with a TCP reset,
+            // which destroys the alert before the client reads it. The caller then closes.
+            if (sendPendingAlert()) {
+                LingeringClose.halfCloseAndDrain(channel, netInBuffer.clear());
+            }
+            throw e;
+        }
+        tlsInfo = describe(engine.getSession());
+    }
+
+    /**
+     * Best-effort: wraps and writes what the engine still has to send (the alert of a rejected
+     * handshake), each write bounded by the write timeout.
+     *
+     * @return whether the alert was written and the connection is still usable for a lingering close
+     */
+    private boolean sendPendingAlert() {
+        try {
+            for (int i = 0; i < 4 && !engine.isOutboundDone(); i++) {
+                netOutBuffer.clear();
+                SSLEngineResult result = engine.wrap(EMPTY, netOutBuffer);
+                netOutBuffer.flip();
+                while (netOutBuffer.hasRemaining()) {
+                    BoundedWrites.writeWithTimeout(channel, channel, netOutBuffer, closeWriteTimeout);
+                }
+                if (result.bytesProduced() == 0) {
+                    break;
+                }
+            }
+            return channel.isOpen();
+        } catch (IOException _) {
+            return false; // the connection is gone; the caller closes it anyway
+        }
+    }
+
+    private void runHandshake() throws IOException {
         engine.beginHandshake();
         HandshakeStatus hs = engine.getHandshakeStatus();
 
@@ -172,7 +215,6 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
                 default -> throw new IOException("Unexpected handshake status: " + hs);
             }
         }
-        tlsInfo = describe(engine.getSession());
     }
 
     // -------------------------------------------------------------------------
@@ -223,6 +265,12 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
             netInBuffer.compact();
             appInBuffer.flip();
 
+            // TLS 1.2 renegotiation would change the session (and client certificate) under the
+            // TlsInfo read at the handshake: refuse it and let the caller close the connection.
+            if (isRenegotiationAttempt(result)) {
+                throw new SSLException("TLS renegotiation refused: the session is fixed at the handshake");
+            }
+
             // Post-handshake events (TLS 1.3 key updates)
             handlePostUnwrap(result);
 
@@ -255,6 +303,23 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
         dst.put(appInBuffer);
         appInBuffer.limit(limit);
         return toTransfer;
+    }
+
+    /**
+     * A handshake message unwrapped after the initial handshake of a TLS 1.2 (or older) session
+     * is a renegotiation attempt. TLS 1.3 has no renegotiation, and its post-handshake messages
+     * (KeyUpdate) stay allowed; a close_notify is not one either.
+     */
+    private boolean isRenegotiationAttempt(SSLEngineResult result) {
+        if (result.getStatus() == Status.CLOSED) {
+            return false;
+        }
+        HandshakeStatus hs = result.getHandshakeStatus();
+        if (hs == HandshakeStatus.NOT_HANDSHAKING || hs == HandshakeStatus.FINISHED) {
+            return false;
+        }
+        TlsInfo info = tlsInfo;
+        return info != null && !"TLSv1.3".equals(info.protocol());
     }
 
     /**
@@ -426,7 +491,7 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
             if (locked) writeLock.unlock();
             try {
                 engine.closeInbound();
-            } catch (javax.net.ssl.SSLException _) {
+            } catch (SSLException _) {
                 // best-effort: peer did not send close_notify
             }
             channel.close();

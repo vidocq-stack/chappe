@@ -21,8 +21,9 @@ package io.vidocq.chappe.api;
 
 /**
  * Whether a TLS listener asks clients for a certificate. Applied to every TLS handshake of
- * the listener; the client certificate is never requested later in the connection (no
- * renegotiation, and HTTP/2 forbids it). The trust material that validates the certificate
+ * the listener; the client certificate is never requested later in the connection (the server
+ * never renegotiates, refuses a TLS 1.2 renegotiation initiated by the client by closing the
+ * connection, and HTTP/2 forbids it). The trust material that validates the certificate
  * comes from the listener's {@link javax.net.ssl.SSLContext}.
  *
  * <p>The chain the client sent is exposed through {@link Request#tls()}
