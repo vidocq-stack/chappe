@@ -21,6 +21,8 @@ package io.vidocq.chappe.api;
 
 import java.util.Objects;
 
+import io.vidocq.chappe.api.internal.HeaderFields;
+
 /**
  * Response telling the HTTP/1.1 transport to write {@code status} and {@code headers} (no
  * Content-Length, no Transfer-Encoding, no body) and then hand the connection to {@code handler}.
@@ -69,17 +71,17 @@ public final class ConnectionUpgrade implements Response {
         if (status.code() < 100 || status.code() > 999) {
             throw new IllegalArgumentException("Invalid upgrade status code: " + status.code());
         }
-        if (status.reason() == null || !isFieldValue(status.reason())) {
+        if (status.reason() == null || !HeaderFields.isFieldValue(status.reason())) {
             throw new IllegalArgumentException("Invalid upgrade reason phrase for status " + status.code());
         }
         var copy = Headers.builder();
         for (var entry : headers) {
             String name = entry.name();
             String value = entry.value();
-            if (name == null || !isToken(name)) {
+            if (name == null || !HeaderFields.isToken(name)) {
                 throw new IllegalArgumentException("Invalid upgrade header name: " + name);
             }
-            if (value == null || !isFieldValue(value)) {
+            if (value == null || !HeaderFields.isFieldValue(value)) {
                 throw new IllegalArgumentException("Invalid value for upgrade header " + name);
             }
             if (name.equalsIgnoreCase("Content-Length") || name.equalsIgnoreCase("Transfer-Encoding")) {
@@ -109,29 +111,5 @@ public final class ConnectionUpgrade implements Response {
     @Override
     public Body body() {
         return Body.empty();
-    }
-
-    /** RFC 9110 §5.6.2 {@code token}: one or more tchar. */
-    private static boolean isToken(String s) {
-        if (s.isEmpty()) return false;
-        for (int i = 0, len = s.length(); i < len; i++) {
-            char c = s.charAt(i);
-            boolean tchar = (c >= 'a' && c <= 'z')
-                    || (c >= 'A' && c <= 'Z')
-                    || (c >= '0' && c <= '9')
-                    || "!#$%&'*+-.^_`|~".indexOf(c) >= 0;
-            if (!tchar) return false;
-        }
-        return true;
-    }
-
-    /** RFC 9110 §5.5 field value: field-vchar, obs-text, SP and HTAB only (one byte per char). */
-    private static boolean isFieldValue(String s) {
-        for (int i = 0, len = s.length(); i < len; i++) {
-            char c = s.charAt(i);
-            boolean ok = (c >= 0x21 && c <= 0x7E) || (c >= 0x80 && c <= 0xFF) || c == ' ' || c == '\t';
-            if (!ok) return false;
-        }
-        return true;
     }
 }

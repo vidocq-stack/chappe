@@ -88,19 +88,48 @@ public interface Response {
         return new DefaultResponseBuilder();
     }
 
-    /** Fluent builder for constructing a {@link Response}. */
+    /**
+     * Fluent builder for constructing a {@link Response}.
+     * <p>
+     * Header and trailer fields are checked as they are given (CHAPPE-008): a name must be an
+     * RFC 9110 §5.6.2 token, and a value may hold only field-vchar, obs-text
+     * ({@code U+0080-U+00FF}), SP and HTAB (RFC 9110 §5.5). CR, LF, NUL, other controls and any
+     * char above {@code U+00FF} throw {@link IllegalArgumentException}, whose message names the
+     * field but never echoes its value. No field can therefore be injected into the response head
+     * nor reach the wire truncated. The transport applies the same rule to a response built
+     * without this builder: an invalid header or reason phrase answers {@code 500}, an invalid
+     * trailer is dropped.
+     */
     interface Builder {
 
         Builder status(StatusCode status);
 
+        /**
+         * Adds a header (duplicates are preserved).
+         *
+         * @throws IllegalArgumentException if the name or the value is invalid (see class doc)
+         */
         Builder header(String name, String value);
 
+        /**
+         * Replaces all headers.
+         *
+         * @throws IllegalArgumentException if one of the fields is invalid (see class doc)
+         */
         Builder headers(Headers headers);
 
-        /** Adds a trailer (HTTP/2 or chunked HTTP/1.1). */
+        /**
+         * Adds a trailer (HTTP/2 or chunked HTTP/1.1).
+         *
+         * @throws IllegalArgumentException if the name or the value is invalid (see class doc)
+         */
         Builder trailer(String name, String value);
 
-        /** Replaces all trailers. */
+        /**
+         * Replaces all trailers.
+         *
+         * @throws IllegalArgumentException if one of the fields is invalid (see class doc)
+         */
         Builder trailers(Headers trailers);
 
         Builder body(Body body);

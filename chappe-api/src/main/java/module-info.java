@@ -28,6 +28,9 @@ module io.vidocq.chappe.api {
 
     exports io.vidocq.chappe.api;
     exports io.vidocq.chappe.api.client;
+    // Header field syntax shared with the transport (CHAPPE-008); not public API.
+    exports io.vidocq.chappe.api.internal to
+            io.vidocq.chappe.http;
 
     uses io.vidocq.chappe.api.ServerProvider;
 }

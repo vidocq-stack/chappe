@@ -13,6 +13,7 @@ Chappe is at `{project-version}`. A production migration is premature. The table
 == Upgrading from {release-version} [.tag-new]#NEW#
 
 * **`writeTimeout` now closes stalled connections** — up to {release-version}, `Server.Builder.writeTimeout(Duration)` was accepted and never applied. It now bounds each blocking write of an HTTP/1.1 response, 30 s by default: if a client stops reading and the socket refuses the bytes for longer than that, Chappe closes the connection and the client receives a truncated body. Idle gaps with nothing to send are not timed, so a quiet Server-Sent Events stream is not affected. If one of your clients legitimately takes longer than 30 s to accept bytes, set a larger `writeTimeout`. See xref:reference.adoc#timeouts[Reference — timeouts].
+* **Invalid response headers now fail** — `Response.builder().header(...)` (and `headers`, `trailer`, `trailers`), `Filter.addHeader*`, the `WebSocketUpgrade` subprotocol and `GrpcCall.addHeader` / `addTrailer` throw `IllegalArgumentException` for a name that is not an RFC 9110 token or a value holding CR, LF, NUL, another control or a char above `U+00FF`. Thrown from a handler, it becomes a `500`. Such a value used to reach the wire truncated to one byte per char (header injection). Encode non-Latin-1 text before setting it, for example `Content-Disposition: attachment; filename*=UTF-8''…` (RFC 8187). See xref:concepts.adoc#header-validation[Concepts — header and trailer validation].
 
 == Overview
 

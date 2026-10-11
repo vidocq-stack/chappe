@@ -38,6 +38,7 @@ import io.vidocq.chappe.api.Headers;
 import io.vidocq.chappe.api.HttpMethod;
 import io.vidocq.chappe.api.Response;
 import io.vidocq.chappe.api.StatusCode;
+import io.vidocq.chappe.api.internal.HeaderFields;
 
 /**
  * Serialisation of an HTTP/1.1 {@link Response} to a channel.
@@ -149,6 +150,9 @@ public final class HttpResponseWriter {
             writeFastPath(body, contentLength, buffer, channel);
             return;
         }
+
+        // Nothing is buffered yet: an invalid head is refused before a byte is written (CHAPPE-008).
+        checkHead(response.status(), response.headers());
 
         // Status line
         putStatusLine(response.status(), buffer, channel);
@@ -284,7 +288,7 @@ public final class HttpResponseWriter {
         buffer.clear();
         putStatusLine(status, buffer, channel);
         for (var entry : headers) {
-            if (!isToken(entry.name()) || !isFieldValue(entry.value())) {
+            if (!HeaderFields.isValid(entry.name(), entry.value())) {
                 continue;
             }
             putAsciiString(entry.name(), buffer, channel);
@@ -300,24 +304,7 @@ public final class HttpResponseWriter {
     // --- Status line ---
 
     private void putStatusLine(StatusCode status, ByteBuffer buffer, WritableByteChannel channel) throws IOException {
-        byte[] preEncoded =
-                switch (status.code()) {
-                    case 200 -> STATUS_200;
-                    case 201 -> STATUS_201;
-                    case 204 -> STATUS_204;
-                    case 301 -> STATUS_301;
-                    case 302 -> STATUS_302;
-                    case 304 -> STATUS_304;
-                    case 400 -> STATUS_400;
-                    case 401 -> STATUS_401;
-                    case 403 -> STATUS_403;
-                    case 404 -> STATUS_404;
-                    case 405 -> STATUS_405;
-                    case 500 -> STATUS_500;
-                    case 502 -> STATUS_502;
-                    case 503 -> STATUS_503;
-                    default -> null;
-                };
+        byte[] preEncoded = preEncodedStatusLine(status.code());
         if (preEncoded != null) {
             putBytes(preEncoded, buffer, channel);
         } else {
@@ -326,6 +313,50 @@ public final class HttpResponseWriter {
             putByte(SPACE, buffer, channel);
             putAsciiString(status.reason(), buffer, channel);
             putBytes(CRLF, buffer, channel);
+        }
+    }
+
+    /** The pre-encoded status line of a common status code, or {@code null}. */
+    private static byte[] preEncodedStatusLine(int code) {
+        return switch (code) {
+            case 200 -> STATUS_200;
+            case 201 -> STATUS_201;
+            case 204 -> STATUS_204;
+            case 301 -> STATUS_301;
+            case 302 -> STATUS_302;
+            case 304 -> STATUS_304;
+            case 400 -> STATUS_400;
+            case 401 -> STATUS_401;
+            case 403 -> STATUS_403;
+            case 404 -> STATUS_404;
+            case 405 -> STATUS_405;
+            case 500 -> STATUS_500;
+            case 502 -> STATUS_502;
+            case 503 -> STATUS_503;
+            default -> null;
+        };
+    }
+
+    /**
+     * Refuses a head that cannot be written as is (CHAPPE-008): a header name that is not an
+     * RFC 9110 token, a value or a custom reason phrase holding CR, LF, NUL, another control or a
+     * char above {@code U+00FF}. The builder already refuses such fields; this catches a response
+     * built without it. Called before anything is buffered, so the connection can still answer 500.
+     *
+     * @throws InvalidResponseHeadException naming the field, never echoing its value
+     */
+    static void checkHead(StatusCode status, Headers headers) {
+        if (preEncodedStatusLine(status.code()) == null
+                && (status.code() < 100 || status.code() > 999 || !HeaderFields.isFieldValue(status.reason()))) {
+            throw new InvalidResponseHeadException("Invalid status line for status " + status.code());
+        }
+        for (var entry : headers) {
+            if (!HeaderFields.isValid(entry.name(), entry.value())) {
+                throw new InvalidResponseHeadException(
+                        HeaderFields.isToken(entry.name())
+                                ? "Invalid value for response header " + entry.name()
+                                : "Invalid response header name: " + HeaderFields.printable(entry.name()));
+            }
         }
     }
 
@@ -373,7 +404,7 @@ public final class HttpResponseWriter {
         }
         putBytes(LAST_CHUNK, buffer, channel);
         for (var entry : trailers) {
-            if (!isToken(entry.name()) || !isFieldValue(entry.value())) {
+            if (!HeaderFields.isValid(entry.name(), entry.value())) {
                 continue;
             }
             putAsciiString(entry.name(), buffer, channel);
@@ -405,30 +436,6 @@ public final class HttpResponseWriter {
      */
     private static boolean mayBlock(InputStream in) throws IOException {
         return in.available() <= 0;
-    }
-
-    /** RFC 9110 §5.6.2 {@code token}: one or more tchar. */
-    private static boolean isToken(String s) {
-        if (s.isEmpty()) return false;
-        for (int i = 0, len = s.length(); i < len; i++) {
-            char c = s.charAt(i);
-            boolean tchar = (c >= 'a' && c <= 'z')
-                    || (c >= 'A' && c <= 'Z')
-                    || (c >= '0' && c <= '9')
-                    || "!#$%&'*+-.^_`|~".indexOf(c) >= 0;
-            if (!tchar) return false;
-        }
-        return true;
-    }
-
-    /** RFC 9110 §5.5 field value: field-vchar, obs-text, SP and HTAB only (one byte per char). */
-    private static boolean isFieldValue(String s) {
-        for (int i = 0, len = s.length(); i < len; i++) {
-            char c = s.charAt(i);
-            boolean ok = (c >= 0x21 && c <= 0x7E) || (c >= 0x80 && c <= 0xFF) || c == ' ' || c == '\t';
-            if (!ok) return false;
-        }
-        return true;
     }
 
     @SuppressWarnings("ThreadPriorityCheck") // Thread.yield() = workaround JDK-8264762 (sendfile retry)
@@ -483,11 +490,20 @@ public final class HttpResponseWriter {
 
     // --- Optimized write primitives ---
 
-    /** Writes an ASCII String directly into the buffer, char by char — zero allocation. */
+    /**
+     * Writes a String directly into the buffer as ISO-8859-1, char by char — zero allocation.
+     * Strict: a char above {@code U+00FF} has no one-byte form and is refused, never truncated
+     * (its low byte could be CR or LF, CHAPPE-008). Callers validate first, so this is the last
+     * line of defence.
+     */
     private void putAsciiString(String s, ByteBuffer buffer, WritableByteChannel channel) throws IOException {
         for (int i = 0, len = s.length(); i < len; i++) {
+            char c = s.charAt(i);
+            if (c > 0xFF) {
+                throw new IOException("Refusing to write a char above U+00FF in a response head");
+            }
             if (!buffer.hasRemaining()) flush(buffer, channel);
-            buffer.put((byte) s.charAt(i));
+            buffer.put((byte) c);
         }
     }
 

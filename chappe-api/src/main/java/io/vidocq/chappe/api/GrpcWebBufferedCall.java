@@ -27,6 +27,8 @@ import java.time.Duration;
 import java.util.Base64;
 import java.util.Optional;
 
+import io.vidocq.chappe.api.internal.HeaderFields;
+
 /**
  * {@link GrpcCall} implementation backed by a standard HTTP/1.1 body (buffered for
  * reading, streaming for writing via {@link OutputStream}).
@@ -160,6 +162,7 @@ final class GrpcWebBufferedCall implements GrpcCall {
         if (completed) {
             throw new IllegalStateException("call already completed");
         }
+        HeaderFields.requireValid("trailer", name, value); // serialized as a header line (CHAPPE-008)
         responseTrailersBuilder.add(name, value);
     }
 

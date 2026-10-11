@@ -88,12 +88,15 @@ public interface GrpcCall {
      * Adds a header to the initial response (Initial-Metadata).
      * Must be called <b>before</b> the first {@link #send}.
      * @throws IllegalStateException if the initial headers have already been emitted
+     * @throws IllegalArgumentException if the name is not an RFC 9110 token or the value holds CR,
+     *         LF, NUL, another control or a char above {@code U+00FF} (see {@link Response.Builder})
      */
     void addHeader(String name, String value);
 
     /**
      * Adds an additional trailer. Must be called before {@link #complete}.
      * @throws IllegalStateException if {@code complete} has already been called
+     * @throws IllegalArgumentException if the name or the value is invalid (as for {@link #addHeader})
      */
     void addTrailer(String name, String value);
 

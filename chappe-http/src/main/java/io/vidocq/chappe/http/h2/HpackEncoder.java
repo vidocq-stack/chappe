@@ -24,6 +24,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 
 import io.vidocq.chappe.api.Headers;
+import io.vidocq.chappe.api.internal.HeaderFields;
 
 /**
  * Optimized HPACK encoder — RFC 7541.
@@ -54,8 +55,17 @@ public final class HpackEncoder {
      * @param statusCode the HTTP status code
      * @param headers    the response headers
      * @return the encoded header block
+     * @throws IllegalArgumentException if a name is not an RFC 9110 token or a value holds CR, LF,
+     *         NUL, another control or a char above {@code U+00FF} (HPACK carries octets: such a
+     *         char would be mangled, and RFC 9113 §8.2.1 makes CR, LF and NUL malformed); the
+     *         dynamic table is then left untouched
      */
     public byte[] encode(int statusCode, Headers headers) {
+        // All fields are checked before the first one is encoded: a failure must leave the dynamic
+        // table untouched, or it would no longer match the peer's (CHAPPE-008).
+        for (var entry : headers) {
+            HeaderFields.requireValid("response header", entry.name(), entry.value());
+        }
         var out = new ByteArrayOutputStream(256);
 
         // :status pseudo-header
@@ -75,10 +85,15 @@ public final class HpackEncoder {
      * <p>
      * Unlike {@link #encode(int, Headers)}, does not emit pseudo-headers:
      * RFC 9113 §8.1 forbids pseudo-headers in trailers.
+     * A trailer whose name is not a token or whose value is not a valid field value is dropped,
+     * as over HTTP/1.1.
      */
     public byte[] encodeTrailers(Headers trailers) {
         var out = new ByteArrayOutputStream(64);
         for (var entry : trailers) {
+            if (!HeaderFields.isValid(entry.name(), entry.value())) {
+                continue; // dropped, as over HTTP/1.1 (CHAPPE-008)
+            }
             encodeHeader(out, entry.name().toLowerCase(Locale.ROOT), entry.value());
         }
         return out.toByteArray();

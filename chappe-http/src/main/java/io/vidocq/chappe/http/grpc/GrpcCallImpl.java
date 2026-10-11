@@ -32,6 +32,7 @@ import java.util.zip.GZIPOutputStream;
 import io.vidocq.chappe.api.GrpcCall;
 import io.vidocq.chappe.api.GrpcStatus;
 import io.vidocq.chappe.api.Headers;
+import io.vidocq.chappe.api.internal.HeaderFields;
 import io.vidocq.chappe.http.HttpRequestImpl;
 import io.vidocq.chappe.http.h2.Http2Connection;
 import io.vidocq.chappe.http.h2.Http2Stream;
@@ -171,6 +172,7 @@ public final class GrpcCallImpl implements GrpcCall {
         if (initialHeadersSent) {
             throw new IllegalStateException("initial headers already sent");
         }
+        HeaderFields.requireValid("header", name, value); // CHAPPE-008
         responseHeadersBuilder.add(name, value);
     }
 
@@ -179,6 +181,7 @@ public final class GrpcCallImpl implements GrpcCall {
         if (completed.get()) {
             throw new IllegalStateException("call already completed");
         }
+        HeaderFields.requireValid("trailer", name, value); // CHAPPE-008
         responseTrailersBuilder.add(name, value);
     }
 

@@ -21,6 +21,8 @@ package io.vidocq.chappe.api;
 
 import java.util.Objects;
 
+import io.vidocq.chappe.api.internal.HeaderFields;
+
 /**
  * Marker response telling the HTTP transport that a connection must be upgraded
  * to WebSocket (RFC 6455 §1.3) after sending the {@code 101 Switching Protocols} response.
@@ -37,6 +39,11 @@ public final class WebSocketUpgrade implements Response {
 
     public WebSocketUpgrade(WebSocketHandler handler, String subprotocol, Request handshakeRequest) {
         this.handler = Objects.requireNonNull(handler, "handler");
+        // Written as the Sec-WebSocket-Protocol header: an RFC 6455 §4.3 token (CHAPPE-008).
+        if (subprotocol != null && !subprotocol.isEmpty() && !HeaderFields.isToken(subprotocol)) {
+            throw new IllegalArgumentException(
+                    "Invalid WebSocket subprotocol: " + HeaderFields.printable(subprotocol) + " (must be a token)");
+        }
         this.subprotocol = subprotocol;
         this.handshakeRequest = handshakeRequest;
     }

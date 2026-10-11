@@ -39,6 +39,7 @@ import io.vidocq.chappe.api.RequestContext;
 import io.vidocq.chappe.api.Response;
 import io.vidocq.chappe.api.ServerConfig;
 import io.vidocq.chappe.api.StatusCode;
+import io.vidocq.chappe.api.internal.HeaderFields;
 import io.vidocq.chappe.http.HttpRequestImpl;
 
 /**
@@ -49,6 +50,8 @@ import io.vidocq.chappe.http.HttpRequestImpl;
  * dispatching each stream to a separate virtual thread for processing.
  */
 public final class Http2Connection {
+
+    private static final System.Logger LOG = System.getLogger(Http2Connection.class.getName());
 
     private static final byte[] CLIENT_PREFACE = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
 
@@ -482,10 +485,20 @@ public final class Http2Connection {
                 return;
             }
 
+            // A head HPACK cannot carry as is (a custom Response bypassing the builder's checks)
+            // answers 500 rather than a mangled or malformed field (CHAPPE-008).
+            if (!validHeaders(response.headers())) {
+                LOG.log(
+                        System.Logger.Level.WARNING,
+                        "Refusing an invalid response head on stream " + stream.streamId());
+                response = Response.of(StatusCode.INTERNAL_SERVER_ERROR);
+            }
+
             sendResponse(stream, response);
-        } catch (IOException _) {
+        } catch (IOException | RuntimeException _) {
             // Connection lost, stream reset, or the response body failed mid-stream (a live body the
-            // application aborted). Unless the stream is already gone, reset it: otherwise the client
+            // application aborted), or an unexpected failure such as a field the HPACK encoder refused.
+            // Unless the stream is already gone, reset it: otherwise the client
             // would wait forever for an END_STREAM that never comes (RFC 9113 §5.4.2).
             resetAbortedStream(stream);
         } finally {
@@ -493,6 +506,14 @@ public final class Http2Connection {
             streams.remove(stream.streamId());
             if (handled != null) releaseBody(handled);
         }
+    }
+
+    /** Whether every header is a token name with a field value of one-byte chars (CHAPPE-008). */
+    private static boolean validHeaders(Headers headers) {
+        for (var entry : headers) {
+            if (!HeaderFields.isValid(entry.name(), entry.value())) return false;
+        }
+        return true;
     }
 
     /** Sends RST_STREAM(INTERNAL_ERROR) for a stream whose response failed, unless it was cancelled. */

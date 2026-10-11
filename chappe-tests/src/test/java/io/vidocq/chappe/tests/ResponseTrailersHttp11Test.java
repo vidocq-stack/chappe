@@ -122,13 +122,12 @@ class ResponseTrailersHttp11Test {
 
     @Test
     void trailerWithCrLfIsDropped() throws IOException {
-        start(_ -> Response.builder()
-                .body(Body.of(stream("hello"), -1))
-                .trailer("good", "kept")
-                .trailer("evil", "x\r\nInjected: yes")
-                .trailer("bad\nname", "v")
-                .trailer("nul", "a\0b")
-                .build());
+        start(_ -> chunkedWithTrailers(Headers.builder()
+                .add("good", "kept")
+                .add("evil", "x\r\nInjected: yes")
+                .add("bad\nname", "v")
+                .add("nul", "a\0b")
+                .build()));
 
         try (var socket = new Socket("127.0.0.1", server.port())) {
             socket.setSoTimeout(5000);
@@ -153,13 +152,12 @@ class ResponseTrailersHttp11Test {
      */
     @Test
     void trailerValueAboveLatin1IsDropped() throws IOException {
-        start(_ -> Response.builder()
-                .body(Body.of(stream("hello"), -1))
-                .trailer("evil", "xčĊInjected: yes")
-                .trailer("nul", "aĀb")
-                .trailer("ctl", "a\u0001b")
-                .trailer("good", "kept\tvalue with obs-text é")
-                .build());
+        start(_ -> chunkedWithTrailers(Headers.builder()
+                .add("evil", "xčĊInjected: yes")
+                .add("nul", "aĀb")
+                .add("ctl", "a\u0001b")
+                .add("good", "kept\tvalue with obs-text é")
+                .build()));
 
         try (var socket = new Socket("127.0.0.1", server.port())) {
             socket.setSoTimeout(5000);
@@ -179,15 +177,14 @@ class ResponseTrailersHttp11Test {
     /** Trailer names must be RFC 9110 §5.6.2 tokens; anything else is dropped. */
     @Test
     void trailerNameThatIsNotATokenIsDropped() throws IOException {
-        start(_ -> Response.builder()
-                .body(Body.of(stream("hello"), -1))
-                .trailer("a: b", "v1")
-                .trailer("a b", "v2")
-                .trailer("x:", "v3")
-                .trailer("", "v4")
-                .trailer("été", "v5")
-                .trailer("Ok-Name_1.~!#$%&'*+^`|", "kept")
-                .build());
+        start(_ -> chunkedWithTrailers(Headers.builder()
+                .add("a: b", "v1")
+                .add("a b", "v2")
+                .add("x:", "v3")
+                .add("", "v4")
+                .add("été", "v5")
+                .add("Ok-Name_1.~!#$%&'*+^`|", "kept")
+                .build()));
 
         String raw = exchange();
 
@@ -216,6 +213,35 @@ class ResponseTrailersHttp11Test {
     private void start(Handler handler) {
         server = Server.builder().port(0).handler(handler).build();
         server.start();
+    }
+
+    /**
+     * A chunked {@code hello} response whose trailers bypass the builder, which refuses invalid
+     * ones (CHAPPE-008): the writer must still drop them.
+     */
+    private static Response chunkedWithTrailers(Headers trailers) {
+        Body body = Body.of(stream("hello"), -1);
+        return new Response() {
+            @Override
+            public StatusCode status() {
+                return StatusCode.OK;
+            }
+
+            @Override
+            public Headers headers() {
+                return Headers.empty();
+            }
+
+            @Override
+            public Body body() {
+                return body;
+            }
+
+            @Override
+            public Headers trailers() {
+                return trailers;
+            }
+        };
     }
 
     private static InputStream stream(String s) {

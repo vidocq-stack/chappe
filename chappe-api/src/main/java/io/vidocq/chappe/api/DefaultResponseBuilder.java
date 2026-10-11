@@ -19,6 +19,8 @@
  */
 package io.vidocq.chappe.api;
 
+import io.vidocq.chappe.api.internal.HeaderFields;
+
 /**
  * Default implementation of {@link Response.Builder}.
  */
@@ -39,18 +41,21 @@ final class DefaultResponseBuilder implements Response.Builder {
 
     @Override
     public Response.Builder header(String name, String value) {
+        HeaderFields.requireValid("header", name, value);
         headersBuilder.add(name, value);
         return this;
     }
 
     @Override
     public Response.Builder headers(Headers headers) {
+        requireValid("header", headers);
         this.headers = headers;
         return this;
     }
 
     @Override
     public Response.Builder trailer(String name, String value) {
+        HeaderFields.requireValid("trailer", name, value);
         if (trailersBuilder == null) trailersBuilder = Headers.builder();
         trailersBuilder.add(name, value);
         return this;
@@ -58,6 +63,7 @@ final class DefaultResponseBuilder implements Response.Builder {
 
     @Override
     public Response.Builder trailers(Headers trailers) {
+        requireValid("trailer", trailers);
         this.trailers = trailers;
         return this;
     }
@@ -88,5 +94,13 @@ final class DefaultResponseBuilder implements Response.Builder {
         else if (trailersBuilder != null) t = trailersBuilder.build();
         else t = Headers.empty();
         return new DefaultResponse(status, h, body, t);
+    }
+
+    /** Checks every field of {@code fields} (CHAPPE-008); {@code null} is left to {@code build()}. */
+    private static void requireValid(String kind, Headers fields) {
+        if (fields == null) return;
+        for (var entry : fields) {
+            HeaderFields.requireValid(kind, entry.name(), entry.value());
+        }
     }
 }

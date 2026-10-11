@@ -245,9 +245,22 @@ public final class HttpConnection {
                         return; // the finally block closes the connection (idempotent)
                     }
 
-                    // 4. Write response
-                    writer.write(
-                            response, writeBuffer, writeChannel, keepAlive, request.method(), config.writeTimeout());
+                    // 4. Write response. A head that cannot be written as is (a custom Response
+                    // bypassing the builder's checks) is refused before any byte: answer 500 and
+                    // close instead of a truncated or injected head (CHAPPE-008).
+                    try {
+                        writer.write(
+                                response,
+                                writeBuffer,
+                                writeChannel,
+                                keepAlive,
+                                request.method(),
+                                config.writeTimeout());
+                    } catch (InvalidResponseHeadException e) {
+                        LOG.log(System.Logger.Level.WARNING, "Refusing an invalid response head: " + e.getMessage());
+                        sendError(StatusCode.INTERNAL_SERVER_ERROR, "Internal Server Error");
+                        break;
+                    }
 
                 } finally {
                     releaseBody(handled);

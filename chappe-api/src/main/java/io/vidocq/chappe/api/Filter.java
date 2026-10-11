@@ -29,6 +29,8 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.zip.GZIPOutputStream;
 
+import io.vidocq.chappe.api.internal.HeaderFields;
+
 /**
  * HTTP filter (middleware) — transforms a {@link Handler} into another.
  * <p>
@@ -112,6 +114,7 @@ public interface Filter {
         Objects.requireNonNull(predicate, "predicate");
         Objects.requireNonNull(name, "name");
         Objects.requireNonNull(value, "value");
+        HeaderFields.requireValid("header", name, value); // fail at configuration time (CHAPPE-008)
         return next -> request -> {
             Response r = next.handle(request);
             if (!predicate.getAsBoolean()) return r;

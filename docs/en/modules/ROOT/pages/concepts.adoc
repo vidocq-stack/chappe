@@ -69,7 +69,22 @@ req.attribute(k, v)    // mutable per-request attributes (Servlet-compat)
 
 On HTTP/1.1, in-memory and file bodies are written with as few socket writes as possible. A body of unknown length (`contentLength() < 0`) is sent chunked on a keep-alive connection, one flushed chunk per read. A body of known length is sent under its `Content-Length` and fills full write buffers while its stream reports bytes ready (`available() > 0`). This is the case for classpath and jar resources. Whenever the next read could block, the buffered bytes are flushed, so a client sees each part while the producer is still running.
 
-After the last chunk of a chunked body, the transport calls `Response.trailers()` and writes the fields it returns into the trailer section (RFC 9112 §7.1.2). It drops any field whose name is not an RFC 9110 token, or whose value contains anything other than visible ASCII, obs-text (`0x80`–`0xFF`), space or tab; a char above `U+00FF` is always dropped. Choosing which names may appear in a trailer section is left to the caller: RFC 9110 §6.5.1 forbids framing fields such as `Content-Length` or `Transfer-Encoding` there. HTTP/2 sends the same trailers as a final HEADERS frame.
+After the last chunk of a chunked body, the transport calls `Response.trailers()` and writes the fields it returns into the trailer section (RFC 9112 §7.1.2). Choosing which names may appear in a trailer section is left to the caller: RFC 9110 §6.5.1 forbids framing fields such as `Content-Length` or `Transfer-Encoding` there. HTTP/2 sends the same trailers as a final HEADERS frame.
+
+[#header-validation]
+=== Header and trailer validation [.tag-new]#NEW#
+
+Every response field follows one rule, so that no field can be injected into the response head and none reaches the wire truncated:
+
+* the name must be an RFC 9110 token (letters, digits and `!#$%&'*+-.^_`|~`);
+* the value may hold only visible ASCII, obs-text (`U+0080`–`U+00FF`, written as ISO-8859-1), space and tab. CR, LF, NUL, other controls and any char above `U+00FF` are refused. Such a char has no one-byte form, and truncating it could forge a CR or LF.
+
+Where the rule is checked:
+
+* `Response.builder()` (`header`, `headers`, `trailer`, `trailers`), `Filter.addHeader*`, `ConnectionUpgrade`, the `WebSocketUpgrade` subprotocol and `GrpcCall.addHeader` / `addTrailer` throw `IllegalArgumentException` at once. The message names the field and never echoes its value.
+* A response built without the builder (a custom `Response` or `Headers`) is checked again by the transport before anything is written. Over HTTP/1.1 an invalid header, or an invalid custom reason phrase, answers `500` and closes the connection. Over HTTP/2 an invalid header answers `500`, and the HPACK dynamic table is left untouched. An invalid trailer is dropped, over both protocols.
+
+Encode any other text before setting it, for example with RFC 8187 (`filename*=UTF-8''…`) or percent-encoding.
 
 == Filters
 

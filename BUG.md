@@ -208,15 +208,25 @@ cause hypothesis, and status.
 ## CHAPPE-008 — HTTP/1.1 writer truncates header chars to one byte (header injection)
 
 - **Date**: 2026-10-10
-- **Status**: OPEN (trailers fixed in `pr/ybl/servlet-streaming-upgrade`; ordinary headers not yet)
-- **Module**: `chappe-http`, `HttpResponseWriter.putAsciiString`, called from the header loop of `write()`
+- **Status**: FIXED (trailers and the upgrade head in `pr/ybl/servlet-streaming-upgrade`; ordinary
+  headers, HTTP/2 and the API in commit `fix(http): validate response header fields everywhere`,
+  branch `pr/ybl/chappe-008-014`)
+- **Module**: `chappe-api` (`Response.Builder`, `Filter`, `WebSocketUpgrade`, `ConnectionUpgrade`,
+  `GrpcWebBufferedCall`, new `internal.HeaderFields`), `chappe-http` (`HttpResponseWriter`,
+  `HttpConnection`, `h2/HpackEncoder`, `h2/Http2Connection`, `grpc/GrpcCallImpl`,
+  `grpc/GrpcWebCallImpl`)
 - **Symptom**: `putAsciiString` casts each `char` of a header name or value to a `byte`, so a char
   above U+00FF loses its high byte. U+010D and U+010A become CR and LF on the wire, so a value such as
   `"ačĊSet-Cookie: a=b"` injects a header line (response splitting). Names and values are
-  not validated at all, so plain CR, LF and NUL go through as well.
+  not validated at all, so plain CR, LF and NUL go through as well. HTTP/2 encoded values with
+  `getBytes(ISO_8859_1)`: a char above U+00FF became `?`, and CR, LF and NUL went through (malformed
+  per RFC 9113 §8.2.1, dangerous behind an HTTP/2-to-HTTP/1.1 proxy).
 - **Minimal reproduction**: a handler returning
   `Response.builder().header("X", "ačĊSet-Cookie: a=b").build()`. The raw response then
-  carries a separate `Set-Cookie: a=b` line.
+  carries a separate `Set-Cookie: a=b` line. Regression tests:
+  `chappe-tests/.../ResponseHeaderValidationTest` (16 tests; before the fix 14 failed: the builder
+  accepted every invalid field, HTTP/1.1 answered `200` with the injected line, HTTP/2 sent
+  `x-evil: a??b`, a `:status` pseudo-header from the application, and invalid trailers).
 - **Cause hypothesis**: the writer assumes the application hands it ASCII header text.
 - **Cross-reference**: foy `BUG-20261009-11`. Foy already rejects CR, LF, NUL and chars above U+00FF
   before they reach chappe (foy 2f7fcf0), so Servlet applications are covered. Other chappe users
@@ -227,6 +237,26 @@ cause hypothesis, and status.
     above U+00FF gets through. See `ResponseTrailersHttp11Test.trailerValueAboveLatin1IsDropped`. The same
     check, or a 500 for an invalid header, still has to be applied to ordinary headers in `write()`.
     That was deliberately left out of this task.
+  - 2026-10-11: ordinary headers fixed.
+- **Fix**: one rule, in `io.vidocq.chappe.api.internal.HeaderFields` (exported to
+  `io.vidocq.chappe.http` only): a name is a token; a value holds only field-vchar, obs-text,
+  SP and HTAB. It is checked in three layers:
+  - **API, fail fast**: `Response.Builder.header/headers/trailer/trailers`, `Filter.addHeader*` (at
+    filter creation), the `WebSocketUpgrade` subprotocol (a token), `GrpcCall.addHeader/addTrailer`
+    (the three implementations) and `ConnectionUpgrade` (already) throw `IllegalArgumentException`.
+    The message names the field (escaped) and never echoes the value. `Headers.builder()` stays
+    unchecked: it also builds request headers and trailers parsed from the wire.
+  - **HTTP/1.1 writer**: `checkHead` checks every header and a custom reason phrase before a byte
+    is buffered. On failure `HttpConnection` logs a warning, answers `500` and closes. Trailers
+    are still dropped. `putAsciiString` refuses a char above U+00FF with an `IOException` instead of
+    truncating it.
+  - **HTTP/2**: `Http2Connection` answers `500` for an invalid header. `HpackEncoder.encode` checks
+    every field before encoding the first one, so a refusal leaves the dynamic table untouched.
+    `encodeTrailers` drops invalid trailers, as HTTP/1.1 does. A `RuntimeException` while sending
+    now resets the stream instead of leaving it open.
+  - There is no HTTP/3 (QPACK) code in chappe yet: nothing to fix there.
+
+---
 
 ## CHAPPE-007 — `RobustnessTest.oversizedHeader` fails with "Connection reset by peer" (main red since 2026-09-21)
 
