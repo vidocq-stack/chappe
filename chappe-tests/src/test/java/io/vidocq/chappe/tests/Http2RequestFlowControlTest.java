@@ -49,10 +49,14 @@ import org.junit.jupiter.api.Test;
 class Http2RequestFlowControlTest {
 
     private static final String GRPC_PATH = "/svc.Upload/Collect";
+    private static final String GRPC_WEB_PATH = "/svc.Upload/CollectWeb";
+    private static final int INTERNAL_ERROR = 0x2;
 
     private final CountDownLatch release = new CountDownLatch(1);
-    private final Router grpcRouter =
-            Router.builder().grpc(GRPC_PATH, this::collect).build();
+    private final Router grpcRouter = Router.builder()
+            .grpc(GRPC_PATH, this::collect)
+            .grpcWeb(GRPC_WEB_PATH, this::collect)
+            .build();
     private Server server;
 
     @AfterEach
@@ -65,7 +69,9 @@ class Http2RequestFlowControlTest {
         server = Server.builder()
                 .port(0)
                 .readTimeout(readTimeout)
-                .handler(request -> GRPC_PATH.equals(request.path()) ? grpcRouter.handle(request) : handle(request))
+                .handler(request -> GRPC_PATH.equals(request.path()) || GRPC_WEB_PATH.equals(request.path())
+                        ? grpcRouter.handle(request)
+                        : handle(request))
                 .build();
         server.start();
     }
@@ -182,6 +188,18 @@ class Http2RequestFlowControlTest {
             h2.data(1, false, "abc".getBytes(StandardCharsets.US_ASCII));
             h2.flush(); // and nothing more: the body stalls
             assertEquals(new Reply("200", "failed:SocketTimeoutException"), h2.reply(1));
+        }
+    }
+
+    /** A gRPC-Web call in text mode reads its whole body at once: readTimeout bounds it, as a plain body. */
+    @Test
+    void aStalledGrpcWebTextBodyIsResetAfterTheReadTimeout() throws Exception {
+        start(Duration.ofMillis(300));
+        try (var h2 = H2TestConnection.open(server.port())) {
+            h2.headers(1, false, requestHeaders("POST", GRPC_WEB_PATH, "content-type", "application/grpc-web-text"));
+            h2.data(1, false, "AAAA".getBytes(StandardCharsets.US_ASCII));
+            h2.flush(); // and nothing more: the body stalls
+            assertEquals(INTERNAL_ERROR, h2.await(TYPE_RST_STREAM, 1).errorCode());
         }
     }
 }

@@ -35,10 +35,12 @@ import javax.net.ssl.SSLContext;
  *     byte arrives for that long, the read throws {@link java.net.SocketTimeoutException} and the
  *     connection is closed; over TLS a read waits for a whole TLS record (up to 16 KiB), so each
  *     record must arrive within it. Over HTTP/2 it bounds the wait for the stream's next DATA frame:
- *     the read throws {@link java.net.SocketTimeoutException}, and the stream is reset once the
- *     response is sent. A call the router sends to a gRPC handler ({@code Router.grpc} or {@code
- *     grpcWeb}) is exempt, so a client or bidi streaming call may pause; a gRPC content-type on a
- *     request to any other handler exempts nothing. It bounds each read, not the whole body.
+ *     the read throws {@link java.net.SocketTimeoutException}, and, if the request body has not
+ *     ended, the stream is reset once the response is sent. A call the router sends to a gRPC
+ *     handler ({@code Router.grpc}), or to a gRPC-Web handler ({@code Router.grpcWeb}) in binary
+ *     mode, is exempt, so a client or bidi streaming call may pause; a gRPC-Web call in text mode,
+ *     whose whole body is read at once, is not. A gRPC content-type on a request to any other
+ *     handler exempts nothing. It bounds each read, not the whole body.
  *     Zero or negative disables it; a value too large for nanoseconds in a {@code long} is saturated
  *     (about 73 years). The wait for a next request is bounded by {@code idleTimeout}
  *     instead.
@@ -51,7 +53,10 @@ import javax.net.ssl.SSLContext;
  *     affected by this timeout, however long the gap. Use {@code idleTimeout} to bound
  *     connection inactivity instead.
  * @param idleTimeout idle timeout before closing the connection (default: 60s)
- * @param maxRequestSize maximum request body size in bytes (default: 10 MiB)
+ * @param maxRequestSize maximum request body size in bytes (default: 10 MiB), on HTTP/1.1 and
+ *     HTTP/2. A call routed to a gRPC handler, or to a gRPC-Web handler in binary mode, is not
+ *     capped: nothing bounds its total, and each message is bounded only when the handler reads it,
+ *     by the receive message size of the gRPC layer. A gRPC-Web call in text mode is capped
  * @param maxHeaderSize maximum header size in bytes (default: 8 KiB)
  * @param maxDrainSize most bytes of a request body the handler left unread that the server reads
  *     and discards to keep an HTTP/1.1 connection (default: 1 MiB), counted in wire bytes: a

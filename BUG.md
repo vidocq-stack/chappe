@@ -28,10 +28,21 @@ cause hypothesis, and status.
     `RST_STREAM(NO_ERROR)` (CHAPPE-023);
   - once the response has started, the stream is reset with `RST_STREAM(CANCEL)` through
     `resetStream`, so its id joins the remembered resets and the DATA in flight is ignored;
-  - a call the router sends to a gRPC handler (`GrpcDispatch` / `GrpcWebDispatch` in
-    `dispatchStream`, the hook of the readTimeout exemption) is exempt, even when its messages passed
-    the limit before the route was known. A client `content-type` exempts nothing
+  - a call the router sends to a gRPC handler (`GrpcDispatch` in `dispatchStream`, the hook of the
+    readTimeout exemption), or to a gRPC-Web handler in binary mode (`GrpcWebDispatch` with
+    `Mode.BINARY`), is exempt, even when its messages passed the limit before the route was known
+    (`#aCallRoutedToAGrpcHandlerIsNotCappedByMaxRequestSize`,
+    `#aCallRoutedToAGrpcWebBinaryHandlerIsNotCappedByMaxRequestSize`). Nothing bounds the total such a
+    call receives: each message is bounded only when the handler reads it, at the 4 MiB receive
+    message size of the gRPC layer. A client `content-type` exempts nothing
     (`#aGrpcContentTypeDoesNotExemptAPlainHandlerFromTheLimit`);
+  - a gRPC-Web call in text mode (`application/grpc-web-text`) is not exempt from the cap nor from
+    `readTimeout`: `GrpcWebCallImpl` reads its whole base64 body with `readAllBytes` before decoding
+    it, so an exemption made it an unbounded heap buffer with no read timeout. A body over the cap
+    ends the call with `RESOURCE_EXHAUSTED` before the handler runs
+    (`#aGrpcWebTextBodyOverTheLimitEndsTheCallWithResourceExhausted`), and a stalled one resets the
+    stream (`Http2RequestFlowControlTest#aStalledGrpcWebTextBodyIsResetAfterTheReadTimeout`). Cost:
+    large text-mode uploads need a larger `maxRequestSize`;
   - a stream gets a single RST_STREAM: `writeRstStream` checks and sets `resetSent` under the
     stream's reset lock, so when an early response's `RST_STREAM(NO_ERROR)` and the cap's
     `RST_STREAM(CANCEL)` race, the second is a no-op (RFC 9113 §5.1). This covers every reset path
@@ -99,6 +110,15 @@ cause hypothesis, and status.
     request. Fix: derive `SETTINGS_MAX_HEADER_LIST_SIZE` from `maxHeaderSize` (with room for the
     32-byte per-field overhead), and between it and a hard accumulation cap, decode with a discarding
     sink and answer `431` on the stream.
+  - (c) Once a stream id has been evicted from the ring of the last 256 reset or refused ids
+    (`ResetStreams`, CHAPPE-023), each DATA frame the client still sends on it is answered with its
+    own `RST_STREAM(STREAM_CLOSED)`: one frame out for each frame in. The client pays for it in
+    connection window, but nothing stops it. Fix: answer such a stream once, or count these resets
+    and end the connection with `GOAWAY(ENHANCE_YOUR_CALM)` past a threshold.
+  - (d) HEADERS that arrive on a live stream after its END_STREAM (a second header block that is not
+    trailers) are not answered with `STREAM_CLOSED` as RFC 9113 §5.1 requires for a half-closed
+    (remote) stream. Pre-existing, not changed by this PR. Fix: check `remoteEnded` when a header
+    block completes on a known stream.
 
 ---
 
@@ -149,8 +169,9 @@ cause hypothesis, and status.
   other read arms a deadline (a compare-and-set) that one watchdog virtual thread per connection
   follows; no thread is started per read, and the socket's blocking mode is never switched (that
   would take the write lock: a body read would wait behind a blocked response write, full duplex).
-  A timeout too large for nanoseconds is saturated instead of failing the connection. At the deadline the connection is closed and
-  the read throws `SocketTimeoutException`; zero or negative disables the bound. The HTTP/2
+  A timeout too large for nanoseconds is saturated instead of failing the connection. At the
+  deadline the connection is closed and the read throws `SocketTimeoutException`; zero or negative
+  disables the bound. The HTTP/2
   counterpart is CHAPPE-024.
 - **Found while fixing**: over TLS, once the connection was closed under the handler,
   `SslHandler.write` returned `0` (the engine's outbound side is done) instead of failing, so the
@@ -160,6 +181,12 @@ cause hypothesis, and status.
 - **Also in this commit (CHAPPE-021 follow-ups)**: `ServerConfig` refuses a negative `maxDrainSize`
   in its canonical constructor too; `HttpBodyReader.drain` takes a `RequestBodyInputStream`, so no
   body stream reaches the drain without the wire-byte hook.
+- **Follow-ups (open)**:
+  - (a) `BoundedWrites`, which applies `writeTimeout` to HTTP/1.1 response writes (pre-existing, not
+    changed by this PR), starts one virtual thread per bounded write, where `TimedReadChannel` arms a
+    deadline that one watchdog per connection follows (ruling F-05 for reads). A response written in
+    many small writes starts as many threads. Fix: give writes the same per-connection deadline and
+    watchdog.
 
 ---
 
@@ -228,7 +255,13 @@ cause hypothesis, and status.
   first (RFC 9110 §10.1.1;
   `ChunkedBodyLimitTest#anExpectContinueWithAContentLengthOverTheLimitGets413Without100Continue`).
   Cost: a body near the cap with heavy chunk overhead trips slightly earlier than its data alone
-  would.
+  would. A `RequestBodyTooLargeException` that escapes the handler, as is or as a cause, or after a
+  read of this body threw one, is answered `413` instead of `500`, as over HTTP/2 (CHAPPE-025): the
+  response is not committed yet at that point. The connection still closes after it
+  (`#aCapFailureEscapingTheHandlerIsAnswered413AndClosesTheConnection`,
+  `#aWrappedCapFailureEscapingTheHandlerIsAnswered413`). A handler that catches the exception keeps
+  its own response over HTTP/1.1, where HTTP/2 replaces it with the `413`. A cap failure during the
+  response write (a live response body reading the request) closes the connection, as before.
 - **Related**: Foy BUG-20261011-11 (`foy/BUG.md`), closed from Foy once it builds against this fix.
 
 ---

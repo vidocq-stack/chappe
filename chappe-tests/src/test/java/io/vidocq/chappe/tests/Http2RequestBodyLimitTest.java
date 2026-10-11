@@ -26,6 +26,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InterruptedIOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -46,19 +47,24 @@ import org.junit.jupiter.api.Test;
 /**
  * CHAPPE-025: {@code maxRequestSize} caps an HTTP/2 request body. Before the response starts, the read
  * fails with RequestBodyTooLargeException and the server answers 413; once the response is on its way,
- * the stream is reset with CANCEL. A call the router sends to a gRPC handler is not capped, whatever
- * the content-type a client sends to a plain handler.
+ * the stream is reset with CANCEL. A call the router sends to a gRPC handler, or to a gRPC-Web handler in
+ * binary mode, is not capped, whatever the content-type a client sends to a plain handler. A gRPC-Web
+ * call in text mode is: its whole body is read at once.
  */
 class Http2RequestBodyLimitTest {
 
     private static final long LIMIT = 1000;
     private static final String GRPC_PATH = "/svc.Upload/Collect";
+    private static final String GRPC_WEB_PATH = "/svc.Upload/CollectWeb";
+    private static final int RESOURCE_EXHAUSTED = 8;
     private static final int TYPE_PING = 0x6;
 
     private final CompletableFuture<String> outcome = new CompletableFuture<>();
     private final ObservedBody liveBody = new ObservedBody();
-    private final Router grpcRouter =
-            Router.builder().grpc(GRPC_PATH, this::collect).build();
+    private final Router grpcRouter = Router.builder()
+            .grpc(GRPC_PATH, this::collect)
+            .grpcWeb(GRPC_WEB_PATH, this::collect)
+            .build();
     private final CountDownLatch routeGrpc = new CountDownLatch(1);
     private Server server;
 
@@ -67,7 +73,9 @@ class Http2RequestBodyLimitTest {
         server = Server.builder()
                 .port(0)
                 .maxRequestSize(LIMIT)
-                .handler(request -> GRPC_PATH.equals(request.path()) ? routeGrpc(request) : handle(request))
+                .handler(request -> GRPC_PATH.equals(request.path()) || GRPC_WEB_PATH.equals(request.path())
+                        ? routeGrpc(request)
+                        : handle(request))
                 .build();
         server.start();
     }
@@ -97,7 +105,7 @@ class Http2RequestBodyLimitTest {
         };
     }
 
-    /** Routes a gRPC call once the test lets it: the body can pass the limit before the route is known. */
+    /** Routes a gRPC or gRPC-Web call once the test lets it: the body can pass the limit before the route is known. */
     private Response routeGrpc(Request request) throws Exception {
         assertTrue(routeGrpc.await(10, TimeUnit.SECONDS), "the gRPC route was never released");
         return grpcRouter.handle(request);
@@ -209,5 +217,58 @@ class Http2RequestBodyLimitTest {
             assertEquals("RequestBodyTooLargeException", outcome.get(5, TimeUnit.SECONDS));
             assertEquals("413", h2.reply(1).status());
         }
+    }
+
+    @Test
+    void aCallRoutedToAGrpcWebBinaryHandlerIsNotCappedByMaxRequestSize() throws Exception {
+        try (var h2 = H2TestConnection.open(server.port())) {
+            h2.headers(1, false, requestHeaders("POST", GRPC_WEB_PATH, "content-type", "application/grpc-web"));
+            h2.data(1, false, GrpcFrameWriter.encode(new byte[1_000]));
+            h2.data(1, true, GrpcFrameWriter.encode(new byte[500]));
+            h2.frame(TYPE_PING, 0, 0, new byte[8]);
+            h2.flush();
+            // As for gRPC: the DATA is counted past the limit before the route is known.
+            h2.await(TYPE_PING, 0);
+            routeGrpc.countDown();
+            Reply reply = h2.reply(1);
+            assertEquals("200", reply.status());
+            assertTrue(reply.body().contains("read:1500"), reply.body());
+            assertTrue(reply.body().contains("grpc-status:0"), reply.body());
+        }
+    }
+
+    /**
+     * A gRPC-Web call in text mode reads its whole base64 body before decoding it: it stays capped, and
+     * a body over the limit ends the call with RESOURCE_EXHAUSTED before the handler runs.
+     */
+    @Test
+    void aGrpcWebTextBodyOverTheLimitEndsTheCallWithResourceExhausted() throws Exception {
+        byte[] encoded = Base64.getEncoder().encode(GrpcFrameWriter.encode(new byte[900])); // 1,208 bytes
+        try (var h2 = H2TestConnection.open(server.port())) {
+            h2.headers(1, false, requestHeaders("POST", GRPC_WEB_PATH, "content-type", "application/grpc-web-text"));
+            h2.data(1, false, java.util.Arrays.copyOfRange(encoded, 0, 600));
+            h2.data(1, true, java.util.Arrays.copyOfRange(encoded, 600, encoded.length));
+            h2.frame(TYPE_PING, 0, 0, new byte[8]);
+            h2.flush();
+            h2.await(TYPE_PING, 0);
+            routeGrpc.countDown();
+            Reply reply = h2.reply(1);
+            assertEquals("200", reply.status());
+            String body = decodeGrpcWebText(reply.body());
+            assertFalse(body.contains("read:"), "the handler must not run: " + body);
+            assertTrue(body.contains("grpc-status:" + RESOURCE_EXHAUSTED), body);
+        }
+    }
+
+    /**
+     * Decodes a gRPC-Web text body. Each frame is base64-encoded on its own, so padding may appear
+     * mid-body: decode it one 4-character quantum at a time.
+     */
+    private static String decodeGrpcWebText(String body) {
+        var out = new StringBuilder();
+        for (int i = 0; i + 4 <= body.length(); i += 4) {
+            out.append(new String(Base64.getDecoder().decode(body.substring(i, i + 4)), StandardCharsets.ISO_8859_1));
+        }
+        return out.toString();
     }
 }

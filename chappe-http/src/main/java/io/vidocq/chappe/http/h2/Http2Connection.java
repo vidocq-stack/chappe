@@ -499,8 +499,9 @@ public final class Http2Connection {
      * a body reader crediting the window concurrently either wrote its WINDOW_UPDATE before, or sees
      * the reset and writes none. A stream already reset gets no second RST_STREAM (RFC 9113 §5.1):
      * the reset paths race (an early response's NO_ERROR on the handler thread, the body cap's CANCEL
-     * on the connection thread), and the first one wins (CHAPPE-025). The response body of a cancelled stream is released once the lock is
-     * let go: {@link Body#release()} is application code, and one that blocks must not hold the lock.
+     * on the connection thread), and the first one wins (CHAPPE-025). The response body of a
+     * cancelled stream is released once the lock is let go: {@link Body#release()} is application
+     * code, and one that blocks must not hold the lock.
      */
     private void writeRstStream(Http2Stream stream, Http2ErrorCode error, boolean cancel) throws IOException {
         var lock = stream.resetLock();
@@ -533,7 +534,7 @@ public final class Http2Connection {
 
     /**
      * Whether the peer ended its side of {@code stream}: END_STREAM on its HEADERS, its last DATA or
-     * its trailers. Read on the connection thread, which sets both flags.
+     * its trailers. Both are volatile flags set by the connection thread; read from either thread.
      */
     private static boolean remoteEnded(Http2Stream stream) {
         return stream.headersEndStream() || stream.isEndStreamReceived();
@@ -680,8 +681,13 @@ public final class Http2Connection {
 
             // gRPC-Web switch: trailers serialized inline as a 0x80 DATA frame.
             if (response instanceof io.vidocq.chappe.api.GrpcWebDispatch gwd) {
-                stream.bodyReadTimeout(null); // as for gRPC above (ruling F-04)
-                stream.exemptFromBodyLimit(); // as for gRPC above (P-1, CHAPPE-025)
+                // Binary mode frames each message as gRPC does: exempt as above (F-04, P-1). Text mode
+                // reads the whole base64 body at once before decoding it: it stays under readTimeout
+                // and maxRequestSize, as a plain body (CHAPPE-025).
+                if (gwd.mode() == io.vidocq.chappe.api.GrpcWebDispatch.Mode.BINARY) {
+                    stream.bodyReadTimeout(null);
+                    stream.exemptFromBodyLimit();
+                }
                 var call = new io.vidocq.chappe.http.grpc.GrpcWebCallImpl(stream, request, this, gwd.mode());
                 io.vidocq.chappe.http.grpc.GrpcWebCallImpl.run(call, gwd.handler());
                 completed = true;

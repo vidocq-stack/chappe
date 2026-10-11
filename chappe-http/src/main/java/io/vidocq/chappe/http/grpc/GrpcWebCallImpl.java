@@ -30,6 +30,7 @@ import io.vidocq.chappe.api.GrpcCall;
 import io.vidocq.chappe.api.GrpcStatus;
 import io.vidocq.chappe.api.GrpcWebDispatch;
 import io.vidocq.chappe.api.Headers;
+import io.vidocq.chappe.api.RequestBodyTooLargeException;
 import io.vidocq.chappe.api.internal.HeaderFields;
 import io.vidocq.chappe.http.HttpRequestImpl;
 import io.vidocq.chappe.http.h2.Http2Connection;
@@ -65,6 +66,8 @@ public final class GrpcWebCallImpl implements GrpcCall {
     private final String contentType;
     private final long deadlineNanoTime;
     private final boolean requestEncodingUnsupported;
+    private final boolean requestBodyTooLarge;
+    private final long bodyLimit;
 
     private final Headers.Builder responseHeadersBuilder = Headers.builder();
     private final Headers.Builder responseTrailersBuilder = Headers.builder();
@@ -112,11 +115,24 @@ public final class GrpcWebCallImpl implements GrpcCall {
         // unary call (or short client-streaming). Chunk-by-chunk streaming is
         // possible for BINARY; in TEXT mode browser clients usually send a single
         // full chunk (full XHR POST).
+        // The text body stays under maxRequestSize and readTimeout (CHAPPE-025): a body over the cap
+        // ends the call with RESOURCE_EXHAUSTED, without running the handler.
         if (mode == GrpcWebDispatch.Mode.TEXT) {
-            byte[] raw = stream.createBody().asInputStream().readAllBytes();
+            byte[] raw;
+            long tooLargeLimit = -1;
+            try {
+                raw = stream.createBody().asInputStream().readAllBytes();
+            } catch (RequestBodyTooLargeException e) {
+                raw = new byte[0];
+                tooLargeLimit = e.limit();
+            }
+            this.requestBodyTooLarge = tooLargeLimit >= 0;
+            this.bodyLimit = tooLargeLimit;
             byte[] decoded = raw.length == 0 ? raw : GrpcWebFraming.base64Decode(raw);
             this.bodyStream = new ByteArrayInputStream(decoded);
         } else {
+            this.requestBodyTooLarge = false;
+            this.bodyLimit = -1;
             this.bodyStream = stream.createBody().asInputStream();
         }
     }
@@ -263,6 +279,16 @@ public final class GrpcWebCallImpl implements GrpcCall {
      * UNIMPLEMENTED) and deadline ({@code grpc-timeout}) through a watchdog virtual thread.
      */
     public static void run(GrpcWebCallImpl call, io.vidocq.chappe.api.GrpcHandler handler) {
+        if (call.requestBodyTooLarge) {
+            try {
+                call.complete(
+                        GrpcStatus.RESOURCE_EXHAUSTED,
+                        "request body exceeds the limit of " + call.bodyLimit + " bytes");
+            } catch (IOException _) {
+                // lost connection
+            }
+            return;
+        }
         if (call.requestEncodingUnsupported) {
             String clientEnc = call.request.headers().firstOrNull("grpc-encoding");
             try {
