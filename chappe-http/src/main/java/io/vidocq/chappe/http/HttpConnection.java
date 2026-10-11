@@ -69,20 +69,22 @@ public final class HttpConnection {
     private volatile Thread probeThread;
 
     public HttpConnection(SocketChannel channel, Handler handler, ServerConfig config) {
-        this(channel, channel, channel, handler, config, null, null);
+        this(channel, channel, channel, ConnectionInfo.of(channel, null), handler, config, null, null);
     }
 
     public HttpConnection(SocketChannel channel, Handler handler, ServerConfig config, ByteBuffer prefilledBuffer) {
-        this(channel, channel, channel, handler, config, prefilledBuffer, null);
+        this(channel, channel, channel, ConnectionInfo.of(channel, null), handler, config, prefilledBuffer, null);
     }
 
     /**
-     * Constructor for TLS — accepts separate channels (SslHandler).
+     * Full constructor: separate channels (an {@link SslHandler} over TLS) and the connection
+     * metadata every request of this connection reports.
      */
     public HttpConnection(
             ReadableByteChannel readChannel,
             WritableByteChannel writeChannel,
             Closeable closeable,
+            ConnectionInfo connectionInfo,
             Handler handler,
             ServerConfig config,
             ByteBuffer prefilledBuffer,
@@ -105,10 +107,8 @@ public final class HttpConnection {
         this.request = new HttpRequestImpl();
         this.context = new RequestContext(request);
 
-        // Populate connection-level metadata once
-        if (closeable instanceof SocketChannel sc) {
-            request.initConnectionInfo(sc, false);
-        }
+        // Connection-level metadata, once: reset() keeps it across keep-alive requests.
+        request.initConnectionInfo(connectionInfo);
         request.disconnectArmer(this::armDisconnectProbe);
     }
 

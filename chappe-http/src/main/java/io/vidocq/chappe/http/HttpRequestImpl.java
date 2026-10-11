@@ -114,19 +114,14 @@ public final class HttpRequestImpl implements Request, Headers {
     }
 
     /**
-     * Initializes connection information from the socket channel.
-     * Called only once when the connection is created.
+     * Sets the connection-level metadata. Called once per connection (HTTP/1.1) or once per
+     * stream (HTTP/2); {@link #reset()} keeps it.
      */
-    public void initConnectionInfo(java.nio.channels.SocketChannel channel, boolean secure) {
-        if (channel != null) {
-            try {
-                this.remoteAddress = (java.net.InetSocketAddress) channel.getRemoteAddress();
-                this.localAddress = (java.net.InetSocketAddress) channel.getLocalAddress();
-            } catch (java.io.IOException _) {
-                // Ignore — addresses remain null
-            }
-        }
-        setSecure(secure);
+    public void initConnectionInfo(ConnectionInfo info) {
+        this.remoteAddress = info.remoteAddress();
+        this.localAddress = info.localAddress();
+        this.tls = info.tls();
+        setSecure(info.secure());
     }
 
     // --- Enrichment fields (connection + request) ---
@@ -136,6 +131,7 @@ public final class HttpRequestImpl implements Request, Headers {
     private java.net.InetSocketAddress remoteAddress;
     private java.net.InetSocketAddress localAddress;
     private boolean secure;
+    private TlsInfo tls;
     private String scheme = "http";
 
     // --- Lazily computed fields ---
@@ -182,7 +178,7 @@ public final class HttpRequestImpl implements Request, Headers {
         pathQueryParsed = false;
         queryParams = null;
         pathParams = Collections.emptyMap();
-        // Per-request fields (NOT connection-level: remoteAddress, localAddress, secure, scheme)
+        // Per-request fields (NOT connection-level: remoteAddress, localAddress, secure, scheme, tls)
         contextPath = "";
         pathInfoCache = null;
         attributes.clear();
@@ -404,6 +400,11 @@ public final class HttpRequestImpl implements Request, Headers {
     @Override
     public String scheme() {
         return scheme;
+    }
+
+    @Override
+    public Optional<TlsInfo> tls() {
+        return Optional.ofNullable(tls);
     }
 
     // --- Private helpers ---

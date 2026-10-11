@@ -42,6 +42,7 @@ import io.vidocq.chappe.api.Server;
 import io.vidocq.chappe.api.ServerConfig;
 import io.vidocq.chappe.http.BoundedReads;
 import io.vidocq.chappe.http.ByteBufferPool;
+import io.vidocq.chappe.http.ConnectionInfo;
 import io.vidocq.chappe.http.HttpConnection;
 import io.vidocq.chappe.http.SslHandler;
 import io.vidocq.chappe.http.h2.Http2Connection;
@@ -384,6 +385,9 @@ final class ChappeServer implements Server {
         var sslHandler = new SslHandler(channel, engine, config.writeTimeout());
         sslHandler.doHandshake();
 
+        // Connection metadata, once per connection, after the handshake (CHAPPE-026)
+        var connectionInfo = ConnectionInfo.of(channel, sslHandler.tlsInfo());
+
         // Protocol negotiated via ALPN
         String protocol = sslHandler.getAlpnProtocol();
         boolean isH2 = "h2".equals(protocol);
@@ -392,7 +396,7 @@ final class ChappeServer implements Server {
             // HTTP/2 via ALPN — no pre-read, Http2Connection handles the preface
             readBuffer.clear();
             readBuffer.flip(); // empty
-            new Http2Connection(sslHandler, sslHandler, handler, config, readBuffer).run();
+            new Http2Connection(sslHandler, sslHandler, connectionInfo, handler, config, readBuffer).run();
         } else {
             // HTTP/1.1 — pre-read for the parser
             readBuffer.clear();
@@ -402,7 +406,16 @@ final class ChappeServer implements Server {
                 return;
             }
             readBuffer.flip();
-            new HttpConnection(sslHandler, sslHandler, sslHandler, handler, config, readBuffer, writeBuffer).run();
+            new HttpConnection(
+                            sslHandler,
+                            sslHandler,
+                            sslHandler,
+                            connectionInfo,
+                            handler,
+                            config,
+                            readBuffer,
+                            writeBuffer)
+                    .run();
         }
     }
 
@@ -441,7 +454,16 @@ final class ChappeServer implements Server {
         if (isHttp2Preface(readBuffer)) {
             new Http2Connection(channel, handler, config, readBuffer).run();
         } else {
-            new HttpConnection(channel, channel, channel, handler, config, readBuffer, writeBuffer).run();
+            new HttpConnection(
+                            channel,
+                            channel,
+                            channel,
+                            ConnectionInfo.of(channel, null),
+                            handler,
+                            config,
+                            readBuffer,
+                            writeBuffer)
+                    .run();
         }
     }
 

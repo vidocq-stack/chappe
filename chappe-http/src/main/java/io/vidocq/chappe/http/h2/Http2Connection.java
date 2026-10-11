@@ -40,6 +40,7 @@ import io.vidocq.chappe.api.Response;
 import io.vidocq.chappe.api.ServerConfig;
 import io.vidocq.chappe.api.StatusCode;
 import io.vidocq.chappe.api.internal.HeaderFields;
+import io.vidocq.chappe.http.ConnectionInfo;
 import io.vidocq.chappe.http.HttpRequestImpl;
 
 /**
@@ -69,6 +70,9 @@ public final class Http2Connection {
     private final Handler handler;
 
     private final ServerConfig config;
+
+    /** Connection metadata copied into every stream's request. */
+    private final ConnectionInfo connectionInfo;
 
     // --- Buffers ---
     private final ByteBuffer readBuffer;
@@ -106,7 +110,7 @@ public final class Http2Connection {
     private Http2Stream pendingHeaderBlock;
 
     /**
-     * Creates a new HTTP/2 connection.
+     * Creates a new cleartext (h2c) HTTP/2 connection.
      *
      * @param channel    the socket channel for the connection
      * @param handler    the application handler
@@ -114,20 +118,23 @@ public final class Http2Connection {
      * @param readBuffer the pre-filled read buffer (from protocol sniffing)
      */
     public Http2Connection(SocketChannel channel, Handler handler, ServerConfig config, ByteBuffer readBuffer) {
-        this((ReadableByteChannel) channel, (WritableByteChannel) channel, handler, config, readBuffer);
+        this(channel, channel, ConnectionInfo.of(channel, null), handler, config, readBuffer);
     }
 
     /**
-     * Constructor accepting separate channels (for TLS via SslHandler).
+     * Constructor accepting separate channels (for TLS via SslHandler) and the connection
+     * metadata every stream's request reports.
      */
     public Http2Connection(
             ReadableByteChannel readChannel,
             WritableByteChannel writeChannel,
+            ConnectionInfo connectionInfo,
             Handler handler,
             ServerConfig config,
             ByteBuffer readBuffer) {
         this.readChannel = readChannel;
         this.writeChannel = writeChannel;
+        this.connectionInfo = connectionInfo;
         this.handler = handler;
         this.config = config;
         this.readBuffer = readBuffer;
@@ -296,6 +303,7 @@ public final class Http2Connection {
                 remoteSettings.initialWindowSize(),
                 config.readTimeout(),
                 increment -> creditStreamWindow(streamId, increment));
+        stream.request().initConnectionInfo(connectionInfo);
         // maxRequestSize caps the body; a call routed to a gRPC handler is exempted at dispatch (CHAPPE-025).
         stream.bodyLimit(config.maxRequestSize());
         stream.open();

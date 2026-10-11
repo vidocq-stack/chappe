@@ -26,12 +26,20 @@ import java.nio.channels.ClosedChannelException;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.channels.WritableByteChannel;
+import java.security.cert.Certificate;
+import java.security.cert.X509Certificate;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.locks.ReentrantLock;
 
 import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLEngineResult;
 import javax.net.ssl.SSLEngineResult.HandshakeStatus;
 import javax.net.ssl.SSLEngineResult.Status;
+import javax.net.ssl.SSLPeerUnverifiedException;
+import javax.net.ssl.SSLSession;
+
+import io.vidocq.chappe.api.TlsInfo;
 
 /**
  * Wraps a {@link SocketChannel} and {@link SSLEngine} to provide transparent TLS
@@ -68,6 +76,9 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
 
     /** Bound on each blocking write of close_notify in {@link #close()}. */
     private final java.time.Duration closeWriteTimeout;
+
+    /** The session of the completed handshake; {@code null} until {@link #doHandshake()} returns. */
+    private volatile TlsInfo tlsInfo;
 
     /** A handler whose {@link #close()} bounds its close_notify write by the default write timeout. */
     public SslHandler(SocketChannel channel, SSLEngine engine) {
@@ -161,6 +172,7 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
                 default -> throw new IOException("Unexpected handshake status: " + hs);
             }
         }
+        tlsInfo = describe(engine.getSession());
     }
 
     // -------------------------------------------------------------------------
@@ -323,6 +335,28 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
 
     public String getAlpnProtocol() {
         return engine.getApplicationProtocol();
+    }
+
+    /**
+     * The TLS session negotiated by {@link #doHandshake()}, or {@code null} before it returned.
+     * Read once, at the end of the handshake.
+     */
+    public TlsInfo tlsInfo() {
+        return tlsInfo;
+    }
+
+    private static TlsInfo describe(SSLSession session) {
+        List<X509Certificate> chain = new ArrayList<>();
+        try {
+            for (Certificate certificate : session.getPeerCertificates()) {
+                if (certificate instanceof X509Certificate x509) {
+                    chain.add(x509);
+                }
+            }
+        } catch (SSLPeerUnverifiedException _) {
+            // The client sent no certificate, or the listener did not ask for one.
+        }
+        return new TlsInfo(session.getProtocol(), session.getCipherSuite(), session.getId(), chain);
     }
 
     @Override

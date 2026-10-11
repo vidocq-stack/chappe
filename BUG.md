@@ -5,6 +5,28 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-026 — over TLS and HTTP/2, a request reported cleartext and no client address
+
+- **Date**: 2026-10-11
+- **Status**: FIXED (commit `fix(http): report TLS and HTTP/2 connection info to handlers (CHAPPE-026)`,
+  branch `pr/ybl/chappe-tls-client-auth`)
+- **Module**: `chappe-http` (`HttpConnection`, `h2/Http2Connection`), `chappe-core` (`ChappeServer`)
+- **Symptom**: over TLS (HTTP/1.1 and HTTP/2 negotiated by ALPN), `Request.isSecure()` was `false`,
+  `scheme()` was `"http"` and `remoteAddress()`/`localAddress()` were `null`. Over h2c the
+  addresses were `null` too. Foy refused every TLS request on a CONFIDENTIAL constraint (it reads
+  `isSecure()`), and Cassini's `SecurityContext.isSecure()` and `UriInfo` scheme were wrong.
+- **Minimal reproduction**: `chappe-tests/.../ConnectionInfoTest` (h1 and h2 over TLS, keep-alive,
+  `Router.mount`, h2c prior knowledge). Before the fix every case but cleartext HTTP/1.1 failed.
+- **Cause**: `HttpConnection` filled the connection fields only when its `Closeable` was a
+  `SocketChannel`; over TLS it is the `SslHandler`. `Http2Stream` creates one request per stream and
+  nothing in `h2/` set connection fields.
+- **Fix**: `ChappeServer` builds a `ConnectionInfo` (addresses and the `TlsInfo` that `SslHandler`
+  reads at the end of the handshake) once per connection and passes it to `HttpConnection` and
+  `Http2Connection`, which copies it into every stream's request. `Request.tls()` exposes the
+  session.
+
+---
+
 ## CHAPPE-025 — HTTP/2 request bodies are not capped by maxRequestSize
 
 - **Date**: 2026-10-11

@@ -31,6 +31,7 @@ import java.util.List;
 
 import io.vidocq.chappe.api.Response;
 import io.vidocq.chappe.api.ServerConfig;
+import io.vidocq.chappe.http.ConnectionInfo;
 
 import org.junit.jupiter.api.Test;
 
@@ -49,6 +50,7 @@ class Http2StreamResetOnceTest {
     private final Http2Connection connection = new Http2Connection(
             Channels.newChannel(new ByteArrayInputStream(new byte[0])),
             (WritableByteChannel) Channels.newChannel(wire),
+            new ConnectionInfo(null, null, null),
             _ -> Response.ok("unused"),
             ServerConfig.DEFAULT,
             ByteBuffer.allocate(0));
