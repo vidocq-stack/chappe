@@ -397,10 +397,6 @@ public final class Http2Connection {
         // Extract pseudo-headers
         extractPseudoHeaders(req);
 
-        // A gRPC call may stream its request for as long as it lives (client or bidi streaming), with
-        // pauses of any length: readTimeout does not bound it, as maxRequestSize does not (ruling F-04).
-        if (isGrpc(req)) stream.bodyReadTimeout(null);
-
         // Half-close remote if END_STREAM was set on HEADERS
         boolean hasBody = !stream.headersEndStream();
         if (!hasBody) {
@@ -412,12 +408,6 @@ public final class Http2Connection {
         // have half-closed the stream, and its body must not be lost (CHAPPE-016).
         int streamId = stream.streamId();
         Thread.ofVirtual().name("chappe-h2-stream-" + streamId).start(() -> dispatchStream(stream, hasBody));
-    }
-
-    /** Whether the request is a gRPC or gRPC-Web call: a {@code content-type} of {@code application/grpc*}. */
-    private static boolean isGrpc(HttpRequestImpl request) {
-        String contentType = request.headers().firstOrNull("content-type");
-        return contentType != null && contentType.regionMatches(true, 0, "application/grpc", 0, 16);
     }
 
     private void handleData(Http2Frame.DataFrame frame) throws IOException {
@@ -465,13 +455,41 @@ public final class Http2Connection {
         replenishConnectionWindow();
     }
 
-    /** Sends the stream WINDOW_UPDATE the body reader earned by consuming bytes, unless the stream is gone. */
+    /**
+     * Sends the stream WINDOW_UPDATE the body reader earned by consuming bytes, unless the stream is
+     * gone or reset. Under the stream's reset lock, which {@link #writeRstStream} holds from the
+     * cancellation to the RST_STREAM: no WINDOW_UPDATE follows a RST_STREAM this endpoint sent (RFC
+     * 9113 §5.1).
+     */
     private void creditStreamWindow(int streamId, int increment) {
-        if (!streams.containsKey(streamId)) return;
+        var stream = streams.get(streamId);
+        if (stream == null) return;
+        var lock = stream.resetLock();
+        lock.lock();
         try {
+            if (stream.isCancelled() || stream.isResetSent()) return;
             frameWriter.writeWindowUpdate(streamId, increment);
         } catch (IOException _) {
             // connection lost: the reader fails when the connection cancels its stream
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * Writes RST_STREAM for {@code stream} under its reset lock, after {@code beforeReset} (the
+     * cancellation, if any): a body reader crediting the window concurrently either wrote its
+     * WINDOW_UPDATE before, or sees the reset and writes none.
+     */
+    private void writeRstStream(Http2Stream stream, Http2ErrorCode error, Runnable beforeReset) throws IOException {
+        var lock = stream.resetLock();
+        lock.lock();
+        try {
+            beforeReset.run();
+            stream.markResetSent();
+            frameWriter.writeRstStream(stream.streamId(), error);
+        } finally {
+            lock.unlock();
         }
     }
 
@@ -623,6 +641,10 @@ public final class Http2Connection {
 
             // gRPC switch: router returned a GrpcDispatch marker.
             if (response instanceof io.vidocq.chappe.api.GrpcDispatch gd) {
+                // A call the router sent to a gRPC handler may stream its request for as long as it
+                // lives (client or bidi streaming), with pauses of any length: readTimeout does not
+                // bound it (ruling F-04). Decided by the route, never by a client header.
+                stream.bodyReadTimeout(null);
                 var call = new io.vidocq.chappe.http.grpc.GrpcCallImpl(stream, request, this);
                 io.vidocq.chappe.http.grpc.GrpcCallImpl.run(call, gd.handler());
                 completed = true;
@@ -631,6 +653,7 @@ public final class Http2Connection {
 
             // gRPC-Web switch: trailers serialized inline as a 0x80 DATA frame.
             if (response instanceof io.vidocq.chappe.api.GrpcWebDispatch gwd) {
+                stream.bodyReadTimeout(null); // as for gRPC above (ruling F-04)
                 var call = new io.vidocq.chappe.http.grpc.GrpcWebCallImpl(stream, request, this, gwd.mode());
                 io.vidocq.chappe.http.grpc.GrpcWebCallImpl.run(call, gwd.handler());
                 completed = true;
@@ -675,7 +698,7 @@ public final class Http2Connection {
         if (stream.isCancelled()) return; // reset by the peer or connection gone: no frame (§5.4.2)
         resetStreams.add(stream.streamId()); // the request DATA still in flight is ignored (§5.1)
         try {
-            frameWriter.writeRstStream(stream.streamId(), Http2ErrorCode.INTERNAL_ERROR);
+            writeRstStream(stream, Http2ErrorCode.INTERNAL_ERROR, () -> {});
         } catch (IOException _) {
             // connection lost: nothing more to tell the peer
         }
@@ -690,9 +713,9 @@ public final class Http2Connection {
         if (stream.isCancelled() || remoteEnded(stream)) return;
         resetStreams.add(stream.streamId());
         streams.remove(stream.streamId());
-        stream.cancel(); // a reader still waiting for the body fails instead of waiting forever
         try {
-            frameWriter.writeRstStream(stream.streamId(), Http2ErrorCode.NO_ERROR);
+            // the cancel fails a reader still waiting for the body instead of letting it wait forever
+            writeRstStream(stream, Http2ErrorCode.NO_ERROR, stream::cancel);
         } catch (IOException _) {
             // connection lost: nothing more to tell the peer
         }
@@ -706,9 +729,10 @@ public final class Http2Connection {
     private void resetStream(Http2Stream stream, Http2ErrorCode error) throws IOException {
         resetStreams.add(stream.streamId());
         streams.remove(stream.streamId());
-        stream.cancel();
-        wakeConnectionWindowWaiters();
-        frameWriter.writeRstStream(stream.streamId(), error);
+        writeRstStream(stream, error, () -> {
+            stream.cancel();
+            wakeConnectionWindowWaiters();
+        });
     }
 
     /** {@link Body#release() Releases} the body of a response the handler returned; never throws. */

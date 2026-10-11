@@ -45,8 +45,6 @@ import org.junit.jupiter.api.Test;
  */
 class Http2EarlyResponseTest {
 
-    private static final int TYPE_CONTINUATION = 0x9;
-
     private final CountDownLatch release = new CountDownLatch(1);
     private Server server;
 

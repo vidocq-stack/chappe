@@ -29,9 +29,13 @@ cause hypothesis, and status.
   credited on receipt, so an unread stream never blocks the others; a connection buffers at most
   `MAX_CONCURRENT_STREAMS` (100) × 64 KiB. A body read waits at most `readTimeout` for the next DATA
   frame, then throws `SocketTimeoutException` (the HTTP/2 side of CHAPPE-022); the wait is a timed
-  poll of the stream's queue, with no timer thread, and returns at once when a chunk is queued. A gRPC
-  or gRPC-Web stream (`content-type: application/grpc*`) is exempt (ruling F-04): a client or bidi
-  streaming call may pause for as long as it likes. A read of zero bytes returns 0 at once.
+  poll of the stream's queue, with no timer thread, and returns at once when a chunk is queued. A call
+  the router sends to a gRPC handler (`Router.grpc` / `grpcWeb`, i.e. a `GrpcDispatch` /
+  `GrpcWebDispatch` answer) is exempt (ruling F-04): a client or bidi streaming call may pause for as
+  long as it likes. The exemption is decided at dispatch, never from the client's `content-type`,
+  which would let any client switch the timeout off on any handler. No WINDOW_UPDATE follows a
+  RST_STREAM this endpoint sent on the stream (§5.1): both are written under a per-stream lock. A
+  read of zero bytes returns 0 at once.
 - **Same class, header blocks (CONTINUATION flood, CVE-2024-27316 class)**: a header block (HEADERS
   plus its CONTINUATION frames) was accumulated without bound until END_HEADERS; `HpackDecoder`
   checks `maxHeaderListSize` only once the block is complete. A client that never set END_HEADERS
@@ -44,6 +48,18 @@ cause hypothesis, and status.
   piecemeal here, so the connection is closed; §10.5 names `ENHANCE_YOUR_CALM` for such abuse, and
   the HPACK decoder already uses it for a decoded list past the same size. It is neither a
   `COMPRESSION_ERROR` (the HPACK is not malformed) nor a `PROTOCOL_ERROR` (the framing is valid).
+- **Follow-ups (open)**:
+  - (a) HTTP/2 writes have no `writeTimeout` (it bounds HTTP/1.1 only). A peer that stops reading
+    its socket can block any HTTP/2 write indefinitely, and now the stream WINDOW_UPDATE a body read
+    sends too: a request body read can block behind it, beyond `readTimeout`. Fix: bound HTTP/2
+    writes by `writeTimeout`, or let the connection thread send the WINDOW_UPDATEs the readers earn.
+  - (b) The HTTP/2 header-list limit is a fixed 8,192 bytes (`Http2Settings.DEFAULT`), not derived
+    from `ServerConfig.maxHeaderSize`, so raising `maxHeaderSize` does not help HTTP/2, and a header
+    section that fits HTTP/1.1 can fail over HTTP/2. Past it, the connection ends with
+    `GOAWAY(ENHANCE_YOUR_CALM)`, which cuts every other stream, where HTTP/1.1 answers `431` on the
+    request. Fix: derive `SETTINGS_MAX_HEADER_LIST_SIZE` from `maxHeaderSize` (with room for the
+    32-byte per-field overhead), and between it and a hard accumulation cap, decode with a discarding
+    sink and answer `431` on the stream.
 
 ---
 

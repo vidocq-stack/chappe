@@ -36,8 +36,9 @@ import javax.net.ssl.SSLContext;
  *     connection is closed; over TLS a read waits for a whole TLS record (up to 16 KiB), so each
  *     record must arrive within it. Over HTTP/2 it bounds the wait for the stream's next DATA frame:
  *     the read throws {@link java.net.SocketTimeoutException}, and the stream is reset once the
- *     response is sent. A gRPC or gRPC-Web stream ({@code content-type: application/grpc*}) is
- *     exempt, so a client or bidi streaming call may pause. It bounds each read, not the whole body.
+ *     response is sent. A call the router sends to a gRPC handler ({@code Router.grpc} or {@code
+ *     grpcWeb}) is exempt, so a client or bidi streaming call may pause; a gRPC content-type on a
+ *     request to any other handler exempts nothing. It bounds each read, not the whole body.
  *     Zero or negative disables it; a value too large for nanoseconds in a {@code long} is saturated
  *     (about 73 years). The wait for a next request is bounded by {@code idleTimeout}
  *     instead.

@@ -42,8 +42,10 @@ import org.junit.jupiter.api.Test;
  */
 class Http2HeaderBlockLimitTest {
 
-    /** Nine 1 KiB fragments: the block passes 8,192 bytes on the ninth, the last frame sent. */
-    private static final int FLOOD_FRAMES = 9;
+    /** The max header list size chappe advertises, which bounds a header block. */
+    private static final int MAX_HEADER_LIST_SIZE = 8_192;
+
+    private static final int FRAGMENT = 1_024;
 
     private Server server;
 
@@ -64,11 +66,16 @@ class Http2HeaderBlockLimitTest {
     }
 
     /**
-     * Sends {@link #FLOOD_FRAMES} CONTINUATION frames that never end the block, then reads up to the
-     * GOAWAY. Without a bound the server would wait for END_HEADERS while buffering every fragment.
+     * Sends {@code first} as a HEADERS frame without END_HEADERS, then 1 KiB CONTINUATION frames that
+     * never end the block, up to the one that takes it past the limit and no further, then reads up to
+     * the GOAWAY. The server has then read every byte sent, so its close cannot turn into a TCP reset
+     * that would swallow the GOAWAY. Without a bound the server would wait for END_HEADERS while
+     * buffering every fragment.
      */
-    private static Frame flood(H2TestConnection h2, int streamId) throws IOException {
-        for (int i = 0; i < FLOOD_FRAMES; i++) h2.frame(TYPE_CONTINUATION, 0, streamId, new byte[1_024]);
+    private static Frame flood(H2TestConnection h2, int streamId, byte[] first) throws IOException {
+        h2.frame(TYPE_HEADERS, FLAG_END_STREAM, streamId, first); // no END_HEADERS
+        int frames = (MAX_HEADER_LIST_SIZE - first.length) / FRAGMENT + 1; // the last one passes the limit
+        for (int i = 0; i < frames; i++) h2.frame(TYPE_CONTINUATION, 0, streamId, new byte[FRAGMENT]);
         h2.flush();
         while (true) {
             Frame f = h2.read(); // a SocketTimeoutException here means the server kept accumulating
@@ -79,8 +86,8 @@ class Http2HeaderBlockLimitTest {
     @Test
     void aContinuationFloodOnANewStreamEndsTheConnectionWithEnhanceYourCalm() throws Exception {
         try (var h2 = H2TestConnection.open(server.port())) {
-            h2.frame(TYPE_HEADERS, FLAG_END_STREAM, 1, requestHeaders("GET", "/")); // no END_HEADERS
-            assertEquals(ENHANCE_YOUR_CALM, flood(h2, 1).goawayErrorCode());
+            assertEquals(
+                    ENHANCE_YOUR_CALM, flood(h2, 1, requestHeaders("GET", "/")).goawayErrorCode());
         }
     }
 
@@ -93,8 +100,9 @@ class Http2HeaderBlockLimitTest {
             assertEquals(new Reply("200", "early"), h2.reply(1));
             assertEquals(NO_ERROR, h2.await(TYPE_RST_STREAM, 1).errorCode());
             // Trailers on the reset stream: decoded and dropped, so accumulated all the same.
-            h2.frame(TYPE_HEADERS, FLAG_END_STREAM, 1, literalWithIndexing("x-late", "v1"));
-            assertEquals(ENHANCE_YOUR_CALM, flood(h2, 1).goawayErrorCode());
+            assertEquals(
+                    ENHANCE_YOUR_CALM,
+                    flood(h2, 1, literalWithIndexing("x-late", "v1")).goawayErrorCode());
         }
     }
 

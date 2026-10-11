@@ -61,6 +61,11 @@ public final class Http2Stream {
     private final AtomicInteger consumedSinceUpdate = new AtomicInteger();
     private final IntConsumer windowCredit;
 
+    // Held from a reset's cancellation to its RST_STREAM, and by a WINDOW_UPDATE write: none follows
+    // the RST_STREAM (RFC 9113 §5.1)
+    private final ReentrantLock resetLock = new ReentrantLock();
+    private volatile boolean resetSent;
+
     // Bound on the wait for the next DATA frame; cleared for a gRPC stream (ruling F-04, CHAPPE-024)
     private volatile Duration bodyReadTimeout;
 
@@ -209,6 +214,19 @@ public final class Http2Stream {
         if (increment <= 0) return;
         recvWindow.addAndGet(increment);
         windowCredit.accept(increment);
+    }
+
+    ReentrantLock resetLock() {
+        return resetLock;
+    }
+
+    /** Records that this endpoint sent RST_STREAM on the stream; called under {@link #resetLock()}. */
+    void markResetSent() {
+        resetSent = true;
+    }
+
+    boolean isResetSent() {
+        return resetSent;
     }
 
     /** The bound on a body read waiting for the next DATA frame; {@code null} when unbounded. */

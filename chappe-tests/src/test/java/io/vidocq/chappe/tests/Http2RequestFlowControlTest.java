@@ -28,9 +28,13 @@ import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
+import io.vidocq.chappe.api.GrpcCall;
+import io.vidocq.chappe.api.GrpcStatus;
 import io.vidocq.chappe.api.Request;
 import io.vidocq.chappe.api.Response;
+import io.vidocq.chappe.api.Router;
 import io.vidocq.chappe.api.Server;
+import io.vidocq.chappe.http.grpc.GrpcFrameWriter;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -38,12 +42,17 @@ import org.junit.jupiter.api.Test;
 /**
  * CHAPPE-024: the HTTP/2 stream window reopens as the handler reads the body, so a stream buffers at
  * most its window; a client overrunning it gets a stream FLOW_CONTROL_ERROR; readTimeout bounds the
- * wait for the next DATA frame, except on a gRPC stream. The padded upload is guarded by {@link
+ * wait for the next DATA frame, except on a call routed to a gRPC handler ({@code Router.grpc}),
+ * whatever the content-type a client sends to a plain handler. The padded upload is guarded by {@link
  * Http2PaddedDataFlowControlTest} (CHAPPE-023).
  */
 class Http2RequestFlowControlTest {
 
+    private static final String GRPC_PATH = "/svc.Upload/Collect";
+
     private final CountDownLatch release = new CountDownLatch(1);
+    private final Router grpcRouter =
+            Router.builder().grpc(GRPC_PATH, this::collect).build();
     private Server server;
 
     @AfterEach
@@ -56,7 +65,7 @@ class Http2RequestFlowControlTest {
         server = Server.builder()
                 .port(0)
                 .readTimeout(readTimeout)
-                .handler(this::handle)
+                .handler(request -> GRPC_PATH.equals(request.path()) ? grpcRouter.handle(request) : handle(request))
                 .build();
         server.start();
     }
@@ -83,6 +92,15 @@ class Http2RequestFlowControlTest {
         } catch (IOException e) {
             return Response.ok("failed:" + e.getClass().getSimpleName());
         }
+    }
+
+    /** A client-streaming gRPC call: sums the sizes of the messages it receives up to the half-close. */
+    private void collect(GrpcCall call) throws IOException {
+        int total = 0;
+        byte[] message;
+        while ((message = call.receive()) != null) total += message.length;
+        call.send(("read:" + total).getBytes(StandardCharsets.US_ASCII));
+        call.complete(GrpcStatus.OK, "");
     }
 
     @Test
@@ -138,18 +156,32 @@ class Http2RequestFlowControlTest {
     }
 
     @Test
-    void anIdleGrpcStreamIsExemptFromTheReadTimeout() throws Exception {
+    void anIdleCallRoutedToAGrpcHandlerIsExemptFromTheReadTimeout() throws Exception {
+        start(Duration.ofMillis(300));
+        try (var h2 = H2TestConnection.open(server.port())) {
+            h2.headers(
+                    1, false, requestHeaders("POST", GRPC_PATH, "content-type", "application/grpc", "te", "trailers"));
+            h2.data(1, false, GrpcFrameWriter.encode("abc".getBytes(StandardCharsets.US_ASCII)));
+            h2.flush();
+            // A client-streaming call pauses three times longer than readTimeout: a timed-out read
+            // would end the call within this wait.
+            assertNull(h2.poll(900), "the idle gRPC call was answered before its half-close");
+            h2.data(1, true, GrpcFrameWriter.encode("def".getBytes(StandardCharsets.US_ASCII)));
+            h2.flush();
+            Reply reply = h2.reply(1);
+            assertEquals("200", reply.status());
+            assertTrue(reply.body().endsWith("read:6"), reply.body());
+        }
+    }
+
+    @Test
+    void aGrpcContentTypeDoesNotExemptAPlainHandlerFromTheReadTimeout() throws Exception {
         start(Duration.ofMillis(300));
         try (var h2 = H2TestConnection.open(server.port())) {
             h2.headers(1, false, requestHeaders("POST", "/read", "content-type", "application/grpc+proto"));
             h2.data(1, false, "abc".getBytes(StandardCharsets.US_ASCII));
-            h2.flush();
-            // A client-streaming call pauses three times longer than readTimeout: a timed-out read
-            // would answer within this wait.
-            assertNull(h2.poll(900), "the idle gRPC stream was answered before its END_STREAM");
-            h2.data(1, true, "def".getBytes(StandardCharsets.US_ASCII));
-            h2.flush();
-            assertEquals(new Reply("200", "read:6"), h2.reply(1));
+            h2.flush(); // and nothing more: the body stalls
+            assertEquals(new Reply("200", "failed:SocketTimeoutException"), h2.reply(1));
         }
     }
 }
