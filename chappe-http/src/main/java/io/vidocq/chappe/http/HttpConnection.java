@@ -210,20 +210,20 @@ public final class HttpConnection {
                         response = Response.of(StatusCode.HTTP_VERSION_NOT_SUPPORTED);
                     }
 
-                    // An upgrade drains the request body before taking the connection over; after a
-                    // failed body read (or a closed read channel) the byte stream position is
-                    // unknown: close the connection, no drain, no upgrade head (CHAPPE-013), but
-                    // gracefully while the channel is still open (CHAPPE-014).
+                    // An upgrade drains the request body before taking the connection over. After a
+                    // failed body read (or a closed read channel) the byte stream position is unknown,
+                    // and a body longer than maxDrainSize is not worth reading: close the connection,
+                    // no upgrade head (CHAPPE-013, CHAPPE-021), gracefully while the channel is still
+                    // open (CHAPPE-014).
                     if ((response instanceof WebSocketUpgrade || response instanceof ConnectionUpgrade)
                             && bodyStream != null
-                            && (bodyReadFailed(bodyStream) || !readChannel.isOpen())) {
+                            && (bodyReadFailed(bodyStream) || !readChannel.isOpen() || !drained(bodyStream))) {
                         lingerOnClose = readChannel.isOpen();
                         break;
                     }
 
                     // 6a. WebSocket upgrade: switch to frame mode and end HTTP loop.
                     if (response instanceof WebSocketUpgrade upgrade) {
-                        if (bodyStream != null) HttpBodyReader.drain(bodyStream);
                         var key = request.headers().firstOrNull("Sec-WebSocket-Key");
                         WebSocketHandshake.writeResponse(writeChannel, key, upgrade.subprotocol());
                         // Prefer the matched handshake request (carries route pathParams) over the raw one.
@@ -243,7 +243,7 @@ public final class HttpConnection {
                     // 6b. Generic connection upgrade: write the application's head, then hand the
                     // raw streams over and park until the application closes the connection.
                     if (response instanceof ConnectionUpgrade upgrade) {
-                        runUpgrade(upgrade, bodyStream);
+                        runUpgrade(upgrade);
                         return; // the finally block closes the connection (idempotent)
                     }
 
@@ -279,15 +279,12 @@ public final class HttpConnection {
                     break;
                 }
 
-                // 8. Drain unread body (for keep-alive). A drain that fails (bad framing, a body
-                // cut short) is a failed body read too: same graceful close, no next request.
-                if (bodyStream != null) {
-                    try {
-                        HttpBodyReader.drain(bodyStream);
-                    } catch (IOException _) {
-                        lingerOnClose = readChannel.isOpen();
-                        break;
-                    }
+                // 8. Drain the unread body (for keep-alive), within maxDrainSize. A drain that fails
+                // (bad framing, a body cut short) is a failed body read too, and a body longer than
+                // the budget is not worth reading (CHAPPE-021): same graceful close, no next request.
+                if (bodyStream != null && !drained(bodyStream)) {
+                    lingerOnClose = readChannel.isOpen();
+                    break;
                 }
 
                 // 9. Check keep-alive
@@ -326,6 +323,19 @@ public final class HttpConnection {
     /** Whether reading the request body failed (a truncated or broken body leaves the stream unusable). */
     private static boolean bodyReadFailed(InputStream bodyStream) {
         return bodyStream instanceof RequestBodyInputStream body && body.failed();
+    }
+
+    /**
+     * Drains what the handler left of the request body, within {@code config.maxDrainSize()}
+     * (CHAPPE-021). {@code false} when the budget ran out or the read failed: the connection must
+     * then close instead of reading a next request or switching protocols.
+     */
+    private boolean drained(InputStream bodyStream) {
+        try {
+            return HttpBodyReader.drain(bodyStream, config.maxDrainSize());
+        } catch (IOException _) {
+            return false;
+        }
     }
 
     /** {@link Body#release() Releases} the body of a response the handler returned; never throws. */
@@ -429,8 +439,8 @@ public final class HttpConnection {
     // --- Generic connection upgrade ---
 
     /**
-     * Takes the connection over for a {@link ConnectionUpgrade}: drains the request body, writes
-     * the status line and the application's headers, then calls
+     * Takes the connection over for a {@link ConnectionUpgrade} (the request body is already
+     * drained): writes the status line and the application's headers, then calls
      * {@link UpgradeHandler#onUpgrade} on this thread. Bytes already read past the request head
      * are copied out of the pooled {@code readBuffer} and are the first bytes of the upgraded
      * input.
@@ -441,8 +451,7 @@ public final class HttpConnection {
      * closes it. The idle timeout no longer applies once the connection is upgraded; end of
      * stream on the input does not close it either — the application decides.
      */
-    private void runUpgrade(ConnectionUpgrade upgrade, InputStream bodyStream) throws IOException {
-        if (bodyStream != null) HttpBodyReader.drain(bodyStream);
+    private void runUpgrade(ConnectionUpgrade upgrade) throws IOException {
         writer.writeUpgradeHead(upgrade.status(), upgrade.headers(), writeBuffer, writeChannel, config.writeTimeout());
         var conn = new UpgradedConnectionImpl(readChannel, writeChannel, readBuffer, closeable, request);
         try {

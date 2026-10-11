@@ -42,6 +42,9 @@ import javax.net.ssl.SSLContext;
  * @param idleTimeout idle timeout before closing the connection (default: 60s)
  * @param maxRequestSize maximum request body size in bytes (default: 10 MiB)
  * @param maxHeaderSize maximum header size in bytes (default: 8 KiB)
+ * @param maxDrainSize most bytes of a request body the handler left unread that the server reads
+ *     and discards to keep an HTTP/1.1 connection (default: 1 MiB); past it the connection is
+ *     closed instead, and an upgrade is refused
  * @param sslContext SSL/TLS context ({@code null} = cleartext)
  * @param alpnProtocols negotiated ALPN protocols (default: {@code ["h2", "http/1.1"]})
  * @param shutdownGracePeriod drain timeout before forced shutdown (default: 30s)
@@ -55,6 +58,7 @@ public record ServerConfig(
         Duration idleTimeout,
         long maxRequestSize,
         int maxHeaderSize,
+        long maxDrainSize,
         SSLContext sslContext,
         List<String> alpnProtocols,
         Duration shutdownGracePeriod) {
@@ -69,6 +73,7 @@ public record ServerConfig(
             Duration.ofSeconds(60),
             10L * 1024 * 1024,
             8192,
+            1024L * 1024,
             null,
             List.of("h2", "http/1.1"),
             Duration.ofSeconds(30));

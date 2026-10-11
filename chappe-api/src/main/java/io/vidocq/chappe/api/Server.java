@@ -102,6 +102,15 @@ public interface Server extends AutoCloseable {
 
         Builder maxHeaderSize(int bytes);
 
+        /**
+         * Most bytes of a request body the handler left unread that the server reads and discards
+         * to keep an HTTP/1.1 connection (default: 1 MiB). Past it the connection is closed instead.
+         * {@code 0} closes the connection whenever a body was left unread.
+         *
+         * @throws IllegalArgumentException if {@code bytes} is negative
+         */
+        Builder maxDrainSize(long bytes);
+
         /** Configures TLS with the given {@link SSLContext}. */
         Builder tls(SSLContext sslContext);
 

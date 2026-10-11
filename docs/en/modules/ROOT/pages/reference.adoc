@@ -94,7 +94,7 @@ The builder is the nested `Server.Builder` interface:
 * `handler(Handler)`
 * `backlog(int)`
 * `readTimeout(Duration)` / `writeTimeout(Duration)` / `idleTimeout(Duration)`
-* `maxRequestSize(long)` / `maxHeaderSize(int)`
+* `maxRequestSize(long)` / `maxHeaderSize(int)` / `maxDrainSize(long)` [.tag-new]#NEW#
 * `tls(SSLContext)`
 * `alpnProtocols(String...)`
 * `shutdownGracePeriod(Duration)`
@@ -113,6 +113,7 @@ The executor is not configurable: every connection is handled on its own virtual
 ==== Request body limits [.tag-new]#NEW#
 
 * `maxRequestSize` (default 10 MiB) caps a request body. Over HTTP/1.1, a `Content-Length` above it is answered `413 Content Too Large` (RFC 9110 §15.5.14) before the handler runs, and the connection is closed. A chunked body is counted as it is on the wire, framing included (chunk-size lines with their extensions, CRLFs and the trailer section), so a body near the cap with heavy chunk overhead trips slightly earlier than its data alone would. The chunk that would take it past the cap fails the read with `RequestBodyTooLargeException`, an `IOException` whose `limit()` is the cap, before any of that chunk's data is read; every later read of the body throws the same exception. Whatever the cap, one chunk-size line or one trailer line longer than 8 KiB fails the read with an `IOException`. The handler can still answer (a `413` is the usual choice); Chappe then closes the connection gracefully and reads no other request from it.
+* `maxDrainSize` (default 1 MiB) bounds what Chappe reads of a body the handler left unread. Over HTTP/1.1, the rest of the body sits between the response and the next request, so Chappe reads and discards it to keep the connection. When more than `maxDrainSize` bytes are left, it closes the connection gracefully instead, after the response; a `WebSocketUpgrade` or `ConnectionUpgrade` answer is refused the same way, and the connection closes without the `101`. A chunked body is counted as it is on the wire, framing and trailers included, and the unread rest of a chunk the handler started counts too. `0` closes the connection whenever a body was left unread. A negative value is refused with `IllegalArgumentException`.
 
 === `Router`
 

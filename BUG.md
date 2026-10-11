@@ -5,6 +5,32 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-021 — the drain of an unread request body has no bound
+
+- **Date**: 2026-10-11
+- **Status**: FIXED (commit `fix(http): bound the drain of an unread request body (CHAPPE-021)`,
+  branch `pr/ybl/chappe-request-body-bounds`)
+- **Module**: `chappe-http` (`HttpBodyReader`, `HttpConnection`, `RequestBodyInputStream`,
+  `ChunkedInputStream`), `chappe-api` (`ServerConfig`, `Server.Builder`), `chappe-core`
+  (`ChappeServerBuilder`)
+- **Symptom**: when a handler returned without reading its request body, `HttpBodyReader.drain` read
+  the rest before the next request, with no byte bound. A client that kept sending a chunked body held
+  the connection and its virtual thread for as long as it sent; a `Content-Length` body up to
+  `maxRequestSize` (10 MiB) was pulled in full only to reuse the connection. The same unbounded drain
+  ran before a WebSocket or generic upgrade. Seen from Foy as BUG-20261011-11.
+- **Minimal reproduction**: `chappe-tests/.../UnreadBodyDrainTest#anEndlessChunkedUploadIgnoredByTheHandlerIsCutOff`
+  (the client never reached the end of the connection while it uploaded).
+- **Cause**: `drain(InputStream)` read to `-1`, without a budget.
+- **Fix**: new `ServerConfig.maxDrainSize` (`Server.Builder.maxDrainSize(long)`, default 1 MiB, the
+  same budget as the lingering close). `drain(InputStream, long)` returns `false` past it, and the
+  connection closes gracefully instead (lingering close), after the response; an upgrade is refused
+  the same way, without its `101`. The budget counts wire bytes: a chunked body counts its size lines,
+  extensions, CRLFs and trailers (`RequestBodyInputStream.limitRemainingWireBytes`), and the unread
+  rest of a chunk the handler started counts too, so framing alone cannot outlast it. A failed read
+  during the drain ends it and closes the connection.
+
+---
+
 ## CHAPPE-020 — a chunked request body is not capped by maxRequestSize
 
 - **Date**: 2026-10-11

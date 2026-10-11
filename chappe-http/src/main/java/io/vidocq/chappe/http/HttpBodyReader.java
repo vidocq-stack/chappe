@@ -53,14 +53,31 @@ public final class HttpBodyReader {
     }
 
     /**
-     * Drains the remaining body bytes (for keep-alive when the handler
-     * did not read the body).
+     * Reads and discards what is left of a request body, at most {@code maxBytes} bytes on the wire:
+     * a handler that did not read its body leaves the rest on the connection, ahead of the next
+     * request. A chunked body counts its framing and trailers too, so endless framing cannot outlast
+     * the budget (CHAPPE-021).
+     *
+     * @return {@code true} when the body ended within the budget; {@code false} when more than
+     *     {@code maxBytes} bytes were left, and the caller closes the connection instead (CHAPPE-021)
+     * @throws IOException when the body cannot be read (bad framing, a body cut short, an earlier
+     *     failed read): the caller closes the connection too
      */
-    static void drain(InputStream bodyStream) throws IOException {
-        if (bodyStream == null) return;
+    static boolean drain(InputStream bodyStream, long maxBytes) throws IOException {
+        if (bodyStream instanceof RequestBodyInputStream body) body.limitRemainingWireBytes(maxBytes);
         byte[] buf = new byte[4096];
-        while (bodyStream.read(buf) != -1) {
-            // discard
+        long left = maxBytes;
+        try {
+            while (true) {
+                // One byte past the budget tells a body longer than the budget from one that ends at it.
+                int len = left >= buf.length ? buf.length : (int) left + 1;
+                int n = bodyStream.read(buf, 0, len);
+                if (n == -1) return true;
+                left -= n;
+                if (left < 0) return false;
+            }
+        } catch (RequestBodyInputStream.DrainBudgetExceededException _) {
+            return false;
         }
     }
 }

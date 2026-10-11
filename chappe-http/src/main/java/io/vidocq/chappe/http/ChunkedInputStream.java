@@ -39,8 +39,9 @@ import io.vidocq.chappe.api.RequestBodyTooLargeException;
  * size lines with their extensions, CRLFs and the trailer section. A chunk's data is counted when
  * its size line is read, so a chunk that would take the body past the cap fails before any of its
  * data is read. One chunk-size line and one trailer line are each bounded by
- * {@link #MAX_CHUNK_LINE_LENGTH}, whatever the cap. A failed read is final: every later read
- * rethrows the same exception.
+ * {@link #MAX_CHUNK_LINE_LENGTH}, whatever the cap. The drain of a body the handler left unread
+ * bounds the same wire count with its own budget (CHAPPE-021). A failed read is final: every later
+ * read rethrows the same exception.
  */
 final class ChunkedInputStream extends RequestBodyInputStream {
 
@@ -68,6 +69,10 @@ final class ChunkedInputStream extends RequestBodyInputStream {
     private long wireBytes;
     /** The failure of an earlier read, rethrown by every later read. */
     private IOException failure;
+    /** Most {@link #wireBytes} the drain lets this body reach (CHAPPE-021); no bound until it starts. */
+    private long drainLimit = Long.MAX_VALUE;
+    /** The drain budget {@link #drainLimit} was set from, for the failure message. */
+    private long drainBudget;
 
     ChunkedInputStream(ByteBuffer buffer, ReadableByteChannel channel) {
         this(buffer, channel, null, Long.MAX_VALUE);
@@ -85,6 +90,7 @@ final class ChunkedInputStream extends RequestBodyInputStream {
     int readByte() throws IOException {
         if (failure != null) throw failure;
         try {
+            checkDrainLimit();
             return decodeByte();
         } catch (IOException e) {
             failure = e;
@@ -96,11 +102,28 @@ final class ChunkedInputStream extends RequestBodyInputStream {
     int readBytes(byte[] b, int off, int len) throws IOException {
         if (failure != null) throw failure;
         try {
+            checkDrainLimit();
             return decodeBytes(b, off, len);
         } catch (IOException e) {
             failure = e;
             throw e;
         }
+    }
+
+    /**
+     * Counts the rest of the body, as it is on the wire, against the drain budget (CHAPPE-021). The
+     * data of the current chunk was counted when its size line was read, so what the handler left of
+     * it counts against the budget too: a read fails at once when that rest alone exceeds it.
+     */
+    @Override
+    void limitRemainingWireBytes(long maxBytes) {
+        long consumed = wireBytes - chunkRemaining;
+        drainBudget = maxBytes;
+        drainLimit = maxBytes > Long.MAX_VALUE - consumed ? Long.MAX_VALUE : consumed + maxBytes;
+    }
+
+    private void checkDrainLimit() throws DrainBudgetExceededException {
+        if (wireBytes > drainLimit) throw new DrainBudgetExceededException(drainBudget);
     }
 
     private int decodeByte() throws IOException {
@@ -232,18 +255,20 @@ final class ChunkedInputStream extends RequestBodyInputStream {
      * would take the body past the cap fails before any of its data is read (CHAPPE-020). The stream is
      * then {@link #failed()}, so the connection closes instead of draining it.
      */
-    private void countChunk(long size) throws RequestBodyTooLargeException {
+    private void countChunk(long size) throws IOException {
         if (size > maxBodySize - wireBytes) throw new RequestBodyTooLargeException(maxBodySize);
         wireBytes += size;
+        checkDrainLimit();
     }
 
     /**
      * Takes one framing byte (size line, extension, CRLF, trailer section) from the buffer, which the
      * caller made non-empty, and counts it against {@code maxBodySize} (CHAPPE-020).
      */
-    private int nextFramingByte() throws RequestBodyTooLargeException {
+    private int nextFramingByte() throws IOException {
         int b = buffer.get() & 0xFF;
         if (++wireBytes > maxBodySize) throw new RequestBodyTooLargeException(maxBodySize);
+        checkDrainLimit();
         return b;
     }
 

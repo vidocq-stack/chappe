@@ -21,6 +21,7 @@ package io.vidocq.chappe.http;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.Serial;
 
 /**
  * A request body stream reading the connection's own buffer and channel. Once a read failed (a
@@ -62,4 +63,23 @@ abstract class RequestBodyInputStream extends InputStream {
 
     /** {@link InputStream#read(byte[], int, int)}. */
     abstract int readBytes(byte[] b, int off, int len) throws IOException;
+
+    /**
+     * Bounds what is left of this body to {@code maxBytes} more bytes on the wire, for the drain of a
+     * body the handler left unread (CHAPPE-021). A stream whose wire bytes are its data bytes needs
+     * nothing: the drain counts what it reads. A stream that also reads framing overrides this, and a
+     * read that would take it past the bound fails with a {@link DrainBudgetExceededException}.
+     */
+    void limitRemainingWireBytes(long maxBytes) {}
+
+    /** What is left of the body exceeds the drain budget: the connection closes instead (CHAPPE-021). */
+    static final class DrainBudgetExceededException extends IOException {
+
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        DrainBudgetExceededException(long maxBytes) {
+            super("More than " + maxBytes + " bytes of the request body left to drain");
+        }
+    }
 }

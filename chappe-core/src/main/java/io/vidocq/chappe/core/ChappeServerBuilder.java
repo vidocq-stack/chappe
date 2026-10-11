@@ -42,6 +42,7 @@ final class ChappeServerBuilder implements Server.Builder {
     private Duration idleTimeout = ServerConfig.DEFAULT.idleTimeout();
     private long maxRequestSize = ServerConfig.DEFAULT.maxRequestSize();
     private int maxHeaderSize = ServerConfig.DEFAULT.maxHeaderSize();
+    private long maxDrainSize = ServerConfig.DEFAULT.maxDrainSize();
     private SSLContext sslContext;
     private List<String> alpnProtocols = ServerConfig.DEFAULT.alpnProtocols();
     private Duration shutdownGracePeriod = ServerConfig.DEFAULT.shutdownGracePeriod();
@@ -102,6 +103,13 @@ final class ChappeServerBuilder implements Server.Builder {
     }
 
     @Override
+    public Server.Builder maxDrainSize(long bytes) {
+        if (bytes < 0) throw new IllegalArgumentException("maxDrainSize must be >= 0, got " + bytes);
+        this.maxDrainSize = bytes;
+        return this;
+    }
+
+    @Override
     public Server.Builder tls(SSLContext sslContext) {
         this.sslContext = sslContext;
         return this;
@@ -133,6 +141,7 @@ final class ChappeServerBuilder implements Server.Builder {
                 idleTimeout,
                 maxRequestSize,
                 maxHeaderSize,
+                maxDrainSize,
                 sslContext,
                 alpnProtocols,
                 shutdownGracePeriod);
