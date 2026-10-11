@@ -148,4 +148,9 @@ public interface ForwardingRequest extends Request {
     default String scheme() {
         return delegate().scheme();
     }
+
+    @Override
+    default Optional<TlsInfo> tls() {
+        return delegate().tls();
+    }
 }

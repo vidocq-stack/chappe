@@ -146,4 +146,17 @@ public interface Request {
     default String scheme() {
         return isSecure() ? "https" : "http";
     }
+
+    /**
+     * The TLS session of the connection that carried this request, or empty on a cleartext
+     * connection. Present exactly when {@link #isSecure()} is {@code true}.
+     *
+     * <p>Read once per connection, when the TLS handshake completes, and shared by every
+     * request of that connection (HTTP/1.1 keep-alive, HTTP/2 streams).
+     * {@link TlsInfo#peerCertificates()} holds the client's chain when the listener asked for
+     * one (see {@code Server.Builder.tls(SSLContext, ClientAuth)}) and the client sent it.
+     */
+    default Optional<TlsInfo> tls() {
+        return Optional.empty();
+    }
 }
