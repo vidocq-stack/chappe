@@ -23,6 +23,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.Serial;
 
+import io.vidocq.chappe.api.RequestBodyTooLargeException;
+
 /**
  * A request body stream reading the connection's own buffer and channel. Once a read failed (a
  * truncated body, a reset, an interrupt that closed the channel) the position in the byte stream
@@ -32,10 +34,16 @@ import java.io.Serial;
 abstract class RequestBodyInputStream extends InputStream {
 
     private volatile boolean failed;
+    private volatile boolean tooLarge;
 
     /** Whether a read of this body threw. */
     final boolean failed() {
         return failed;
+    }
+
+    /** Whether a read of this body threw a {@link RequestBodyTooLargeException} (CHAPPE-020). */
+    final boolean failedTooLarge() {
+        return tooLarge;
     }
 
     @Override
@@ -43,6 +51,7 @@ abstract class RequestBodyInputStream extends InputStream {
         try {
             return readByte();
         } catch (IOException | RuntimeException e) {
+            tooLarge |= e instanceof RequestBodyTooLargeException;
             failed = true;
             throw e;
         }
@@ -53,6 +62,7 @@ abstract class RequestBodyInputStream extends InputStream {
         try {
             return readBytes(b, off, len);
         } catch (IOException | RuntimeException e) {
+            tooLarge |= e instanceof RequestBodyTooLargeException;
             failed = true;
             throw e;
         }

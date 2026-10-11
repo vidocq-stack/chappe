@@ -75,11 +75,24 @@ class ChunkedBodyLimitTest {
 
     /**
      * {@code /read} reads the whole body and reports how the read ended; {@code /reread} reads again
-     * after the cap failure and reports whether the same exception came back; anything else answers
-     * {@code pong}.
+     * after the cap failure and reports whether the same exception came back; {@code /escape} lets
+     * the cap failure escape the handler, {@code /wrapped} wraps it in an unchecked exception first;
+     * anything else answers {@code pong}.
      */
-    private Response handle(Request request) {
+    private Response handle(Request request) throws Exception {
         if ("/reread".equals(request.path())) return rereadAfterTheCap(request);
+        if ("/escape".equals(request.path())) {
+            request.body().asInputStream().readAllBytes();
+            return Response.ok("no failure");
+        }
+        if ("/wrapped".equals(request.path())) {
+            try {
+                request.body().asInputStream().readAllBytes();
+            } catch (IOException e) {
+                throw new java.io.UncheckedIOException(e);
+            }
+            return Response.ok("no failure");
+        }
         if (!"/read".equals(request.path())) return Response.ok("pong");
         try {
             byte[] body = request.body().asInputStream().readAllBytes();
@@ -242,6 +255,29 @@ class ChunkedBodyLimitTest {
                 + chunk(400) + chunk(400) + "0\r\n\r\n");
 
         assertEquals("sticky", outcome.get(5, TimeUnit.SECONDS));
+    }
+
+    /**
+     * A cap failure that escapes the handler is answered {@code 413}, as over HTTP/2, not
+     * {@code 500}; the connection is closed after it.
+     */
+    @Test
+    void aCapFailureEscapingTheHandlerIsAnswered413AndClosesTheConnection() throws Exception {
+        String response = sendThenRead("POST /escape HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n"
+                + chunk(400) + chunk(400) + chunk(400) + "0\r\n\r\n"
+                + "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+
+        assertTrue(response.startsWith("HTTP/1.1 413"), head(response));
+        assertFalse(response.contains("pong"), "no request may be read after an over-limit body");
+    }
+
+    /** A cap failure wrapped in another exception by the handler is still answered {@code 413}. */
+    @Test
+    void aWrappedCapFailureEscapingTheHandlerIsAnswered413() throws Exception {
+        String response = sendThenRead("POST /wrapped HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n"
+                + chunk(400) + chunk(400) + chunk(400) + "0\r\n\r\n");
+
+        assertTrue(response.startsWith("HTTP/1.1 413"), head(response));
     }
 
     /** RFC 9110 §15.5.14: a Content-Length above the cap is answered 413, without running the handler. */

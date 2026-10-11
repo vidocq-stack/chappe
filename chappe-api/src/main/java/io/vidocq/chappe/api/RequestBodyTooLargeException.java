@@ -25,13 +25,20 @@ import java.io.Serial;
 /**
  * Thrown by a request body read that would go past the server's {@link ServerConfig#maxRequestSize()
  * maxRequestSize}. A handler can tell it from a cut or malformed body and answer {@code 413}. The
- * body is unusable afterwards: every later read of it throws the same exception.
+ * body is unusable afterwards: every later read of it throws the same exception. If the handler lets
+ * it escape, as is or as the cause of another exception, the server answers {@code 413} on both
+ * protocols.
  *
- * <p>Over HTTP/1.1 the connection is closed after the response. Over HTTP/2 the read throws once the
- * DATA payload of the stream passes the cap; while the response has not started, the server then
- * answers {@code 413} in place of the handler's response and, if the client is still sending,
- * resets the rest of the upload with {@code RST_STREAM(NO_ERROR)}. Once the response has started, the stream is reset with {@code
- * RST_STREAM(CANCEL)} instead. A call routed to a gRPC handler is not capped.
+ * <p>Over HTTP/1.1 the connection is closed after the response. A handler that catches the exception
+ * keeps its own response; a cap failure while the response is being written closes the connection.
+ *
+ * <p>Over HTTP/2 the read throws once the DATA payload of the stream passes the cap. While the
+ * response has not started, the server answers {@code 413} in place of whatever the handler answers,
+ * even after catching the exception, and, if the client is still sending, resets the rest of the
+ * upload with {@code RST_STREAM(NO_ERROR)}. Once the response has started, the stream is reset with
+ * {@code RST_STREAM(CANCEL)} instead. A call routed to a gRPC handler, or to a gRPC-Web handler in
+ * binary mode, is not capped; a gRPC-Web call in text mode is, and ends with
+ * {@code RESOURCE_EXHAUSTED}.
  */
 public final class RequestBodyTooLargeException extends IOException {
 

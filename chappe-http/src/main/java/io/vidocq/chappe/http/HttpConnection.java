@@ -189,10 +189,14 @@ public final class HttpConnection {
                     response =
                             ScopedValue.where(RequestContext.CURRENT, context).call(() -> handler.handle(request));
                 } catch (Exception e) {
-                    response = Response.builder()
-                            .status(StatusCode.INTERNAL_SERVER_ERROR)
-                            .body("Internal Server Error")
-                            .build();
+                    // Nothing is written yet: a cap failure that escapes the handler, as is or wrapped,
+                    // is answered 413 as over HTTP/2, and the connection closes after it (step 7).
+                    response = bodyTooLarge(e, bodyStream)
+                            ? Response.of(StatusCode.PAYLOAD_TOO_LARGE)
+                            : Response.builder()
+                                    .status(StatusCode.INTERNAL_SERVER_ERROR)
+                                    .body("Internal Server Error")
+                                    .build();
                 } finally {
                     // The probe shares the parse buffer: it must be fully stopped
                     // before the loop resumes channel reads (next request parse,
@@ -321,6 +325,19 @@ public final class HttpConnection {
             }
         }
         close();
+    }
+
+    /**
+     * Whether a handler failure comes from the request body cap: the exception, or one of its causes,
+     * is a {@link RequestBodyTooLargeException}, or a read of this body threw one (CHAPPE-020).
+     */
+    private static boolean bodyTooLarge(Throwable failure, RequestBodyInputStream bodyStream) {
+        if (bodyStream != null && bodyStream.failedTooLarge()) return true;
+        Throwable t = failure;
+        for (int depth = 0; t != null && depth < 16; depth++, t = t.getCause()) { // bounded: a cause cycle
+            if (t instanceof RequestBodyTooLargeException) return true;
+        }
+        return false;
     }
 
     /** Whether reading the request body failed (a truncated or broken body leaves the stream unusable). */
