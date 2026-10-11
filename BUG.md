@@ -24,15 +24,21 @@ cause hypothesis, and status.
     reader, the response or the route decides: the handler's read fails with
     `RequestBodyTooLargeException` (the frame that passed the limit is never handed out), the
     buffered DATA is dropped and no longer credited, and the dispatch answers `413` instead of the
-    handler's response, then resets the rest of the upload with `RST_STREAM(NO_ERROR)` (CHAPPE-023);
+    handler's response, then, if the client is still sending, resets the rest of the upload with
+    `RST_STREAM(NO_ERROR)` (CHAPPE-023);
   - once the response has started, the stream is reset with `RST_STREAM(CANCEL)` through
     `resetStream`, so its id joins the remembered resets and the DATA in flight is ignored;
   - a call the router sends to a gRPC handler (`GrpcDispatch` / `GrpcWebDispatch` in
     `dispatchStream`, the hook of the readTimeout exemption) is exempt, even when its messages passed
     the limit before the route was known. A client `content-type` exempts nothing
-    (`#aGrpcContentTypeDoesNotExemptAPlainHandlerFromTheLimit`).
-  Also: a stream reset no longer runs the application's `Body.release()` under the stream's reset
-  lock (the lock is released first), so a blocking `release()` cannot stall the connection thread.
+    (`#aGrpcContentTypeDoesNotExemptAPlainHandlerFromTheLimit`);
+  - a stream gets a single RST_STREAM: `writeRstStream` checks and sets `resetSent` under the
+    stream's reset lock, so when an early response's `RST_STREAM(NO_ERROR)` and the cap's
+    `RST_STREAM(CANCEL)` race, the second is a no-op (RFC 9113 §5.1). This covers every reset path
+    (`NO_ERROR`, `CANCEL`, `STREAM_CLOSED`, `FLOW_CONTROL_ERROR`; `Http2StreamResetOnceTest`);
+  - the application's `Body.release()` is no longer run under the stream's reset lock: a reset
+    releases the response body after letting the lock go. It still runs on the thread that resets,
+    the connection thread included.
 - **Related**: Foy BUG-20261011-11 (`foy/BUG.md`), which CHAPPE-020, CHAPPE-021 and this entry fix on
   the chappe side. That entry is closed from Foy, once Foy builds against a chappe carrying them.
 
@@ -180,8 +186,8 @@ cause hypothesis, and status.
   extensions, CRLFs and trailers (`RequestBodyInputStream.limitRemainingWireBytes`), and the unread
   rest of a chunk the handler started counts too, so framing alone cannot outlast it. A failed read
   during the drain ends it and closes the connection.
-
 - **Related**: Foy BUG-20261011-11 (`foy/BUG.md`), closed from Foy once it builds against this fix.
+
 ---
 
 ## CHAPPE-020 — a chunked request body is not capped by maxRequestSize
@@ -223,8 +229,8 @@ cause hypothesis, and status.
   `ChunkedBodyLimitTest#anExpectContinueWithAContentLengthOverTheLimitGets413Without100Continue`).
   Cost: a body near the cap with heavy chunk overhead trips slightly earlier than its data alone
   would.
-
 - **Related**: Foy BUG-20261011-11 (`foy/BUG.md`), closed from Foy once it builds against this fix.
+
 ---
 
 ## CHAPPE-019 — Filter.addHeaderIf and Filter.gzip drop the response trailers

@@ -53,11 +53,13 @@ class Http2RequestBodyLimitTest {
 
     private static final long LIMIT = 1000;
     private static final String GRPC_PATH = "/svc.Upload/Collect";
+    private static final int TYPE_PING = 0x6;
 
     private final CompletableFuture<String> outcome = new CompletableFuture<>();
     private final ObservedBody liveBody = new ObservedBody();
     private final Router grpcRouter =
             Router.builder().grpc(GRPC_PATH, this::collect).build();
+    private final CountDownLatch routeGrpc = new CountDownLatch(1);
     private Server server;
 
     @BeforeEach
@@ -65,7 +67,7 @@ class Http2RequestBodyLimitTest {
         server = Server.builder()
                 .port(0)
                 .maxRequestSize(LIMIT)
-                .handler(request -> GRPC_PATH.equals(request.path()) ? grpcRouter.handle(request) : handle(request))
+                .handler(request -> GRPC_PATH.equals(request.path()) ? routeGrpc(request) : handle(request))
                 .build();
         server.start();
     }
@@ -73,6 +75,7 @@ class Http2RequestBodyLimitTest {
     @AfterEach
     void tearDown() {
         liveBody.close();
+        routeGrpc.countDown();
         if (server != null) server.stop();
     }
 
@@ -92,6 +95,12 @@ class Http2RequestBodyLimitTest {
             case "/live" -> Response.builder().body(Body.of(liveBody, -1)).build();
             default -> Response.ok("pong");
         };
+    }
+
+    /** Routes a gRPC call once the test lets it: the body can pass the limit before the route is known. */
+    private Response routeGrpc(Request request) throws Exception {
+        assertTrue(routeGrpc.await(10, TimeUnit.SECONDS), "the gRPC route was never released");
+        return grpcRouter.handle(request);
     }
 
     /** A client-streaming gRPC call: sums the sizes of the messages it receives up to the half-close. */
@@ -176,10 +185,14 @@ class Http2RequestBodyLimitTest {
         try (var h2 = H2TestConnection.open(server.port())) {
             h2.headers(
                     1, false, requestHeaders("POST", GRPC_PATH, "content-type", "application/grpc", "te", "trailers"));
-            // Both messages are sent before the router runs: the limit is passed before the call is routed.
             h2.data(1, false, GrpcFrameWriter.encode(new byte[1_000]));
             h2.data(1, true, GrpcFrameWriter.encode(new byte[500]));
+            h2.frame(TYPE_PING, 0, 0, new byte[8]);
             h2.flush();
+            // Frames are handled in order: once the PING is acknowledged, the server has counted the
+            // DATA past the limit, and only then may the router send the call to its gRPC handler.
+            h2.await(TYPE_PING, 0);
+            routeGrpc.countDown();
             Reply reply = h2.reply(1);
             assertEquals("200", reply.status());
             assertTrue(reply.body().endsWith("read:1500"), reply.body());

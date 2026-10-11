@@ -497,7 +497,9 @@ public final class Http2Connection {
     /**
      * Writes RST_STREAM for {@code stream} under its reset lock, after cancelling it if {@code cancel}:
      * a body reader crediting the window concurrently either wrote its WINDOW_UPDATE before, or sees
-     * the reset and writes none. The response body of a cancelled stream is released once the lock is
+     * the reset and writes none. A stream already reset gets no second RST_STREAM (RFC 9113 §5.1):
+     * the reset paths race (an early response's NO_ERROR on the handler thread, the body cap's CANCEL
+     * on the connection thread), and the first one wins (CHAPPE-025). The response body of a cancelled stream is released once the lock is
      * let go: {@link Body#release()} is application code, and one that blocks must not hold the lock.
      */
     private void writeRstStream(Http2Stream stream, Http2ErrorCode error, boolean cancel) throws IOException {
@@ -508,7 +510,7 @@ public final class Http2Connection {
                 stream.cancelKeepingResponseBody();
                 wakeConnectionWindowWaiters();
             }
-            stream.markResetSent();
+            if (!stream.markResetSent()) return;
             frameWriter.writeRstStream(stream.streamId(), error);
         } finally {
             lock.unlock();
@@ -741,7 +743,8 @@ public final class Http2Connection {
      * to stop sending it with RST_STREAM(NO_ERROR). The id is remembered first, so the DATA already in
      * flight is ignored instead of failing the whole connection (§5.1) (CHAPPE-023).
      */
-    private void stopUnreadRequestBody(Http2Stream stream) {
+    // package-private for Http2StreamResetOnceTest
+    void stopUnreadRequestBody(Http2Stream stream) {
         if (stream.isCancelled() || remoteEnded(stream)) return;
         resetStreams.add(stream.streamId());
         streams.remove(stream.streamId());
@@ -758,7 +761,8 @@ public final class Http2Connection {
      * the frames the peer already sent on it are ignored, cancels it (its body reader fails, the body it
      * was sending is released, its sender stops waiting), then sends RST_STREAM.
      */
-    private void resetStream(Http2Stream stream, Http2ErrorCode error) throws IOException {
+    // package-private for Http2StreamResetOnceTest
+    void resetStream(Http2Stream stream, Http2ErrorCode error) throws IOException {
         resetStreams.add(stream.streamId());
         streams.remove(stream.streamId());
         writeRstStream(stream, error, true);

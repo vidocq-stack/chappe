@@ -242,9 +242,14 @@ public final class Http2Stream {
         return resetLock;
     }
 
-    /** Records that this endpoint sent RST_STREAM on the stream; called under {@link #resetLock()}. */
-    void markResetSent() {
+    /**
+     * Records that this endpoint sends RST_STREAM on the stream; called under {@link #resetLock()}.
+     * {@code false} when one was already sent: a stream gets a single RST_STREAM (RFC 9113 §5.1).
+     */
+    boolean markResetSent() {
+        if (resetSent) return false;
         resetSent = true;
+        return true;
     }
 
     boolean isResetSent() {

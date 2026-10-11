@@ -29,8 +29,8 @@ import java.io.Serial;
  *
  * <p>Over HTTP/1.1 the connection is closed after the response. Over HTTP/2 the read throws once the
  * DATA payload of the stream passes the cap; while the response has not started, the server then
- * answers {@code 413} in place of the handler's response and resets the rest of the upload with
- * {@code RST_STREAM(NO_ERROR)}. Once the response has started, the stream is reset with {@code
+ * answers {@code 413} in place of the handler's response and, if the client is still sending,
+ * resets the rest of the upload with {@code RST_STREAM(NO_ERROR)}. Once the response has started, the stream is reset with {@code
  * RST_STREAM(CANCEL)} instead. A call routed to a gRPC handler is not capped.
  */
 public final class RequestBodyTooLargeException extends IOException {
