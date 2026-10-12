@@ -124,7 +124,11 @@ cause hypothesis, and status.
   end of the handshake and the watchdog race on one compare-and-set, so exactly one wins. A total
   deadline, not a per-read one, so a drip-feeding client is cut too. The deadline is disarmed
   before the rejected-handshake path of CHAPPE-027 runs, so the alert and the lingering close keep
-  their own budgets. `doHandshake()` without argument keeps no bound.
+  their own budgets. `doHandshake()` without argument keeps no bound. That ordering is guarded by
+  `TlsHandshakeTimeoutTest#aRejectedHandshakeKeepsItsAlertAndItsLingerPastTheDeadline` (a `NEED`
+  listener with a 300 ms deadline: the client gets the alert record, and the server's full close
+  comes after the 2 s linger); moving `disarm()` after the catch blocks makes it fail (full close at
+  about 375 ms).
 - **Follow-ups (OPEN)**:
   - the HTTP/1.1-over-TLS pre-read right after the handshake (`ChappeServer`, around
     `sslHandler.read(readBuffer)`) has no bound: a client that completes the handshake and then

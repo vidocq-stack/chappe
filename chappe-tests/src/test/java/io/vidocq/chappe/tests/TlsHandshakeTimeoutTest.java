@@ -32,13 +32,17 @@ import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLEngine;
+import javax.net.ssl.SSLEngineResult;
+import javax.net.ssl.SSLException;
 import javax.net.ssl.SSLSocket;
 
+import io.vidocq.chappe.api.ClientAuth;
 import io.vidocq.chappe.api.Response;
 import io.vidocq.chappe.api.Server;
 
@@ -77,10 +81,14 @@ class TlsHandshakeTimeoutTest {
     }
 
     private int start(Duration idleTimeout) {
+        return start(idleTimeout, ClientAuth.NONE);
+    }
+
+    private int start(Duration idleTimeout, ClientAuth clientAuth) {
         server = Server.builder()
                 .host("127.0.0.1")
                 .port(0)
-                .tls(serverContext)
+                .tls(serverContext, clientAuth)
                 .idleTimeout(idleTimeout)
                 .writeTimeout(Duration.ofSeconds(5))
                 .handler(req -> {
@@ -128,6 +136,7 @@ class TlsHandshakeTimeoutTest {
             int eof = socket.getInputStream().read();
             long elapsedMs = elapsedMs(start);
             assertEquals(-1, eof, "the server must close a client that sends half a ClientHello");
+            assertTrue(elapsedMs >= 400, "closed by the handshake deadline, not earlier (" + elapsedMs + " ms)");
             assertTrue(elapsedMs < 4500, "closed by the server, not by the client SO_TIMEOUT (" + elapsedMs + " ms)");
         }
     }
@@ -225,6 +234,115 @@ class TlsHandshakeTimeoutTest {
             } while (b != -1);
             long elapsedMs = elapsedMs(start);
             assertTrue(elapsedMs < 2000 + 4000, "closed within the lingering budget (" + elapsedMs + " ms)");
+        }
+    }
+
+    /**
+     * A rejected handshake keeps its alert and its 2 s lingering close, even with a deadline far
+     * shorter than the linger (CHAPPE-027 under CHAPPE-028): the deadline is disarmed before that
+     * path runs. A {@code NEED} listener with a 300 ms deadline rejects a TLS 1.2 client that has no
+     * certificate. The client must receive the alert record (plaintext under TLS 1.2), then keep
+     * sending: the server's half-close gives an EOF at once, but its full close, seen as a reset
+     * of the client's writes, must come only after the linger, not at the 300 ms deadline.
+     */
+    @Test
+    void aRejectedHandshakeKeepsItsAlertAndItsLingerPastTheDeadline() throws Exception {
+        int port = start(Duration.ofMillis(300), ClientAuth.NEED);
+        rejectedHandshake(port); // warm-up: a cold first handshake could outlast the 300 ms deadline
+        RejectedHandshake rejected = rejectedHandshake(port);
+        assertTrue(
+                rejected.alert(),
+                "the client must receive the server's alert record, not a bare close: " + rejected.records());
+        long fullCloseMs = rejected.fullCloseMs();
+        assertTrue(
+                fullCloseMs >= 1500,
+                "the server closed after " + fullCloseMs + " ms: the 300 ms deadline cut the 2 s linger");
+        assertTrue(fullCloseMs < 2000 + 3000, "the linger is bounded (" + fullCloseMs + " ms)");
+    }
+
+    /** What a client without a certificate saw: the record types received, and when the server closed. */
+    private record RejectedHandshake(boolean alert, List<Integer> records, long fullCloseMs) {}
+
+    /**
+     * Drives a TLS 1.2 client engine with no certificate over a raw socket until the server's flight
+     * ends, recording the type of every record received. Then, from the end of that flight, writes
+     * one byte every 50 ms until a write fails: the server's full close answers them with a reset.
+     */
+    private static RejectedHandshake rejectedHandshake(int port) throws Exception {
+        SSLEngine engine = clientContext.createSSLEngine("127.0.0.1", port);
+        engine.setUseClientMode(true);
+        engine.setEnabledProtocols(new String[] {"TLSv1.2"});
+        var records = new java.util.ArrayList<Integer>();
+        try (var socket = new Socket("127.0.0.1", port)) {
+            socket.setSoTimeout(5000);
+            InputStream in = socket.getInputStream();
+            OutputStream out = socket.getOutputStream();
+            var raw = new java.io.ByteArrayOutputStream();
+            ByteBuffer netIn = ByteBuffer.allocate(engine.getSession().getPacketBufferSize());
+            ByteBuffer netOut = ByteBuffer.allocate(engine.getSession().getPacketBufferSize());
+            ByteBuffer app = ByteBuffer.allocate(engine.getSession().getApplicationBufferSize());
+            byte[] chunk = new byte[16 * 1024];
+            engine.beginHandshake();
+            boolean eof = false;
+            try {
+                loop:
+                while (true) {
+                    switch (engine.getHandshakeStatus()) {
+                        case NEED_WRAP -> {
+                            netOut.clear();
+                            engine.wrap(ByteBuffer.allocate(0), netOut);
+                            out.write(netOut.array(), 0, netOut.position());
+                            out.flush();
+                        }
+                        case NEED_TASK -> {
+                            Runnable task;
+                            while ((task = engine.getDelegatedTask()) != null) task.run();
+                        }
+                        case NEED_UNWRAP, NEED_UNWRAP_AGAIN -> {
+                            netIn.flip();
+                            SSLEngineResult result = engine.unwrap(netIn, app.clear());
+                            netIn.compact();
+                            if (result.getStatus() == SSLEngineResult.Status.BUFFER_UNDERFLOW
+                                    || result.bytesConsumed() == 0) {
+                                int n = in.read(chunk);
+                                if (n == -1) {
+                                    eof = true;
+                                    break loop;
+                                }
+                                raw.write(chunk, 0, n);
+                                netIn.put(chunk, 0, n);
+                            }
+                        }
+                        default -> fail("a client without a certificate must not complete the handshake");
+                    }
+                }
+            } catch (SSLException _) {
+                // the server's fatal alert, unwrapped by the client engine
+            }
+            long flightEnd = System.nanoTime();
+            if (!eof) {
+                int n;
+                while ((n = in.read(chunk)) != -1) raw.write(chunk, 0, n); // the half-close's EOF
+            }
+            // Record types of everything received (TLS 1.2: the alert precedes ChangeCipherSpec, in clear)
+            byte[] bytes = raw.toByteArray();
+            boolean alert = false;
+            for (int i = 0; i + 5 <= bytes.length; i += 5 + (((bytes[i + 3] & 0xFF) << 8) | (bytes[i + 4] & 0xFF))) {
+                records.add(bytes[i] & 0xFF);
+                if (bytes[i] == 0x15) alert = true;
+            }
+            long deadline = flightEnd + Duration.ofSeconds(8).toNanos();
+            try {
+                while (System.nanoTime() < deadline) {
+                    out.write(0);
+                    out.flush();
+                    Thread.sleep(50);
+                }
+                fail("the server never closed the rejected connection");
+            } catch (IOException _) {
+                // the reset of the server's full close
+            }
+            return new RejectedHandshake(alert, records, elapsedMs(flightEnd));
         }
     }
 
