@@ -21,8 +21,15 @@ package io.vidocq.chappe.tests;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.HttpURLConnection;
+import java.net.Socket;
+import java.net.SocketException;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -62,6 +69,62 @@ class ServerLifecycleTest {
             assertTrue(port > 0 && port < 65536, "Port should be valid: " + port);
             assertNotNull(server.localAddress());
             assertEquals(port, server.localAddress().getPort());
+            assertEquals(0, server.config().port(), "a wildcard port(0) keeps the configured port 0");
+        }
+    }
+
+    /**
+     * An {@code idleTimeout} too large for an {@code int} of milliseconds (about 24.8 days) must not
+     * kill the accept loop (CHAPPE-031): its {@code SO_TIMEOUT} cast overflowed to a negative value,
+     * {@code setSoTimeout} threw, and the accept thread died, so the server stopped accepting.
+     */
+    @Test
+    void aVeryLargeIdleTimeoutStillAccepts() throws IOException {
+        for (Duration idle : List.of(Duration.ofDays(30), ChronoUnit.FOREVER.getDuration())) {
+            try (var server = Server.builder()
+                    .host("127.0.0.1")
+                    .port(0)
+                    .idleTimeout(idle)
+                    .handler(_ -> Response.ok("ok"))
+                    .build()) {
+                server.start();
+                String response = exchange(server.port());
+                assertTrue(response.startsWith("HTTP/1.1 200"), "idleTimeout " + idle + ": " + response);
+            }
+        }
+    }
+
+    /** A negative {@code idleTimeout} must not kill the accept loop either (CHAPPE-031). */
+    @Test
+    void aNegativeIdleTimeoutDoesNotKillTheAcceptLoop() throws IOException {
+        try (var server = Server.builder()
+                .host("127.0.0.1")
+                .port(0)
+                .idleTimeout(Duration.ofSeconds(-1))
+                .handler(_ -> Response.ok("ok"))
+                .build()) {
+            server.start();
+            // The connection is handled, however briefly: a response or the server's close, never
+            // the client's own SO_TIMEOUT behind a dead accept loop.
+            exchange(server.port());
+        }
+    }
+
+    /** Sends one request with {@code Connection: close} and reads to the end; a reset ends it too. */
+    private static String exchange(int port) throws IOException {
+        try (var socket = new Socket("127.0.0.1", port)) {
+            socket.setSoTimeout(5000);
+            socket.getOutputStream()
+                    .write("GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+                            .getBytes(StandardCharsets.US_ASCII));
+            InputStream in = socket.getInputStream();
+            try {
+                return new String(in.readAllBytes(), StandardCharsets.US_ASCII);
+            } catch (java.net.SocketTimeoutException e) {
+                throw e; // the accept loop is dead: nothing ever handled the connection
+            } catch (SocketException _) {
+                return ""; // closed by the server
+            }
         }
     }
 

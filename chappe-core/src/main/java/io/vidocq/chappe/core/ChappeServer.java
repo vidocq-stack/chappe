@@ -26,6 +26,7 @@ import java.nio.ByteBuffer;
 import java.nio.channels.AsynchronousCloseException;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
+import java.time.Duration;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -315,13 +316,24 @@ final class ChappeServer implements Server {
 
     // --- Accept loop ---
 
+    /**
+     * {@code idleTimeout} as an {@code SO_TIMEOUT}: saturated at {@link Integer#MAX_VALUE} ms, and 0
+     * (no bound) for a {@code null}, zero or negative value. A plain {@code int} cast overflowed past
+     * about 24.8 days, and {@code setSoTimeout} then threw out of the accept loop (CHAPPE-031).
+     */
+    static int soTimeoutMillis(Duration timeout) {
+        if (timeout == null || timeout.isZero() || timeout.isNegative()) return 0;
+        if (timeout.compareTo(Duration.ofMillis(Integer.MAX_VALUE)) >= 0) return Integer.MAX_VALUE;
+        return (int) timeout.toMillis();
+    }
+
     private void acceptLoop() {
         // Capture once — these references do not change during the acceptLoop lifetime
         var ch = serverChannel.get();
         var exec = executor.get();
         if (ch == null || exec == null) return;
 
-        int timeoutMs = (int) config.idleTimeout().toMillis();
+        int timeoutMs = soTimeoutMillis(config.idleTimeout());
         while (running.get()) {
             try {
                 SocketChannel clientChannel = ch.accept();

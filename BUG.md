@@ -5,6 +5,35 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-031 — a very large or negative idleTimeout killed the accept loop
+
+- **Date**: 2026-10-12
+- **Status**: FIXED (commit `fix(core): saturate the idle SO_TIMEOUT so no idleTimeout kills the accept
+  loop (CHAPPE-031)`, branch `pr/ybl/chappe-timeouts`)
+- **Module**: `chappe-core` (`ChappeServer.acceptLoop`)
+- **Symptom**: with `idleTimeout` above `Integer.MAX_VALUE` ms (about 24.8 days), with
+  `ChronoUnit.FOREVER.getDuration()`, or with a negative value, the server started but never
+  answered: connections were accepted by the kernel and then left unhandled, silently.
+- **Minimal reproduction**: `chappe-tests/.../ServerLifecycleTest`
+  (`aVeryLargeIdleTimeoutStillAccepts` with 30 days and `FOREVER`,
+  `aNegativeIdleTimeoutDoesNotKillTheAcceptLoop` with -1 s): before the fix the client read hit its
+  own 5 s `SO_TIMEOUT`.
+- **Cause**: `acceptLoop` computed `(int) config.idleTimeout().toMillis()` once. Past 24.8 days the
+  cast overflowed to a negative value, `FOREVER` made `toMillis()` throw `ArithmeticException`, and
+  a negative `idleTimeout` stayed negative. `setSoTimeout` then threw `IllegalArgumentException`,
+  and `acceptLoop` catches only `IOException`: the accept thread died. `ServerConfig` validates
+  neither bound. Found by the final review of the connection-timeouts branch (pre-existing).
+- **Fix**: `ChappeServer.soTimeoutMillis` saturates the value at `Integer.MAX_VALUE` ms and maps
+  `null`, zero and negative to 0 (no bound). The `SO_TIMEOUT` is informative only on blocking
+  `SocketChannel` reads; the real bounds (`BoundedReads`, `TimedReadChannel`, the handshake deadline)
+  already saturate.
+- **Follow-up (OPEN)**: a zero or negative `idleTimeout` still does not mean "no bound" for the idle
+  waits: `BoundedReads.readWithTimeout` arms a watchdog that fires at once, so a connection waiting
+  for a request may be closed immediately. Either treat it as no bound, as `readTimeout` does, or
+  reject it in `ServerConfig`; a separate decision.
+
+---
+
 ## CHAPPE-030 — an ephemeral port could be lost between the probe and the bind
 
 - **Date**: 2026-10-12
