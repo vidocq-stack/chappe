@@ -5,6 +5,35 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-030 — an ephemeral port could be lost between the probe and the bind
+
+- **Date**: 2026-10-12
+- **Status**: FIXED for non-wildcard hosts (commit `fix(core): bind port 0 directly on a specific
+  address (CHAPPE-030)`, branch `pr/ybl/chappe-timeouts`). For a wildcard host the probe-then-bind
+  window stays open and is repaired by the retry.
+- **Module**: `chappe-core` (`ChappeServer.bindWithRetry`, `resolveBindPort`)
+- **Symptom**: with `port(0)`, `start()` could fail or sleep 100-400 ms and retry although the
+  machine had plenty of free ports, when many servers started at once in the same JVM or when other
+  processes were binding ephemeral ports.
+- **Minimal reproduction**: none deterministic; the race cannot be forced.
+  `ServerLifecycleTest.manyPortZeroServersStartConcurrentlyWithoutError` (8 threads x 25 servers on
+  `127.0.0.1:0`) is a stress test that passed before the fix too, so it was not RED. The property
+  test `portZeroReportsTheBoundPortAndKeepsTheConfig` pins the contract.
+- **Cause**: `resolveBindPort()` bound a throwaway socket to `127.0.0.1:0`, read its port and closed
+  it, then the real listener bound that port. Anyone could take the port between the close and the
+  bind; only the 5-attempt retry repaired it.
+- **Fix**: when `config.port() == 0` and the host is not a wildcard address
+  (`InetAddress.isAnyLocalAddress()`, resolved once outside the retry loop), the listener binds
+  `host:0` directly, so the kernel chooses and binds atomically. `port()` and `localAddress()` already
+  read the bound port back; `ServerConfig.port` stays 0.
+- **Wildcard hosts are deliberately unchanged**: binding port 0 directly on `0.0.0.0` would
+  re-introduce CHAPPE-004 #3 (a port free on the wildcard but held by a foreign process on
+  `127.0.0.1`/`::1`). The loopback probe stays there, with its window repaired by the retry. Closing
+  that window would need an OS-dependent approach that has not been spiked on macOS and Linux.
+- **See also**: CHAPPE-004.
+
+---
+
 ## CHAPPE-029 — a peer that stopped reading blocked HTTP/2 writes forever
 
 - **Date**: 2026-10-12

@@ -29,7 +29,11 @@ import javax.net.ssl.SSLContext;
  * Immutable HTTP server configuration.
  *
  * @param host listen address (default: {@code "0.0.0.0"})
- * @param port listen port (default: {@code 8080}, {@code 0} for an ephemeral port)
+ * @param port listen port (default: {@code 8080}). {@code 0} asks for an ephemeral port: the
+ *     configuration keeps {@code 0} and the bound port is read from {@code Server.port()} once the
+ *     server has started. On a specific host the kernel picks the port when the listener binds, with
+ *     no race; on a wildcard host (such as the default {@code 0.0.0.0}) a free loopback port is
+ *     probed first and a rare lost race is repaired by retrying the bind
  * @param backlog TCP backlog size (default: {@code 1024})
  * @param readTimeout bound on each blocking read of a request body (default: 30s). Over HTTP/1.1
  *     it bounds each socket read, including the drain of a body the handler left unread: when no

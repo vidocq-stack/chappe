@@ -20,6 +20,7 @@
 package io.vidocq.chappe.core;
 
 import java.io.IOException;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.AsynchronousCloseException;
@@ -118,6 +119,7 @@ final class ChappeServer implements Server {
         ServerSocketChannel ch = null;
         IOException lastBindEx = null;
         boolean done = false;
+        final boolean wildcard = config.port() == 0 && isWildcardHost(config.host());
         for (int attempt = 0; attempt < 5 && !done; attempt++) {
             try {
                 ch = ServerSocketChannel.open();
@@ -127,7 +129,7 @@ final class ChappeServer implements Server {
                 // let two live Server instances in the same JVM share one port and steal each
                 // other's connections (cross-server contamination — see CHAPPE-004).
                 ch.setOption(java.net.StandardSocketOptions.SO_REUSEADDR, true);
-                ch.bind(new InetSocketAddress(config.host(), resolveBindPort()), config.backlog());
+                ch.bind(new InetSocketAddress(config.host(), resolveBindPort(wildcard)), config.backlog());
                 ch.configureBlocking(true);
                 lastBindEx = null;
                 done = true;
@@ -146,25 +148,51 @@ final class ChappeServer implements Server {
     }
 
     /**
-     * Resolve the port to bind to. For a fixed port this is simply {@code config.port()}.
-     * <p>
-     * For an ephemeral request ({@code port == 0}) we first bind a throwaway socket to
-     * {@code 127.0.0.1:0}: the kernel only hands back a port that is free on the loopback
-     * address, skipping any port a foreign process already holds there. We then bind the
-     * real listener (on {@code config.host()}, typically the {@code 0.0.0.0} wildcard) to
-     * that port. A plain wildcard {@code bind(0.0.0.0, 0)} can otherwise return a port a
-     * foreign service already owns on {@code 127.0.0.1}/{@code ::1} — a different address
-     * family, so the two binds silently coexist — and a loopback client is then sometimes
-     * routed to the foreign socket instead of ours. This surfaced as tests receiving
-     * responses from an IDE's built-in server or a local DB driver (CHAPPE-004).
+     * Resolve the port to hand to {@code bind}. For a fixed port this is simply
+     * {@code config.port()}. For an ephemeral request ({@code port == 0}) there are two cases.
+     *
+     * <h4>Specific host (loopback or a concrete interface address)</h4>
+     * Returns {@code 0}: the listener binds {@code host:0} directly and the kernel picks and
+     * binds the port atomically, so there is no window in which another thread or process can
+     * take it (CHAPPE-030). A foreign service cannot hold the same port on the same specific
+     * address, so the CHAPPE-004 #3 problem below cannot occur either.
+     *
+     * <h4>Wildcard host ({@code 0.0.0.0} or {@code ::})</h4>
+     * <strong>Never bind port 0 directly on a wildcard.</strong> A plain
+     * {@code bind(0.0.0.0, 0)} can return a port a foreign service already owns on
+     * {@code 127.0.0.1}/{@code ::1} — a different address family, so the two binds silently
+     * coexist — and a loopback client is then sometimes routed to the foreign socket instead of
+     * ours. This surfaced as tests receiving responses from an IDE's built-in server or a local
+     * DB driver (CHAPPE-004 #3). So we first bind a throwaway socket to {@code 127.0.0.1:0}: the
+     * kernel only hands back a port that is free on the loopback address. The probe is closed and
+     * the real listener binds that port. Between the probe's close and the real bind another
+     * party can take the port (CHAPPE-030); that window stays open for the wildcard and is
+     * repaired by the retry loop in {@link #bindWithRetry()}, which probes again at each attempt.
+     *
+     * @param wildcard whether the configured host is a wildcard address
      */
-    private int resolveBindPort() throws IOException {
+    private int resolveBindPort(boolean wildcard) throws IOException {
         if (config.port() != 0) {
             return config.port();
+        }
+        if (!wildcard) {
+            return 0;
         }
         try (ServerSocketChannel probe = ServerSocketChannel.open()) {
             probe.bind(new InetSocketAddress("127.0.0.1", 0));
             return ((InetSocketAddress) probe.getLocalAddress()).getPort();
+        }
+    }
+
+    /**
+     * Whether {@code host} resolves to a wildcard address. An unresolvable host is reported as
+     * not a wildcard: the bind then fails on it exactly as it did before.
+     */
+    private static boolean isWildcardHost(String host) {
+        try {
+            return InetAddress.getByName(host).isAnyLocalAddress();
+        } catch (IOException _) {
+            return false;
         }
     }
 
