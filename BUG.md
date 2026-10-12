@@ -5,6 +5,79 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-033 — the HPACK decoder followed the peer's table size and trusted declared lengths
+
+- **Date**: 2026-10-12
+- **Status**: FIXED (commit `fix(http): bound the HPACK decoder by our own settings and check every
+  declared length (CHAPPE-033)`, branch `pr/ybl/chappe-h2-header-list`)
+- **Module**: `chappe-http` (`h2/HpackDecoder`, `h2/HpackHuffman`, `h2/HpackEncoder`,
+  `h2/Http2Connection`)
+- **Symptom**:
+  - **Table size (interop and memory).** A client that sent `SETTINGS_HEADER_TABLE_SIZE = 0` (its
+    own decoder keeps no dynamic table), or a value of 2^31 or more, had its connection ended with
+    `GOAWAY(COMPRESSION_ERROR)` on its first indexed reference to an entry it had inserted. A huge
+    value, or a dynamic table size update of any size, let the decoder's table grow the heap per
+    connection without bound. A size update in the middle of a block was applied silently.
+  - **Untrusted lengths.** A block of 8 bytes declaring a 2 GiB string made the decoder allocate
+    it before checking the block: an `OutOfMemoryError` (or a `NegativeArraySizeException` for a
+    Huffman string of 1 GiB). An overflowing or truncated integer, a truncated or invalid Huffman
+    string, or index 0 threw a `RuntimeException`. None of these were `Http2ConnectionException`s:
+    they escaped `Http2Connection.run()`, and the connection closed without a `GOAWAY`.
+  - **Encoder.** Our encoder ignored the peer's `SETTINGS_HEADER_TABLE_SIZE` and kept inserting
+    into a 4,096-octet table, so a client that advertised 0 could not decode our responses.
+- **Minimal reproduction**:
+  - `chappe-tests/.../Http2HpackHardeningTest`: `aClientAdvertisingAZeroHeaderTableIsServed`,
+    `aClientAdvertisingAHeaderTableOf2Pow31IsServed`, `aClientAdvertisingTheMaximumHeaderTableIsServed`
+    (`GOAWAY(COMPRESSION_ERROR)` instead of `200`);
+    `aSizeUpdateAboveTheAdvertisedSizeEndsTheConnectionWithCompressionError` and
+    `aSizeUpdateInTheMiddleOfABlockEndsTheConnectionWithCompressionError` (accepted, no `GOAWAY`);
+    `aShortBlockDeclaringATwoGibStringEndsTheConnectionWithCompressionError` and
+    `aTruncatedHuffmanStringEndsTheConnectionWithCompressionError` (the connection closed without
+    a `GOAWAY`).
+  - `chappe-http/.../HpackDecoderHardeningTest`:
+    `aTenByteBlockDeclaringATwoGibStringIsACompressionErrorWithoutAllocating`
+    (`OutOfMemoryError: Requested array size exceeds VM limit`, which killed the Surefire fork),
+    `aHuffmanStringLongerThanTheBlockIsACompressionErrorWithoutAllocating`
+    (`NegativeArraySizeException`), `aTruncatedHuffmanStringIsACompressionError` and
+    `anIntegerCutBeforeItsLastOctetIsACompressionError` (`BufferUnderflowException`),
+    `aHuffmanStringCutInsideASymbolIsACompressionError` (`IllegalArgumentException`),
+    `indexZeroIsACompressionError` (`IndexOutOfBoundsException`),
+    `anIntegerPastIntMaxValueIsACompressionError`,
+    `anIntegerWithTooManyContinuationOctetsIsACompressionError`,
+    `aSizeUpdateAboveTheAdvertisedMaximumIsACompressionError` and
+    `aSizeUpdateInTheMiddleOfABlockIsACompressionError` (accepted).
+- **Cause**:
+  - `Http2Connection.handleSettings` resized the decoder's dynamic table to the peer's
+    `SETTINGS_HEADER_TABLE_SIZE`, read as a signed `int`. That setting bounds the *sender's
+    encoder* (RFC 9113 §6.5.2, RFC 7541 §4.2): our decoder's bound is the value we advertise
+    (4,096), and the peer's encoder lowers it only with size updates (RFC 7541 §6.3). The decoder
+    applied every size update, whatever its value and wherever it came in the block.
+  - `HpackDecoder.decodeString` allocated `new byte[length]`, and `HpackHuffman.decode`
+    `new byte[length * 2]`, before checking `length` against the block. `decodeInteger` had no
+    bound on its continuation octets and overflowed silently. Huffman and index errors were
+    `IllegalArgumentException`s and `IndexOutOfBoundsException`s, and `run()` caught only
+    `IOException`.
+- **Fix**:
+  - The decoder's table is bounded by our advertised `SETTINGS_HEADER_TABLE_SIZE`. A size update
+    above it, or after the first field of a block, is a `COMPRESSION_ERROR` (RFC 7541 §4.2, §6.3).
+  - The peer's `SETTINGS_HEADER_TABLE_SIZE` now goes to the encoder, read as unsigned: its table
+    is `min(4096, setting)`, and a change is signalled by a size update at the start of the next
+    block, preceded by the smallest size reached in between (RFC 7541 §4.2). The encoder is now
+    guarded by a `ReentrantLock`.
+  - A string length past the rest of the block, an integer past `Integer.MAX_VALUE` or longer
+    than 5 continuation octets, a truncated integer, an invalid Huffman string and index 0 are
+    `COMPRESSION_ERROR`s (RFC 7541 §5.1, §5.2, §6.1), checked before any allocation. The Huffman
+    output buffer is sized from the 5-bit shortest code. Every HPACK error is a connection error
+    of type `COMPRESSION_ERROR` (RFC 9113 §4.3), so the connection ends with a `GOAWAY`.
+  - As a safety net, a `RuntimeException` that reaches `Http2Connection.run()` now ends the
+    connection with `GOAWAY(INTERNAL_ERROR)`.
+- **Not covered**: the encoder's output order. Each response encodes its block, then writes it,
+  outside one shared lock, so two concurrent responses can reach the wire in the opposite order
+  from their encoding, and the peer's table then diverges from ours. Suspected from reading the
+  code, not reproduced: it needs its own entry once a repro exists.
+
+---
+
 ## CHAPPE-032 — an HTTP/2 header list past 8,192 bytes ended the whole connection
 
 - **Date**: 2026-10-12

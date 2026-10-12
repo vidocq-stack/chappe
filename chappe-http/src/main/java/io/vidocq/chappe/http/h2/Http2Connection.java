@@ -198,6 +198,10 @@ public final class Http2Connection {
             sendGoaway(e.errorCode());
         } catch (IOException _) {
             // Lost connection
+        } catch (RuntimeException _) {
+            // A defect on the frame loop must still end the connection cleanly (CHAPPE-033):
+            // malformed input is turned into a protocol error before it gets here.
+            sendGoaway(Http2ErrorCode.INTERNAL_ERROR);
         } finally {
             close();
         }
@@ -256,7 +260,9 @@ public final class Http2Connection {
         var payload = frame.payload();
         Http2Settings oldSettings = remoteSettings;
         remoteSettings = remoteSettings.applyFrom(payload, payload.remaining());
-        hpackDecoder.updateMaxTableSize(remoteSettings.headerTableSize());
+        // The peer's HEADER_TABLE_SIZE bounds our encoder's table. Our decoder keeps the size we
+        // advertise, which only the peer's size updates can lower (RFC 7541 §4.2, CHAPPE-033).
+        hpackEncoder.applyPeerMaxTableSize(remoteSettings.headerTableSize());
 
         // Propagate INITIAL_WINDOW_SIZE change to all open streams (RFC 9113 §6.5.2)
         int oldWindowSize = oldSettings.initialWindowSize();

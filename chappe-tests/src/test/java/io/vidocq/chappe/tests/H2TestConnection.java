@@ -57,6 +57,7 @@ final class H2TestConnection implements AutoCloseable {
     static final int STREAM_CLOSED = 0x5;
     static final int REFUSED_STREAM = 0x7;
     static final int CANCEL = 0x8;
+    static final int COMPRESSION_ERROR = 0x9;
     static final int ENHANCE_YOUR_CALM = 0xb;
 
     private static final byte[] PREFACE = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
@@ -98,12 +99,17 @@ final class H2TestConnection implements AutoCloseable {
 
     /** Connects, sends the preface and an empty SETTINGS, and completes the SETTINGS exchange. */
     static H2TestConnection open(int port) throws IOException {
+        return open(port, new byte[0]);
+    }
+
+    /** Connects, sends the preface and a SETTINGS frame with {@code settings} as its payload, and completes the exchange. */
+    static H2TestConnection open(int port, byte[] settings) throws IOException {
         var socket = new Socket();
         socket.connect(new InetSocketAddress("127.0.0.1", port), 5_000);
         socket.setSoTimeout(5_000);
         var h2 = over(socket);
         h2.preface();
-        h2.frame(TYPE_SETTINGS, 0, 0, new byte[0]);
+        h2.frame(TYPE_SETTINGS, 0, 0, settings);
         h2.flush();
         for (int i = 0; i < 2; i++) h2.read(); // the server's SETTINGS and its ACK of ours
         h2.frame(TYPE_SETTINGS, FLAG_ACK, 0, new byte[0]);
@@ -240,6 +246,28 @@ final class H2TestConnection implements AutoCloseable {
     /** An indexed field (RFC 7541 §6.1); 62 is the newest dynamic table entry. */
     static byte[] indexed(int index) {
         return new byte[] {(byte) (0x80 | index)};
+    }
+
+    /** A SETTINGS payload entry: a 16-bit identifier and a 32-bit value (RFC 9113 §6.5.1). */
+    static byte[] setting(int id, int value) {
+        return ByteBuffer.allocate(6).putShort((short) id).putInt(value).array();
+    }
+
+    /** A dynamic table size update (RFC 7541 §6.3): pattern 001, a 5-bit prefix integer. */
+    static byte[] sizeUpdate(int size) {
+        var block = new ByteArrayOutputStream();
+        if (size < 31) {
+            block.write(0x20 | size);
+        } else {
+            block.write(0x3F);
+            int rest = size - 31;
+            while (rest >= 128) {
+                block.write((rest & 0x7F) | 0x80);
+                rest >>>= 7;
+            }
+            block.write(rest);
+        }
+        return block.toByteArray();
     }
 
     static byte[] concat(byte[]... parts) {

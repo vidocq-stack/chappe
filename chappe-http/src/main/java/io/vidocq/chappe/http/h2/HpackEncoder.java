@@ -23,6 +23,7 @@ import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Locale;
+import java.util.concurrent.locks.ReentrantLock;
 
 import io.vidocq.chappe.api.Headers;
 import io.vidocq.chappe.api.internal.HeaderFields;
@@ -46,8 +47,53 @@ public final class HpackEncoder {
 
     private final HpackDynamicTable dynamicTable;
 
+    /** Guards the dynamic table and the pending size update: responses are encoded on many threads. */
+    private final ReentrantLock lock = new ReentrantLock();
+
+    /** The table size in force: at most the peer's SETTINGS_HEADER_TABLE_SIZE (RFC 7541 §4.2). */
+    private int tableSize = DEFAULT_MAX_TABLE_SIZE;
+
+    /** Whether the next block must open with a dynamic table size update. */
+    private boolean sizeUpdatePending;
+
+    /** The smallest table size since the last signalled update (RFC 7541 §4.2). */
+    private int smallestPendingSize;
+
     public HpackEncoder() {
         this.dynamicTable = new HpackDynamicTable(DEFAULT_MAX_TABLE_SIZE);
+    }
+
+    /**
+     * Applies the peer's SETTINGS_HEADER_TABLE_SIZE, which bounds this encoder's dynamic table
+     * (RFC 9113 §6.5.2). The encoder keeps its own 4,096-octet table when the peer allows that much
+     * and shrinks it otherwise; a change is signalled by a dynamic table size update at the start
+     * of the next block, preceded by the smallest size reached in between (RFC 7541 §4.2, §6.3).
+     *
+     * @param peerHeaderTableSize the setting as read from the wire: an unsigned 32-bit value, so a
+     *     negative {@code int} stands for 2^31 or more
+     */
+    public void applyPeerMaxTableSize(int peerHeaderTableSize) {
+        int size = peerHeaderTableSize < 0
+                ? DEFAULT_MAX_TABLE_SIZE
+                : Math.min(peerHeaderTableSize, DEFAULT_MAX_TABLE_SIZE);
+        lock.lock();
+        try {
+            if (size == tableSize) return;
+            smallestPendingSize = sizeUpdatePending ? Math.min(smallestPendingSize, size) : size;
+            sizeUpdatePending = true;
+            tableSize = size;
+            dynamicTable.setMaxSize(size);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /** Writes the pending size updates, if any, at the start of a block. Called under the lock. */
+    private void writePendingSizeUpdate(ByteArrayOutputStream out) {
+        if (!sizeUpdatePending) return;
+        if (smallestPendingSize < tableSize) encodeInteger(out, smallestPendingSize, 5, 0x20);
+        encodeInteger(out, tableSize, 5, 0x20);
+        sizeUpdatePending = false;
     }
 
     /**
@@ -71,16 +117,21 @@ public final class HpackEncoder {
             fields.add(entry);
         }
         var out = new ByteArrayOutputStream(256);
+        lock.lock();
+        try {
+            writePendingSizeUpdate(out);
 
-        // :status pseudo-header
-        String statusValue = String.valueOf(statusCode);
-        encodeHeader(out, ":status", statusValue);
+            // :status pseudo-header
+            String statusValue = String.valueOf(statusCode);
+            encodeHeader(out, ":status", statusValue);
 
-        // Regular headers
-        for (var entry : fields) {
-            encodeHeader(out, entry.name().toLowerCase(Locale.ROOT), entry.value());
+            // Regular headers
+            for (var entry : fields) {
+                encodeHeader(out, entry.name().toLowerCase(Locale.ROOT), entry.value());
+            }
+        } finally {
+            lock.unlock();
         }
-
         return out.toByteArray();
     }
 
@@ -94,11 +145,17 @@ public final class HpackEncoder {
      */
     public byte[] encodeTrailers(Headers trailers) {
         var out = new ByteArrayOutputStream(64);
-        for (var entry : trailers) {
-            if (!HeaderFields.isValid(entry.name(), entry.value())) {
-                continue; // dropped, as over HTTP/1.1 (CHAPPE-008)
+        lock.lock();
+        try {
+            writePendingSizeUpdate(out);
+            for (var entry : trailers) {
+                if (!HeaderFields.isValid(entry.name(), entry.value())) {
+                    continue; // dropped, as over HTTP/1.1 (CHAPPE-008)
+                }
+                encodeHeader(out, entry.name().toLowerCase(Locale.ROOT), entry.value());
             }
-            encodeHeader(out, entry.name().toLowerCase(Locale.ROOT), entry.value());
+        } finally {
+            lock.unlock();
         }
         return out.toByteArray();
     }

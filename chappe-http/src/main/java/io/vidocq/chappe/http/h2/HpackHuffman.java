@@ -168,7 +168,9 @@ public final class HpackHuffman {
      * @throws IllegalArgumentException if the Huffman stream is invalid or contains EOS
      */
     public static String decode(ByteBuffer src, int length) {
-        byte[] out = new byte[length * 2]; // generous upper bound
+        // The shortest code is 5 bits, so length octets decode to at most length * 8 / 5 symbols.
+        // Callers check length against the bytes actually available before calling.
+        byte[] out = new byte[(int) Math.min((long) length * 8 / 5 + 1, Integer.MAX_VALUE - 8)];
         int outLen = 0;
 
         Node node = ROOT;
