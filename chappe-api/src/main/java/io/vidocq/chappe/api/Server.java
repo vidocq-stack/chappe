@@ -96,7 +96,7 @@ public interface Server extends AutoCloseable {
          * Bound on a single blocking write — how long the socket may refuse to accept
          * bytes we are trying to send. Does not bound idle time on a response with
          * nothing in flight (e.g. gaps between Server-Sent Events); see {@link
-         * ServerConfig#writeTimeout()}.
+         * ServerConfig#writeTimeout()}. {@link Duration#ZERO} or a negative value means no bound.
          */
         Builder writeTimeout(Duration timeout);
 

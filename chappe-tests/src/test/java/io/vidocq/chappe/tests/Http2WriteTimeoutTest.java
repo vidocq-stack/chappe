@@ -68,6 +68,7 @@ class Http2WriteTimeoutTest {
 
     private static final int BIG = 32 * 1024 * 1024;
     private static final int MEDIUM = 4 * 1024 * 1024;
+    private static final int ONE_MIB = 1024 * 1024;
     private static final int SETTINGS_INITIAL_WINDOW_SIZE = 0x4;
     private static final int MAX_WINDOW = Integer.MAX_VALUE; // 2^31 - 1
     private static final int DEFAULT_WINDOW = 65_535;
@@ -182,11 +183,45 @@ class Http2WriteTimeoutTest {
         }
     }
 
+    /**
+     * A zero {@code writeTimeout} means no bound, as for the other timeouts: the flushes run
+     * unbounded, where a watchdog armed with zero would close the connection at once.
+     */
+    @Test
+    void aZeroWriteTimeoutIsNoBound() throws Exception {
+        startServer(null, Duration.ZERO);
+        try (var socket = new Socket()) {
+            socket.connect(new InetSocketAddress("127.0.0.1", server.port()), 5_000);
+            socket.setSoTimeout(5_000);
+            var h2 = H2TestConnection.over(socket);
+            requestWithOpenWindows(h2, "/mib");
+
+            long received = 0;
+            boolean ended = false;
+            while (!ended) {
+                Frame f;
+                try {
+                    f = h2.read();
+                } catch (EOFException e) {
+                    throw new AssertionError("the connection was closed after " + received + " bytes", e);
+                }
+                if (f.type() == TYPE_GOAWAY || f.type() == TYPE_RST_STREAM) {
+                    fail("the response was cut after " + received + " bytes (frame type " + f.type() + ")");
+                }
+                if (f.streamId() != 1) continue;
+                if (f.type() == TYPE_DATA) received += f.payload().length;
+                ended = f.endStream();
+            }
+            assertEquals(ONE_MIB, received, "the whole body arrives, up to END_STREAM");
+        }
+    }
+
     // -------------------------------------------------------------------------
 
     private void startServer(SSLContext tls, Duration writeTimeout) {
         byte[] big = new byte[BIG];
         byte[] medium = new byte[MEDIUM];
+        byte[] mib = new byte[ONE_MIB];
         var builder = Server.builder()
                 .port(0)
                 .writeTimeout(writeTimeout)
@@ -194,6 +229,7 @@ class Http2WriteTimeoutTest {
                 .handler(req -> switch (req.path()) {
                     case "/big" -> octets(big);
                     case "/medium" -> octets(medium);
+                    case "/mib" -> octets(mib);
                     default -> Response.ok("small");
                 });
         if (tls != null) builder.tls(tls);

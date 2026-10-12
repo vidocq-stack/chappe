@@ -37,12 +37,23 @@ cause hypothesis, and status.
   reopen a closed receive window. A `writeTimeout` near half a second can therefore cut a healthy
   but pausing reader; the default (30 s) is far from it. `aSlowButProgressingReaderIsNotCut` runs
   with a 2 s bound for that reason.
+- **Zero or negative bound (fix round 1)**: `BoundedWrites.writeWithTimeout` armed its watchdog
+  with whatever it was given, so a zero or negative `writeTimeout` raced a close against the
+  first write (a `null` one threw an NPE in the watchdog thread and left the write unbounded). On HTTP/1.1 that cut a response
+  after its first bytes (pre-existing); with this fix it would have closed whole HTTP/2
+  connections. `writeWithTimeout` now treats `null`, zero and negative as no bound and writes
+  plain, on HTTP/1.1, HTTP/2 and the TLS close_notify alike, the convention `readTimeout` and the
+  TLS handshake bound already follow. Reproduction: `WriteTimeoutTest#zeroWriteTimeoutIsNoBound`
+  and `Http2WriteTimeoutTest#aZeroWriteTimeoutIsNoBound` (the body was cut after 16 to 24 KiB).
 - **Follow-ups (OPEN)**:
   - `Http2Connection.waitForSendWindow` waits on its condition with no bound: a peer that never
     sends WINDOW_UPDATE parks the response thread forever. That is a flow-control stall, not a
     socket-write stall, so `writeTimeout` does not cover it. Fix: bound the wait and reset the
     stream, as a separate decision.
-  - Each bounded write starts one watchdog virtual thread (CHAPPE-022 (a)). A `TimedWriteChannel`,
+  - Each bounded write starts one watchdog virtual thread (CHAPPE-022 (a)). Every frame write ends
+    in a flush, and a full 16 KiB DATA frame plus its 9-byte header spans two flushes of the 16 KiB
+    buffer, so a 32 MiB body costs about 4,096 watchdogs (and as many write calls); a buffer of
+    `maxFrameSize + 9` bytes would halve both. A `TimedWriteChannel`,
     a per-connection write deadline followed by one watchdog like `TimedReadChannel`, would remove
     that cost for HTTP/1.1 and HTTP/2 alike.
 

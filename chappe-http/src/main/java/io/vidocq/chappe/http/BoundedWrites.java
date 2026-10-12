@@ -53,6 +53,8 @@ public final class BoundedWrites {
     /**
      * Performs one blocking {@code channel.write(buf)} bounded by {@code
      * timeout}. On deadline, {@code closeable} is closed, waking the write.
+     * A {@code null}, zero or negative {@code timeout} means no bound: the
+     * write runs plain, with no watchdog.
      *
      * <p>A partial write (some but not all of {@code buf} accepted) is
      * <em>not</em> a timeout — it means the socket made progress, and the
@@ -69,6 +71,9 @@ public final class BoundedWrites {
      */
     public static int writeWithTimeout(
             WritableByteChannel channel, Closeable closeable, ByteBuffer buf, Duration timeout) throws IOException {
+        if (timeout == null || timeout.isZero() || timeout.isNegative()) {
+            return channel.write(buf);
+        }
         var got = new AtomicBoolean();
         Thread watchdog = Thread.ofVirtual().name("chappe-write-watchdog").start(() -> {
             try {

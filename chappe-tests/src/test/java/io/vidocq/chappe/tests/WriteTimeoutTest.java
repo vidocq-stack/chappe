@@ -28,6 +28,10 @@ import java.io.PipedOutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 
@@ -182,6 +186,37 @@ class WriteTimeoutTest {
                     decoded,
                     "Both chunks must arrive — the idle gap must not have killed the connection");
         }
+    }
+
+    /**
+     * A zero {@code writeTimeout} means no bound, as for the other timeouts: a watchdog armed with
+     * zero would close the connection before the first write completes.
+     */
+    @Test
+    void zeroWriteTimeoutIsNoBound() throws Exception {
+        byte[] body = new byte[1024 * 1024];
+        server = Server.builder()
+                .port(0)
+                .writeTimeout(Duration.ZERO)
+                .handler(_ -> Response.builder()
+                        .status(StatusCode.OK)
+                        .header("Content-Type", "application/octet-stream")
+                        .body(Body.of(body))
+                        .build())
+                .build();
+        server.start();
+
+        var client = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
+                .connectTimeout(Duration.ofSeconds(5))
+                .build();
+        var response = client.send(
+                HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + "/"))
+                        .timeout(Duration.ofSeconds(10))
+                        .build(),
+                HttpResponse.BodyHandlers.ofByteArray());
+        assertEquals(200, response.statusCode());
+        assertEquals(body.length, response.body().length, "the whole body arrives");
     }
 
     private static void sleep(long millis) {
