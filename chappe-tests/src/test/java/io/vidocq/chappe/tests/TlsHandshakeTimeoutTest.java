@@ -83,7 +83,17 @@ class TlsHandshakeTimeoutTest {
                 .tls(serverContext)
                 .idleTimeout(idleTimeout)
                 .writeTimeout(Duration.ofSeconds(5))
-                .handler(_ -> Response.ok("ok"))
+                .handler(req -> {
+                    if ("/slow".equals(req.path())) {
+                        // Spans the handshake deadline inside the handler: no keep-alive gap is timed
+                        try {
+                            Thread.sleep(idleTimeout.multipliedBy(2));
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                    }
+                    return Response.ok("ok");
+                })
                 .build();
         server.start();
         return server.port();
@@ -155,6 +165,7 @@ class TlsHandshakeTimeoutTest {
                 long elapsedMs = elapsedMs(start);
                 int sentAtClose = sent.get();
                 assertTrue(closed, "the server must close a drip-feeding client");
+                assertTrue(elapsedMs >= 400, "closed by the handshake deadline, not earlier (" + elapsedMs + " ms)");
                 assertTrue(
                         sentAtClose < hello.length,
                         "cut before the whole ClientHello was sent (" + sentAtClose + "/" + hello.length + ")");
@@ -170,39 +181,36 @@ class TlsHandshakeTimeoutTest {
     }
 
     /**
-     * A handshake that completes disarms the deadline: requests sent past it on the same
-     * keep-alive connection are still served (each one restarts the keep-alive idle wait).
+     * A handshake that completes disarms the deadline. A {@code /slow} request, sent right after the
+     * handshake, keeps the server busy for twice the deadline before it answers: a watchdog left
+     * armed would close the socket in the middle of it. No keep-alive gap is timed, so the only
+     * time-sensitive window is the handshake itself.
      */
     @Test
     void aHandshakeThatCompletesIsNotCut() throws Exception {
         // A wider bound than the others: a cold first handshake must complete well within it.
         Duration idle = Duration.ofSeconds(1);
         int port = start(idle);
-        long connected = System.nanoTime();
         try (var socket = (SSLSocket) clientContext.getSocketFactory().createSocket("127.0.0.1", port)) {
-            socket.setSoTimeout(5000);
+            socket.setSoTimeout(10_000);
             socket.startHandshake();
             OutputStream out = socket.getOutputStream();
             InputStream in = socket.getInputStream();
 
-            assertTrue(get(out, in).startsWith("HTTP/1.1 200"), "first request");
-
-            sleepUntil(connected, idle.toMillis() * 6 / 10);
-            assertTrue(get(out, in).startsWith("HTTP/1.1 200"), "second request, at about 0.6 x the timeout");
-
-            sleepUntil(connected, idle.toMillis() * 12 / 10);
             assertTrue(
-                    get(out, in).startsWith("HTTP/1.1 200"),
-                    "third request, past the handshake deadline: the watchdog must be disarmed");
+                    get(out, in, "/slow").startsWith("HTTP/1.1 200"),
+                    "a response that ends past the handshake deadline: the watchdog must be disarmed");
+            assertTrue(get(out, in, "/").startsWith("HTTP/1.1 200"), "an immediate keep-alive request");
         }
     }
 
     /**
-     * Plaintext on the TLS port is rejected by the engine at once: it takes the rejected-handshake
-     * path (CHAPPE-027, alert then lingering close), which keeps its own 2 s budget.
+     * Plaintext on the TLS port: the engine rejects it at once, and the connection ends within the
+     * 2 s lingering budget of the rejected-handshake path (CHAPPE-027). A smoke test only: the
+     * engine may queue no alert for plaintext, so it proves neither the alert nor the linger.
      */
     @Test
-    void plaintextOnTheTlsPortStillEndsWithinTheLingerBudget() throws IOException {
+    void plaintextOnTheTlsPortEndsWithinTheLingerBudget() throws IOException {
         int port = start(IDLE);
         try (var socket = new Socket("127.0.0.1", port)) {
             socket.setSoTimeout(8000);
@@ -249,8 +257,8 @@ class TlsHandshakeTimeoutTest {
         }
     }
 
-    private static String get(OutputStream out, InputStream in) throws IOException {
-        out.write("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n".getBytes(StandardCharsets.US_ASCII));
+    private static String get(OutputStream out, InputStream in, String path) throws IOException {
+        out.write(("GET " + path + " HTTP/1.1\r\nHost: localhost\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
         out.flush();
         return readOneResponse(in);
     }
@@ -275,12 +283,6 @@ class TlsHandshakeTimeoutTest {
             }
         }
         return sb.toString();
-    }
-
-    /** Sleeps until {@code offsetMs} after {@code originNanos}; returns at once if already past. */
-    private static void sleepUntil(long originNanos, long offsetMs) throws InterruptedException {
-        long left = offsetMs - elapsedMs(originNanos);
-        if (left > 0) Thread.sleep(left);
     }
 
     private static long elapsedMs(long startNanos) {
