@@ -115,6 +115,43 @@ class HpackDecoderLimitTest {
     }
 
     @Test
+    void everyRepresentationPastTheSoftLimitIsDecodedAndDropped() throws Exception {
+        var decoder = new HpackDecoder(4096, 100, 10_000);
+        String forty = "v".repeat(40);
+        // x: 73 (within 100); then, all past it: a static indexed field (:method GET, index 2), a
+        // never-indexed literal, and an insert whose entry a later block must still find.
+        var block = new Block()
+                .literal("x", forty)
+                .literal("y", forty)
+                .indexed(2)
+                .neverIndexed("secret", "s")
+                .literalIndexed("late", "entry");
+        var fields = new ArrayList<String>();
+
+        assertFalse(decoder.decode(block.buffer(), (n, v) -> fields.add(n + ":" + v)));
+        assertEquals(List.of("x:" + forty), fields);
+
+        var next = new ArrayList<String>();
+        assertTrue(decoder.decode(new Block().indexed(NEWEST_DYNAMIC_ENTRY).buffer(), (n, v) -> next.add(n + ":" + v)));
+        assertEquals(List.of("late:entry"), next);
+    }
+
+    @Test
+    void theSizeCountsOctetsOfHuffmanCodedObsTextValues() throws Exception {
+        byte[] obsText = new byte[10];
+        Arrays.fill(obsText, (byte) 0xE9);
+        String value = new String(obsText, StandardCharsets.ISO_8859_1);
+        // n: 1 + 10 + 32 = 43 octets, as for the raw string.
+        var exact = new HpackDecoder(4096, 43, 43);
+        var values = new ArrayList<String>();
+        assertTrue(exact.decode(new Block().literalHuffman("n", value).buffer(), (n, v) -> values.add(v)));
+        assertEquals(List.of(value), values);
+
+        var oneShort = new HpackDecoder(4096, 42, 1000);
+        assertFalse(oneShort.decode(new Block().literalHuffman("n", value).buffer(), (n, v) -> {}));
+    }
+
+    @Test
     void theTwoArgumentConstructorKeepsASingleHardLimit() {
         var decoder = new HpackDecoder(4096, 100);
         String forty = "v".repeat(40);
@@ -146,6 +183,24 @@ class HpackDecoderLimitTest {
             out.write(0x40);
             string(name.getBytes(StandardCharsets.ISO_8859_1));
             string(value.getBytes(StandardCharsets.ISO_8859_1));
+            return this;
+        }
+
+        /** Literal Header Field Never Indexed, new name (RFC 7541 §6.2.3). */
+        Block neverIndexed(String name, String value) {
+            out.write(0x10);
+            string(name.getBytes(StandardCharsets.ISO_8859_1));
+            string(value.getBytes(StandardCharsets.ISO_8859_1));
+            return this;
+        }
+
+        /** Literal Header Field without Indexing, new name, with a Huffman-coded value (RFC 7541 §5.2). */
+        Block literalHuffman(String name, String value) {
+            out.write(0x00);
+            string(name.getBytes(StandardCharsets.ISO_8859_1));
+            byte[] coded = HpackHuffman.encode(value);
+            integer(0x80, 7, coded.length);
+            out.writeBytes(coded);
             return this;
         }
 

@@ -102,6 +102,39 @@ class Http2GrpcTransportTest {
     }
 
     // ------------------------------------------------------------------
+    // 1b. A gRPC call whose header list is past SETTINGS_MAX_HEADER_LIST_SIZE
+    //     gets HTTP 431 before routing (CHAPPE-032); the connection lives on.
+    // ------------------------------------------------------------------
+    @Test
+    void aGrpcCallOverTheHeaderListLimitGets431WithoutReachingItsHandler() throws Exception {
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        startServer("/echo", call -> {
+            calls.incrementAndGet();
+            call.send(call.receive());
+            call.complete(GrpcStatus.OK, "");
+        });
+
+        try (var h2 = H2TestConnection.open(port)) {
+            String[] grpc = {"content-type", "application/grpc", "te", "trailers"};
+            h2.headers(
+                    1,
+                    true,
+                    H2TestConnection.concat(
+                            H2TestConnection.requestHeaders("POST", "/echo", grpc),
+                            H2TestConnection.literalWithoutIndexing("x-big", "a".repeat(12 * 1_024))));
+            h2.flush();
+            assertEquals(new H2TestConnection.Reply("431", ""), h2.reply(1));
+            assertEquals(0, calls.get(), "the gRPC handler must not see the oversized call");
+
+            h2.headers(3, false, H2TestConnection.requestHeaders("POST", "/echo", grpc));
+            h2.data(3, true, GrpcFrameWriter.encode("hi".getBytes(StandardCharsets.UTF_8)));
+            h2.flush();
+            assertEquals("200", h2.reply(3).status());
+            assertEquals(1, calls.get());
+        }
+    }
+
+    // ------------------------------------------------------------------
     // 2. Server-streaming: 1 in -> N out -> trailers OK
     // ------------------------------------------------------------------
     @Test

@@ -300,6 +300,46 @@ class Http2HeaderBlockLimitTest {
         }
     }
 
+    @Test
+    void aListJustUnderTheDecodedCapGets431() throws Exception {
+        try (var h2 = H2TestConnection.open(server.port())) {
+            // 174 octets of pseudo-headers, one entry of 4,037 octets, then 63 references to it:
+            // 174 + 64 * 4,037 = 258,542 decoded, under the 262,144 cap. One more reference would cross it.
+            byte[] references = new byte[63];
+            Arrays.fill(references, indexed(62)[0]);
+            byte[] block =
+                    concat(requestHeaders("GET", "/"), literalWithIndexing("x-big", "a".repeat(4_000)), references);
+            h2.headers(1, true, block);
+            h2.flush();
+            assertEquals(new Reply("431", ""), h2.reply(1));
+
+            h2.headers(3, true, requestHeaders("GET", "/"));
+            h2.flush();
+            assertEquals(new Reply("200", "pong"), h2.reply(3));
+            assertEquals(1, calls.get(), "the handler must not see the oversized request");
+        }
+    }
+
+    @Test
+    void theEncodedBlockCapScalesWithMaxHeaderSize() throws Exception {
+        // maxHeaderSize 32,768: S = 35,968, and the block cap is 4 * S = 143,872, past the 64 KiB floor.
+        var raised = Server.builder()
+                .port(0)
+                .maxHeaderSize(32_768)
+                .handler(this::handle)
+                .build();
+        raised.start();
+        try (var h2 = H2TestConnection.open(raised.port())) {
+            // About 100 KiB of encoded block: past the 64 KiB floor, under 4 * S. The list is past S.
+            headerBlock(h2, 1, true, requestHeaders("GET", "/", "x-big", "a".repeat(100 * 1_024)));
+            h2.flush();
+            assertEquals(new Reply("431", ""), h2.reply(1));
+            assertEquals(0, calls.get());
+        } finally {
+            raised.stop();
+        }
+    }
+
     // --- Trailers and not-served streams --------------------------------------------------------
 
     @Test
