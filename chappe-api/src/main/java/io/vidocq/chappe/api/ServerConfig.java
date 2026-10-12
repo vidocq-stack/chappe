@@ -58,8 +58,14 @@ import javax.net.ssl.SSLContext;
  *     affected by this timeout, however long the gap. Use {@code idleTimeout} to bound
  *     connection inactivity instead. On HTTP/2 it bounds each write of a flushed frame
  *     buffer (up to 16 KiB), and on expiry the whole multiplexed connection is closed, with
- *     every stream on it. Zero or negative: no bound.
- * @param idleTimeout idle timeout before closing the connection (default: 60s)
+ *     every stream on it. Zero or negative: no bound for responses; the writes of a TLS close
+ *     (close_notify, the alert of a rejected handshake) stay bounded, by 2 s in that case.
+ * @param idleTimeout idle timeout before closing the connection (default: 60s). It also bounds the
+ *     whole TLS handshake as one total deadline, not a per-read one: a client that has not
+ *     completed its handshake {@code idleTimeout} after the server started it is disconnected.
+ *     Use a positive value: zero or negative removes the handshake deadline but does not disable
+ *     the idle bound, and a connection waiting for a request may then be closed at once. A very
+ *     large value is saturated.
  * @param maxRequestSize maximum request body size in bytes (default: 10 MiB), on HTTP/1.1 and
  *     HTTP/2. A call routed to a gRPC handler, or to a gRPC-Web handler in binary mode, is not
  *     capped: nothing bounds its total, and each message is bounded only when the handler reads it,

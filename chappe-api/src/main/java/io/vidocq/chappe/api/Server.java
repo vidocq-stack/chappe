@@ -96,10 +96,16 @@ public interface Server extends AutoCloseable {
          * Bound on a single blocking write — how long the socket may refuse to accept
          * bytes we are trying to send. Does not bound idle time on a response with
          * nothing in flight (e.g. gaps between Server-Sent Events); see {@link
-         * ServerConfig#writeTimeout()}. {@link Duration#ZERO} or a negative value means no bound.
+         * ServerConfig#writeTimeout()}. {@link Duration#ZERO} or a negative value means no bound
+         * for responses; the writes of a TLS close stay bounded (2 s).
          */
         Builder writeTimeout(Duration timeout);
 
+        /**
+         * Idle timeout before closing the connection; also the total deadline of the whole TLS
+         * handshake. Use a positive value: zero or negative removes the handshake deadline but
+         * does not disable the idle bound. See {@link ServerConfig#idleTimeout()}.
+         */
         Builder idleTimeout(Duration timeout);
 
         Builder maxRequestSize(long bytes);

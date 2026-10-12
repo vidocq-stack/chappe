@@ -83,9 +83,12 @@ cause hypothesis, and status.
   and `Http2Connection` never passed `config.writeTimeout()` to the writer.
 - **Fix**: `Http2FrameWriter` takes a `writeTimeout` and a `Closeable`, and each write of a flush
   goes through `BoundedWrites.writeWithTimeout`, as HTTP/1.1 does. A flush is at most the 16 KiB
-  frame buffer, and a partial write is progress, so only a socket that accepts nothing for
-  `writeTimeout` is cut. `Http2Connection` passes `config.writeTimeout()` and its write channel,
-  which is the transport: the `SocketChannel` for h2c, the `SslHandler` for TLS. At the deadline
+  frame buffer, and a partial write is progress, so over h2c only a socket that accepts nothing for
+  `writeTimeout` is cut. Over TLS one bounded call is one `SslHandler.write` of the whole flush
+  (up to 16 KiB), so a slow but progressing TLS peer is cut when that whole flush takes longer than
+  `writeTimeout`, and the connection closes at most `writeTimeout` + 100 ms (`CLOSE_LOCK_WAIT_MS`,
+  the wait of `SslHandler.close()` for the stalled writer's lock) after the write started.
+  `Http2Connection` passes `config.writeTimeout()` and its write channel, which is the transport: the `SocketChannel` for h2c, the `SslHandler` for TLS. At the deadline
   the transport is closed: the stalled write fails, every other writer fails fast, the frame loop's
   read fails, and the existing `close()` cancels all the streams. On HTTP/2 a stalled flush
   therefore ends the whole multiplexed connection, every stream with it. The constructors without
@@ -942,7 +945,8 @@ load-balancing and it would let two live `Server` instances share one port.
    the foreign socket — observed as a test receiving a `301` from an IDE's built-in web
    server (`server: IntelliJ IDEA`) and a `Invalid status line` from a local DB driver.
    **Fix**: for `port == 0`, probe `127.0.0.1:0` first to obtain a loopback-free port,
-   then bind the real listener (on `config.host()`) to it (`ChappeServer.resolveBindPort`).
+   then bind the real listener (on `config.host()`) to it (`ChappeServer.resolveBindPort`)
+   (narrowed by CHAPPE-030 to wildcard hosts; a specific host binds `host:0` directly).
    `SO_REUSEADDR` is irrelevant to this and was left unconditional. Production fixed-port
    binds are unaffected.
 
