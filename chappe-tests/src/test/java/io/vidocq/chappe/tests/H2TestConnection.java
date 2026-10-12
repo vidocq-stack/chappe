@@ -101,14 +101,27 @@ final class H2TestConnection implements AutoCloseable {
         var socket = new Socket();
         socket.connect(new InetSocketAddress("127.0.0.1", port), 5_000);
         socket.setSoTimeout(5_000);
-        var h2 = new H2TestConnection(socket);
-        h2.out.write(PREFACE);
+        var h2 = over(socket);
+        h2.preface();
         h2.frame(TYPE_SETTINGS, 0, 0, new byte[0]);
         h2.flush();
         for (int i = 0; i < 2; i++) h2.read(); // the server's SETTINGS and its ACK of ours
         h2.frame(TYPE_SETTINGS, FLAG_ACK, 0, new byte[0]);
         h2.flush();
         return h2;
+    }
+
+    /**
+     * Wraps a socket the caller has already connected (plain or TLS), with nothing sent yet: the
+     * caller writes the preface and drives the SETTINGS exchange itself.
+     */
+    static H2TestConnection over(Socket socket) throws IOException {
+        return new H2TestConnection(socket);
+    }
+
+    /** Writes the client connection preface (not flushed). */
+    void preface() throws IOException {
+        out.write(PREFACE);
     }
 
     void headers(int streamId, boolean endStream, byte[] block) throws IOException {

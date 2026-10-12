@@ -52,7 +52,9 @@ import javax.net.ssl.SSLContext;
  *     timed — while there is data to send, so a streamed response (e.g. Server-Sent
  *     Events) with long idle gaps between events, and no bytes in flight, is never
  *     affected by this timeout, however long the gap. Use {@code idleTimeout} to bound
- *     connection inactivity instead.
+ *     connection inactivity instead. On HTTP/2 it bounds each write of a flushed frame
+ *     buffer (up to 16 KiB), and on expiry the whole multiplexed connection is closed, with
+ *     every stream on it.
  * @param idleTimeout idle timeout before closing the connection (default: 60s)
  * @param maxRequestSize maximum request body size in bytes (default: 10 MiB), on HTTP/1.1 and
  *     HTTP/2. A call routed to a gRPC handler, or to a gRPC-Web handler in binary mode, is not

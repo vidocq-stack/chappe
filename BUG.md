@@ -5,6 +5,49 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-029 — a peer that stopped reading blocked HTTP/2 writes forever
+
+- **Date**: 2026-10-12
+- **Status**: FIXED (commit `fix(http): apply writeTimeout to HTTP/2 writes (CHAPPE-029)`,
+  branch `pr/ybl/chappe-timeouts`)
+- **Module**: `chappe-http` (`Http2FrameWriter`, `Http2Connection`)
+- **Symptom**: `writeTimeout` bounded HTTP/1.1 writes only. On HTTP/2, a peer that opened its
+  flow-control windows, sent a request and then stopped reading its socket made the server's
+  `channel.write` block forever. That write runs under the frame writer's single lock, so every
+  other writer of the connection queued behind it: the connection thread (SETTINGS and PING acks),
+  every other stream's response, the WINDOW_UPDATEs a request body read sends (CHAPPE-024 (a)),
+  RST_STREAM and GOAWAY. The connection and its threads stayed open for as long as the peer liked.
+- **Minimal reproduction**: `chappe-tests/.../Http2WriteTimeoutTest`
+  (`aPeerThatStopsReadingIsCut`, `aPeerThatStopsReadingIsCutOverTls`): a client with a 2 KiB
+  receive buffer opens both windows to 2^31 − 1, asks for a 32 MiB body and reads nothing for 3 s.
+  Before the fix it then received the whole 32 MiB and no EOF within 10 s.
+- **Cause**: `Http2FrameWriter.flushBuffer()` looped on `channel.write(writeBuffer)` with no bound,
+  and `Http2Connection` never passed `config.writeTimeout()` to the writer.
+- **Fix**: `Http2FrameWriter` takes a `writeTimeout` and a `Closeable`, and each write of a flush
+  goes through `BoundedWrites.writeWithTimeout`, as HTTP/1.1 does. A flush is at most the 16 KiB
+  frame buffer, and a partial write is progress, so only a socket that accepts nothing for
+  `writeTimeout` is cut. `Http2Connection` passes `config.writeTimeout()` and its write channel,
+  which is the transport: the `SocketChannel` for h2c, the `SslHandler` for TLS. At the deadline
+  the transport is closed: the stalled write fails, every other writer fails fast, the frame loop's
+  read fails, and the existing `close()` cancels all the streams. On HTTP/2 a stalled flush
+  therefore ends the whole multiplexed connection, every stream with it. The constructors without
+  a `writeTimeout` keep no bound.
+- **Found while testing**: on macOS loopback, a reader that drains 64 KiB every 100 ms still left
+  single writes of a few hundred bytes blocked for about 420 ms (measured), the kernel waiting to
+  reopen a closed receive window. A `writeTimeout` near half a second can therefore cut a healthy
+  but pausing reader; the default (30 s) is far from it. `aSlowButProgressingReaderIsNotCut` runs
+  with a 2 s bound for that reason.
+- **Follow-ups (OPEN)**:
+  - `Http2Connection.waitForSendWindow` waits on its condition with no bound: a peer that never
+    sends WINDOW_UPDATE parks the response thread forever. That is a flow-control stall, not a
+    socket-write stall, so `writeTimeout` does not cover it. Fix: bound the wait and reset the
+    stream, as a separate decision.
+  - Each bounded write starts one watchdog virtual thread (CHAPPE-022 (a)). A `TimedWriteChannel`,
+    a per-connection write deadline followed by one watchdog like `TimedReadChannel`, would remove
+    that cost for HTTP/1.1 and HTTP/2 alike.
+
+---
+
 ## CHAPPE-028 — a TLS client that never completed its handshake held its virtual thread forever
 
 - **Date**: 2026-10-12
@@ -186,10 +229,10 @@ cause hypothesis, and status.
   the HPACK decoder already uses it for a decoded list past the same size. It is neither a
   `COMPRESSION_ERROR` (the HPACK is not malformed) nor a `PROTOCOL_ERROR` (the framing is valid).
 - **Follow-ups (open)**:
-  - (a) HTTP/2 writes have no `writeTimeout` (it bounds HTTP/1.1 only). A peer that stops reading
-    its socket can block any HTTP/2 write indefinitely, and now the stream WINDOW_UPDATE a body read
-    sends too: a request body read can block behind it, beyond `readTimeout`. Fix: bound HTTP/2
-    writes by `writeTimeout`, or let the connection thread send the WINDOW_UPDATEs the readers earn.
+  - (a) (FIXED in CHAPPE-029) HTTP/2 writes had no `writeTimeout` (it bounded HTTP/1.1 only). A
+    peer that stopped reading its socket could block any HTTP/2 write indefinitely, and with it the
+    stream WINDOW_UPDATE a body read sends: a request body read could block behind it, beyond
+    `readTimeout`. Each flush is now bounded by `writeTimeout`.
   - (b) The HTTP/2 header-list limit is a fixed 8,192 bytes (`Http2Settings.DEFAULT`), not derived
     from `ServerConfig.maxHeaderSize`, so raising `maxHeaderSize` does not help HTTP/2, and a header
     section that fits HTTP/1.1 can fail over HTTP/2. Past it, the connection ends with

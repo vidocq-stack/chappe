@@ -19,10 +19,14 @@
  */
 package io.vidocq.chappe.http.h2;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.WritableByteChannel;
+import java.time.Duration;
 import java.util.concurrent.locks.ReentrantLock;
+
+import io.vidocq.chappe.http.BoundedWrites;
 
 /**
  * Writes HTTP/2 frames to a {@link WritableByteChannel}.
@@ -32,25 +36,55 @@ import java.util.concurrent.locks.ReentrantLock;
  * <p>
  * Thread-safe: multiple virtual threads can call the write methods
  * concurrently. The lock guarantees that frames are not interleaved.
+ * <p>
+ * When built with a {@code writeTimeout}, each flush of the frame buffer (at most its capacity,
+ * 16 KiB in a connection) is bounded: a socket that accepts nothing for {@code writeTimeout}
+ * gets {@code closeable} closed, which fails the stalled write and every writer after it, and so
+ * ends the whole connection.
  */
 public final class Http2FrameWriter {
 
     private static final int FRAME_HEADER_SIZE = 9;
-    private static final int DEFAULT_MAX_FRAME_SIZE = 16_384;
+    static final int DEFAULT_MAX_FRAME_SIZE = 16_384;
 
     private final ByteBuffer writeBuffer;
     private final WritableByteChannel channel;
     private final ReentrantLock writeLock = new ReentrantLock();
     private final int maxFrameSize;
+    private final Duration writeTimeout;
+    private final Closeable closeable;
 
     public Http2FrameWriter(ByteBuffer writeBuffer, WritableByteChannel channel) {
         this(writeBuffer, channel, DEFAULT_MAX_FRAME_SIZE);
     }
 
     public Http2FrameWriter(ByteBuffer writeBuffer, WritableByteChannel channel, int maxFrameSize) {
+        this(writeBuffer, channel, maxFrameSize, null, null);
+    }
+
+    /**
+     * Creates a writer whose every flush is bounded by {@code writeTimeout}.
+     *
+     * @param writeTimeout how long one blocking write of the buffer may accept nothing before the
+     *     transport is closed; {@code null} for no bound
+     * @param closeable what to close on that deadline, to wake the stalled write (the socket
+     *     channel for h2c, the {@code SslHandler} for TLS); unused when {@code writeTimeout} is
+     *     {@code null}
+     */
+    public Http2FrameWriter(
+            ByteBuffer writeBuffer,
+            WritableByteChannel channel,
+            int maxFrameSize,
+            Duration writeTimeout,
+            Closeable closeable) {
+        if (writeTimeout != null && closeable == null) {
+            throw new IllegalArgumentException("a writeTimeout needs a closeable to close at its deadline");
+        }
         this.writeBuffer = writeBuffer;
         this.channel = channel;
         this.maxFrameSize = maxFrameSize;
+        this.writeTimeout = writeTimeout;
+        this.closeable = closeable;
     }
 
     // -------------------------------------------------------------------------
@@ -243,7 +277,12 @@ public final class Http2FrameWriter {
     private void flushBuffer() throws IOException {
         writeBuffer.flip();
         while (writeBuffer.hasRemaining()) {
-            channel.write(writeBuffer);
+            // A partial write is progress, not a stall: each call arms its own deadline.
+            if (writeTimeout == null) {
+                channel.write(writeBuffer);
+            } else {
+                BoundedWrites.writeWithTimeout(channel, closeable, writeBuffer, writeTimeout);
+            }
         }
         writeBuffer.clear();
     }

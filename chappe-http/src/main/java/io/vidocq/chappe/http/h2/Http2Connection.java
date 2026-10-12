@@ -140,7 +140,15 @@ public final class Http2Connection {
         this.readBuffer = readBuffer;
         this.writeBuffer = ByteBuffer.allocateDirect(WRITE_BUFFER_SIZE);
         this.frameReader = new Http2FrameReader(readBuffer, readChannel);
-        this.frameWriter = new Http2FrameWriter(writeBuffer, writeChannel);
+        // A flush stalled past writeTimeout closes the write channel, which is the transport: the
+        // SocketChannel for h2c, the SslHandler for TLS. The close fails every writer and the frame
+        // loop's read, and close() then cancels every stream.
+        this.frameWriter = new Http2FrameWriter(
+                writeBuffer,
+                writeChannel,
+                Http2FrameWriter.DEFAULT_MAX_FRAME_SIZE,
+                config.writeTimeout(),
+                writeChannel);
         this.hpackDecoder = new HpackDecoder(localSettings.headerTableSize(), localSettings.maxHeaderListSize());
         this.hpackEncoder = new HpackEncoder();
     }
