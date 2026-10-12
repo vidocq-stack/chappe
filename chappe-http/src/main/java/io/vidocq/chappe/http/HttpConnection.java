@@ -321,7 +321,7 @@ public final class HttpConnection {
             if (readChannel instanceof SocketChannel sc) {
                 LingeringClose.halfCloseAndDrain(sc, readBuffer);
             } else if (closeable instanceof SslHandler ssl) {
-                ssl.closeNotifyAndDrain(readBuffer, config.writeTimeout());
+                ssl.closeNotifyAndDrain(readBuffer);
             }
         }
         close();

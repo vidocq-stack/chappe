@@ -68,7 +68,8 @@ public final class Http2FrameWriter {
      * Creates a writer whose every flush is bounded by {@code writeTimeout}.
      *
      * @param writeTimeout how long one blocking write of the buffer may take before the transport
-     *     is closed; {@code null}, zero or negative for no bound
+     *     is closed; {@code null}, zero or negative for no bound, the {@code BoundedWrites} rule for
+     *     data writes (the TLS close_notify of {@code SslHandler} stays bounded even then)
      * @param closeable what to close on that deadline, to wake the stalled write (the socket
      *     channel for h2c, the {@code SslHandler} for TLS); {@code null} closes {@code channel}
      */

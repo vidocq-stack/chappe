@@ -29,8 +29,10 @@ import java.nio.channels.SocketChannel;
 import java.nio.channels.WritableByteChannel;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
 import java.util.concurrent.locks.ReentrantLock;
@@ -78,8 +80,18 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
 
     private static final ByteBuffer EMPTY = ByteBuffer.allocate(0);
 
-    /** Bound on each blocking write of close_notify in {@link #close()}. */
-    private final java.time.Duration closeWriteTimeout;
+    /**
+     * The bound on each close write when the given {@code writeTimeout} is {@code null}, zero or
+     * negative: the lingering-close budget, so a TLS close is bounded like a plaintext one.
+     */
+    static final Duration CLOSE_WRITE_FALLBACK = LingeringClose.TIME;
+
+    /**
+     * Bound on each blocking write of the close path: the close_notify of {@link #close()} and
+     * {@link #closeNotifyAndDrain(ByteBuffer)}, and the alert of a rejected handshake. Always
+     * positive, so a close never blocks forever.
+     */
+    private final Duration closeWriteTimeout;
 
     /** The session of the completed handshake; {@code null} until {@link #doHandshake()} returns. */
     private volatile TlsInfo tlsInfo;
@@ -90,15 +102,20 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
     }
 
     /**
-     * @param writeTimeout bound on each blocking write of the close_notify sent by {@link #close()}
-     *                     (normally the server's {@code writeTimeout}); at the deadline the socket
-     *                     is closed without it
+     * @param writeTimeout bound on each blocking write of the close path: the close_notify sent by
+     *                     {@link #close()} and the alert of a rejected handshake (normally the
+     *                     server's {@code writeTimeout}); at the deadline the socket is closed
+     *                     without them. Unlike data writes ({@link BoundedWrites}, where {@code
+     *                     null}, zero or negative means no bound), the close is always bounded:
+     *                     {@code null}, zero or negative falls back to {@link #CLOSE_WRITE_FALLBACK}
+     *                     (2 s)
      */
-    public SslHandler(SocketChannel channel, SSLEngine engine, java.time.Duration writeTimeout) {
+    public SslHandler(SocketChannel channel, SSLEngine engine, Duration writeTimeout) {
         this.channel = channel;
         this.engine = engine;
-        this.closeWriteTimeout =
-                writeTimeout != null ? writeTimeout : io.vidocq.chappe.api.ServerConfig.DEFAULT.writeTimeout();
+        this.closeWriteTimeout = writeTimeout == null || writeTimeout.isZero() || writeTimeout.isNegative()
+                ? CLOSE_WRITE_FALLBACK
+                : writeTimeout;
 
         int packetSize = engine.getSession().getPacketBufferSize();
         int appSize = engine.getSession().getApplicationBufferSize();
@@ -113,7 +130,7 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
     // Handshake (single-threaded, before concurrent read/write)
     // -------------------------------------------------------------------------
 
-    /** Runs the TLS handshake with no time bound; see {@link #doHandshake(java.time.Duration)}. */
+    /** Runs the TLS handshake with no time bound; see {@link #doHandshake(Duration)}. */
     public void doHandshake() throws IOException {
         doHandshake(null);
     }
@@ -125,7 +142,7 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
      * this method throws {@link SocketTimeoutException} (CHAPPE-028). A handshake the engine rejects
      * still ends with its alert and the bounded lingering close (CHAPPE-027), outside this deadline.
      */
-    public void doHandshake(java.time.Duration timeout) throws IOException {
+    public void doHandshake(Duration timeout) throws IOException {
         HandshakeDeadline deadline = HandshakeDeadline.arm(timeout, channel);
         try {
             try {
@@ -180,7 +197,7 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
 
         private HandshakeDeadline(long timeoutNanos, Closeable closeable) {
             this.closeable = closeable;
-            this.timeoutMillis = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(timeoutNanos);
+            this.timeoutMillis = TimeUnit.NANOSECONDS.toMillis(timeoutNanos);
             if (closeable == null) {
                 this.state = new AtomicInteger(DISARMED);
                 this.deadlineNanos = 0;
@@ -198,9 +215,9 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
          * or a no-op one for a {@code null}, zero or negative {@code timeout}. A timeout above
          * {@link TimedReadChannel#MAX_TIMEOUT} is saturated, so the arithmetic cannot overflow.
          */
-        static HandshakeDeadline arm(java.time.Duration timeout, Closeable closeable) {
+        static HandshakeDeadline arm(Duration timeout, Closeable closeable) {
             if (timeout == null || timeout.isZero() || timeout.isNegative()) return NONE;
-            java.time.Duration bounded =
+            Duration bounded =
                     timeout.compareTo(TimedReadChannel.MAX_TIMEOUT) > 0 ? TimedReadChannel.MAX_TIMEOUT : timeout;
             var deadline = new HandshakeDeadline(bounded.toNanos(), closeable);
             deadline.watchdog.start();
@@ -244,7 +261,7 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
 
     /**
      * Best-effort: wraps and writes what the engine still has to send (the alert of a rejected
-     * handshake), each write bounded by the write timeout.
+     * handshake), each write bounded by the close write timeout (always positive).
      *
      * @return whether bytes were written and the connection is still open, so a lingering close
      *         protects them; {@code false} when there was nothing to send (for example, the
@@ -553,11 +570,11 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
      * close_notify, then half-closes the socket and drains the ciphertext the peer
      * still sends. {@link #close()} completes it.
      * <p>
-     * Each write of close_notify is bounded by {@code writeTimeout}, as response writes are: a
+     * Each write of close_notify is bounded by the close write timeout given at construction: a
      * client that keeps uploading but never reads leaves the send buffer full, and an unbounded
      * write would then hold the connection forever. At the deadline the socket is closed.
      */
-    void closeNotifyAndDrain(ByteBuffer buffer, java.time.Duration writeTimeout) {
+    void closeNotifyAndDrain(ByteBuffer buffer) {
         writeLock.lock();
         try {
             engine.closeOutbound();
@@ -565,7 +582,7 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
             engine.wrap(EMPTY, netOutBuffer);
             netOutBuffer.flip();
             while (netOutBuffer.hasRemaining()) {
-                BoundedWrites.writeWithTimeout(channel, channel, netOutBuffer, writeTimeout);
+                BoundedWrites.writeWithTimeout(channel, channel, netOutBuffer, closeWriteTimeout);
             }
         } catch (IOException _) {
             return; // the connection is gone: nothing left to drain
@@ -582,15 +599,16 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
      * {@link #CLOSE_LOCK_WAIT_MS} — typically a writer stalled in {@code channel.write} because
      * the peer stopped reading — close_notify is skipped and the socket is closed at once, which
      * wakes that writer (and any blocked reader) with an exception. Each write of close_notify
-     * itself is bounded by the write timeout given at construction: a peer that stopped reading
-     * leaves the send buffer full, and the socket is then closed without it. {@code close()}
-     * therefore never blocks behind stalled I/O.
+     * itself is bounded by the close write timeout given at construction, which is always positive
+     * (a {@code null}, zero or negative {@code writeTimeout} falls back to {@link
+     * #CLOSE_WRITE_FALLBACK}): a peer that stopped reading leaves the send buffer full, and the
+     * socket is then closed without it. {@code close()} therefore never blocks behind stalled I/O.
      */
     @Override
     public void close() throws IOException {
         boolean locked = false;
         try {
-            locked = writeLock.tryLock(CLOSE_LOCK_WAIT_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+            locked = writeLock.tryLock(CLOSE_LOCK_WAIT_MS, TimeUnit.MILLISECONDS);
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
         }

@@ -71,9 +71,20 @@ cause hypothesis, and status.
   first write (a `null` one threw an NPE in the watchdog thread and left the write unbounded). On HTTP/1.1 that cut a response
   after its first bytes (pre-existing); with this fix it would have closed whole HTTP/2
   connections. `writeWithTimeout` now treats `null`, zero and negative as no bound and writes
-  plain, on HTTP/1.1, HTTP/2 and the TLS close_notify alike, the convention `readTimeout` and the
-  TLS handshake bound already follow. Reproduction: `WriteTimeoutTest#zeroWriteTimeoutIsNoBound`
-  and `Http2WriteTimeoutTest#aZeroWriteTimeoutIsNoBound` (the body was cut after 16 to 24 KiB).
+  plain, on HTTP/1.1 and HTTP/2, the convention `readTimeout` and the TLS handshake bound already
+  follow. Reproduction: `WriteTimeoutTest#zeroWriteTimeoutIsNoBound` and
+  `Http2WriteTimeoutTest#aZeroWriteTimeoutIsNoBound` (the body was cut after 16 to 24 KiB).
+- **The TLS close stays bounded (final review I1)**: that change also made the TLS close_notify
+  (`SslHandler.close`, `closeNotifyAndDrain`) and the alert of a rejected handshake
+  (`sendPendingAlert`) unbounded under a zero or negative `writeTimeout`: a peer that stopped
+  reading, with the send buffer full, pinned the closing thread until `stop()`. The `SslHandler`
+  constructor now turns a `null`, zero or negative value into `CLOSE_WRITE_FALLBACK`, the 2 s
+  lingering budget (`LingeringClose.TIME`), and every close write uses that one field
+  (`HttpConnection` no longer passes `config.writeTimeout()` to `closeNotifyAndDrain`). A `null`
+  value used to fall back to the 30 s default instead. Reproduction:
+  `TlsCloseBoundTest#aPeerThatStopsReadingCannotPinTheClose` (zero, negative and `null`; a raw
+  32 MiB write holds the stalled socket): before, `close()` was still blocked after 5 s; after, it
+  ends at the 2 s budget.
 - **Follow-ups (OPEN)**:
   - `Http2Connection.waitForSendWindow` waits on its condition with no bound: a peer that never
     sends WINDOW_UPDATE parks the response thread forever. That is a flow-control stall, not a
