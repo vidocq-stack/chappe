@@ -211,7 +211,8 @@ public final class Http2FrameWriter {
             byte[] encodedHeaders = encoder.encode();
             try {
                 writeHeaderFrames(streamId, encodedHeaders, endStream);
-            } catch (IOException | RuntimeException e) {
+            } catch (Throwable e) {
+                // any failure once the block is encoded, an Error included
                 closeTransport(e);
                 throw e;
             }
@@ -281,7 +282,7 @@ public final class Http2FrameWriter {
     }
 
     /** Closes the transport after a failed header block write, keeping {@code failure} as the cause. */
-    private void closeTransport(Exception failure) {
+    private void closeTransport(Throwable failure) {
         try {
             closeable.close();
         } catch (IOException e) {

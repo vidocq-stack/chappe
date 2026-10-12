@@ -44,8 +44,8 @@ cause hypothesis, and status.
     the callback, under the same lock, right before encoding; it now covers the trailers too. The
     gRPC paths keep sending on a cancelled stream, as before: their deadline cancels the stream
     itself, then sends `DEADLINE_EXCEEDED` (`Http2GrpcTransportTest.deadlineExceededViaGrpcTimeout`).
-  - A write that fails once the block is encoded closes the transport: the peer's HPACK state is
-    undefined from then on. An encoding failure (an invalid field) sends nothing and leaves the
+  - A write that fails once the block is encoded (any `Throwable`, an `Error` included) closes the
+    transport: the peer's HPACK state is undefined from then on. An encoding failure (an invalid field) sends nothing and leaves the
     table untouched, as before.
   - The lock spans one header block only: no body write or flow-control wait runs under it.
   - Mutation check: encoding before taking the write lock makes the test fail again (3 runs out of

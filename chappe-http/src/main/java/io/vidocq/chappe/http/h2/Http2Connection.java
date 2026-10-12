@@ -198,9 +198,10 @@ public final class Http2Connection {
             sendGoaway(e.errorCode());
         } catch (IOException _) {
             // Lost connection
-        } catch (RuntimeException _) {
+        } catch (RuntimeException e) {
             // A defect on the frame loop must still end the connection cleanly (CHAPPE-033):
             // malformed input is turned into a protocol error before it gets here.
+            LOG.log(System.Logger.Level.WARNING, "HTTP/2 frame loop failed, closing the connection", e);
             sendGoaway(Http2ErrorCode.INTERNAL_ERROR);
         } finally {
             close();
