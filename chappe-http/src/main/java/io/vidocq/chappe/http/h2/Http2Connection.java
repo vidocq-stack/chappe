@@ -64,6 +64,22 @@ public final class Http2Connection {
     /** How many reset stream ids are remembered, so the frames the peer already sent on them are ignored. */
     private static final int REMEMBERED_RESET_STREAMS = 256;
 
+    /**
+     * The per-field allowance added to maxHeaderSize for the advertised header-list limit: RFC 9113
+     * §6.5.2 counts 32 octets of overhead per field, HTTP/1.1 counts {@code ": "} and CRLF, and the
+     * HTTP/1.1 parser accepts up to 100 fields.
+     */
+    private static final int HEADER_LIST_FIELD_ALLOWANCE = 32 * 100;
+
+    /** The floor of the encoded header block cap (HEADERS plus CONTINUATION). */
+    private static final int MIN_HEADER_BLOCK_CAP = 64 * 1024;
+
+    /** The floor of the decoded header list cap. */
+    private static final int MIN_DECODED_HEADER_LIST_CAP = 256 * 1024;
+
+    private static final StatusCode REQUEST_HEADER_FIELDS_TOO_LARGE =
+            StatusCode.of(431, "Request Header Fields Too Large");
+
     // --- Connection ---
     private final ReadableByteChannel readChannel;
     private final WritableByteChannel writeChannel;
@@ -85,8 +101,14 @@ public final class Http2Connection {
     private final HpackEncoder hpackEncoder;
 
     // --- Settings ---
-    private Http2Settings localSettings = Http2Settings.DEFAULT;
+    private final Http2Settings localSettings;
     private Http2Settings remoteSettings = Http2Settings.DEFAULT;
+
+    // Header-list limits (CHAPPE-032). The advertised SETTINGS_MAX_HEADER_LIST_SIZE is the soft
+    // limit: a list past it gets 431 on its stream. Past the hard caps the peer is abusive and the
+    // connection ends with GOAWAY(ENHANCE_YOUR_CALM): the encoded block (a CONTINUATION flood,
+    // CHAPPE-024) and the decoded list (an HPACK amplification).
+    private final int headerBlockCap;
 
     // --- Streams ---
     private final ConcurrentHashMap<Integer, Http2Stream> streams = new ConcurrentHashMap<>();
@@ -149,7 +171,13 @@ public final class Http2Connection {
                 Http2FrameWriter.DEFAULT_MAX_FRAME_SIZE,
                 config.writeTimeout(),
                 writeChannel);
-        this.hpackDecoder = new HpackDecoder(localSettings.headerTableSize(), localSettings.maxHeaderListSize());
+        int headerListLimit = headerListLimit(config.maxHeaderSize());
+        this.localSettings = Http2Settings.serverDefaults(headerListLimit);
+        this.headerBlockCap = Math.max(saturatedTimes(headerListLimit, 4), MIN_HEADER_BLOCK_CAP);
+        this.hpackDecoder = new HpackDecoder(
+                localSettings.headerTableSize(),
+                headerListLimit,
+                Math.max(saturatedTimes(headerListLimit, 8), MIN_DECODED_HEADER_LIST_CAP));
         this.hpackEncoder = new HpackEncoder();
     }
 
@@ -338,27 +366,39 @@ public final class Http2Connection {
         var discarded = new Http2Stream(streamId, 0, 0);
         discarded.beginHeaders(frame.headerBlock(), frame.endStream());
         if (frame.endHeaders()) {
-            hpackDecoder.decode(discarded.completeHeaderBlock(), (name, value) -> {});
+            decodeUnserved(discarded);
         } else {
             awaitContinuation(discarded);
         }
     }
 
     /**
-     * Refuses a header block (HEADERS plus CONTINUATION) that would grow past the
-     * SETTINGS_MAX_HEADER_LIST_SIZE this endpoint advertises, before a byte of {@code fragment} is
+     * The advertised SETTINGS_MAX_HEADER_LIST_SIZE: {@code maxHeaderSize + 32 * 100}, saturated, so a
+     * header section HTTP/1.1 accepts fits once measured as RFC 9113 §6.5.2 does (CHAPPE-032).
+     */
+    private static int headerListLimit(int maxHeaderSize) {
+        long limit = (long) Math.max(maxHeaderSize, 0) + HEADER_LIST_FIELD_ALLOWANCE;
+        return (int) Math.min(limit, Integer.MAX_VALUE);
+    }
+
+    private static int saturatedTimes(int value, int factor) {
+        return (int) Math.min((long) value * factor, Integer.MAX_VALUE);
+    }
+
+    /**
+     * Refuses a header block (HEADERS plus CONTINUATION) that would grow past the encoded cap, max(4
+     * x the advertised SETTINGS_MAX_HEADER_LIST_SIZE, 64 KiB), before a byte of {@code fragment} is
      * buffered, so a CONTINUATION flood never grows the heap past it (the CVE-2024-27316 class,
      * CHAPPE-024). The block cannot be decoded piecemeal, and RFC 9113 §10.5.1 requires it be
      * processed unless the connection is closed: the connection is closed, with ENHANCE_YOUR_CALM
-     * (§10.5, the code the HPACK decoder already uses for a decoded list past that size). An encoded
-     * block is not larger than the list it decodes to, unless Huffman coding is chosen where it
-     * lengthens a string, which no encoder does.
+     * (§10.5, the code the HPACK decoder uses for a decoded list past its hard cap). A block between
+     * the advertised limit and this cap is decoded, and its stream gets 431 (CHAPPE-032).
      */
     private void boundHeaderBlock(int accumulated, int fragment) throws Http2ConnectionException {
-        int limit = localSettings.maxHeaderListSize();
+        int limit = headerBlockCap;
         if (fragment > limit - accumulated) {
             throw new Http2ConnectionException(
-                    Http2ErrorCode.ENHANCE_YOUR_CALM, "Header block exceeds max header list size " + limit);
+                    Http2ErrorCode.ENHANCE_YOUR_CALM, "Header block exceeds the cap of " + limit + " bytes");
         }
     }
 
@@ -383,24 +423,39 @@ public final class Http2Connection {
             // Not served: refused or reset before its block began, or reset while it was arriving
             // (an early response ending the stream between a trailer HEADERS and its CONTINUATION).
             // Decoded all the same, for the HPACK context (§5.1, §4.3).
-            hpackDecoder.decode(stream.completeHeaderBlock(), (name, value) -> {});
+            decodeUnserved(stream);
         }
     }
 
-    private void completeHeaders(Http2Stream stream) throws Http2ConnectionException {
+    /**
+     * Decodes and drops the header block of a stream that is not served, for the HPACK context. Only
+     * the hard cap applies: whether the list is past the advertised limit does not matter, since
+     * nothing answers the stream (no 431).
+     */
+    private void decodeUnserved(Http2Stream stream) throws Http2ConnectionException {
+        hpackDecoder.decode(stream.completeHeaderBlock(), (name, value) -> {}); // past the soft limit: ignored
+    }
+
+    private void completeHeaders(Http2Stream stream) throws IOException {
         ByteBuffer headerBlock = stream.completeHeaderBlock();
 
         if (stream.inTrailers()) {
             // Trailers: decode into a separate Headers.Builder and attach to request.
             // RFC 9113 §8.1: no pseudo-header allowed in trailers.
             var trailersBuilder = Headers.builder();
-            hpackDecoder.decode(headerBlock, (name, value) -> {
+            boolean withinLimit = hpackDecoder.decode(headerBlock, (name, value) -> {
                 if (!name.isEmpty() && name.charAt(0) == ':') {
                     throw new Http2ConnectionException(
                             Http2ErrorCode.PROTOCOL_ERROR, "Pseudo-header '" + name + "' not allowed in trailers");
                 }
                 trailersBuilder.add(name, value);
             });
+            if (!withinLimit) {
+                // Trailers past the advertised limit: the response may already be under way, so no
+                // 431; a stream error, and the connection lives on (CHAPPE-032).
+                resetStream(stream, Http2ErrorCode.ENHANCE_YOUR_CALM);
+                return;
+            }
             stream.request().setTrailers(trailersBuilder.build());
             // Trailers always carry END_STREAM.
             stream.signalEndStream();
@@ -410,10 +465,11 @@ public final class Http2Connection {
 
         // Initial HEADERS: decode directly into request.
         var req = stream.request();
-        hpackDecoder.decode(headerBlock, req::addHeader);
+        boolean withinLimit = hpackDecoder.decode(headerBlock, req::addHeader);
 
-        // Extract pseudo-headers
-        extractPseudoHeaders(req);
+        // Past the advertised limit the request holds only part of the list, maybe without its
+        // pseudo-headers: never validated, never handed to the handler (CHAPPE-032).
+        if (withinLimit) extractPseudoHeaders(req);
 
         // Half-close remote if END_STREAM was set on HEADERS
         boolean hasBody = !stream.headersEndStream();
@@ -425,7 +481,8 @@ public final class Http2Connection {
         // HEADERS frame: by the time the thread runs, a DATA frame carrying END_STREAM may already
         // have half-closed the stream, and its body must not be lost (CHAPPE-016).
         int streamId = stream.streamId();
-        Thread.ofVirtual().name("chappe-h2-stream-" + streamId).start(() -> dispatchStream(stream, hasBody));
+        Runnable task = withinLimit ? () -> dispatchStream(stream, hasBody) : () -> rejectHeaderList(stream, hasBody);
+        Thread.ofVirtual().name("chappe-h2-stream-" + streamId).start(task);
     }
 
     private void handleData(Http2Frame.DataFrame frame) throws IOException {
@@ -734,11 +791,39 @@ public final class Http2Connection {
             // would wait forever for an END_STREAM that never comes (RFC 9113 §5.4.2).
             resetAbortedStream(stream);
         } finally {
-            if (completed && hasBody) stopUnreadRequestBody(stream);
-            stream.close();
-            streams.remove(stream.streamId());
+            finishStream(stream, hasBody, completed);
             if (handled != null) releaseBody(handled);
         }
+    }
+
+    /**
+     * Answers 431 to a request whose header list is past the advertised
+     * SETTINGS_MAX_HEADER_LIST_SIZE, without calling the handler; the body, if any, is never read
+     * (CHAPPE-032). The other streams of the connection are untouched.
+     */
+    private void rejectHeaderList(Http2Stream stream, boolean hasBody) {
+        boolean completed = false;
+        try {
+            // Claims the response as a dispatch does: the body cap then resets a body still growing
+            // (CHAPPE-025). The 431 wins over a 413 for a body already past maxRequestSize.
+            stream.startResponse();
+            sendResponse(stream, Response.of(REQUEST_HEADER_FIELDS_TOO_LARGE));
+            completed = true;
+        } catch (IOException | RuntimeException _) {
+            resetAbortedStream(stream);
+        } finally {
+            finishStream(stream, hasBody, completed);
+        }
+    }
+
+    /**
+     * Ends a stream once its response is out: a request body still arriving is stopped with
+     * RST_STREAM(NO_ERROR) (CHAPPE-023), then the stream is closed and dropped.
+     */
+    private void finishStream(Http2Stream stream, boolean hasBody, boolean completed) {
+        if (completed && hasBody) stopUnreadRequestBody(stream);
+        stream.close();
+        streams.remove(stream.streamId());
     }
 
     /** Whether every header is a token name with a field value of one-byte chars (CHAPPE-008). */

@@ -230,6 +230,13 @@ final class H2TestConnection implements AutoCloseable {
         return block.toByteArray();
     }
 
+    /** A literal field without indexing and a new name (RFC 7541 §6.2.2): the dynamic table is untouched. */
+    static byte[] literalWithoutIndexing(String name, String value) {
+        var block = new ByteArrayOutputStream();
+        literal(block, 0x00, name, value);
+        return block.toByteArray();
+    }
+
     /** An indexed field (RFC 7541 §6.1); 62 is the newest dynamic table entry. */
     static byte[] indexed(int index) {
         return new byte[] {(byte) (0x80 | index)};
@@ -247,10 +254,21 @@ final class H2TestConnection implements AutoCloseable {
         rawString(out, value);
     }
 
+    /** A string literal without Huffman coding, its length an HPACK integer with a 7-bit prefix (RFC 7541 §5.1, §5.2). */
     private static void rawString(ByteArrayOutputStream out, String s) {
         byte[] bytes = s.getBytes(StandardCharsets.ISO_8859_1);
-        if (bytes.length >= 127) throw new IllegalArgumentException("too long for this encoder: " + s);
-        out.write(bytes.length);
+        int length = bytes.length;
+        if (length < 127) {
+            out.write(length);
+        } else {
+            out.write(127);
+            length -= 127;
+            while (length >= 128) {
+                out.write((length & 0x7F) | 0x80);
+                length >>>= 7;
+            }
+            out.write(length);
+        }
         out.write(bytes, 0, bytes.length);
     }
 

@@ -42,6 +42,20 @@ public record Http2Settings(
 
     public static final Http2Settings DEFAULT = new Http2Settings(4096, false, 100, 65535, 16384, 8192);
 
+    /**
+     * The settings a server advertises: {@link #DEFAULT}, with {@code maxHeaderListSize} as its
+     * SETTINGS_MAX_HEADER_LIST_SIZE.
+     */
+    public static Http2Settings serverDefaults(int maxHeaderListSize) {
+        return new Http2Settings(
+                DEFAULT.headerTableSize,
+                DEFAULT.enablePush,
+                DEFAULT.maxConcurrentStreams,
+                DEFAULT.initialWindowSize,
+                DEFAULT.maxFrameSize,
+                maxHeaderListSize);
+    }
+
     /** Parses a SETTINGS payload and returns the updated settings. */
     public Http2Settings applyFrom(ByteBuffer payload, int length) {
         int htSize = headerTableSize;

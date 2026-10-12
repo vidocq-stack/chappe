@@ -70,7 +70,15 @@ import javax.net.ssl.SSLContext;
  *     HTTP/2. A call routed to a gRPC handler, or to a gRPC-Web handler in binary mode, is not
  *     capped: nothing bounds its total, and each message is bounded only when the handler reads it,
  *     by the receive message size of the gRPC layer. A gRPC-Web call in text mode is capped
- * @param maxHeaderSize maximum header size in bytes (default: 8 KiB)
+ * @param maxHeaderSize maximum header size in bytes (default: 8 KiB). On HTTP/1.1, the raw bytes of
+ *     the request header section; past it, {@code 431}. On HTTP/2, it sets the advertised
+ *     {@code SETTINGS_MAX_HEADER_LIST_SIZE} to {@code maxHeaderSize + 32 * 100} (11,392 by default),
+ *     measured as RFC 9113 §6.5.2 does. A header list past it is still decoded, so the HPACK
+ *     context stays intact, and its stream alone gets {@code 431}; trailers past it reset their
+ *     stream. The hard caps end the connection with {@code GOAWAY(ENHANCE_YOUR_CALM)}: a header
+ *     block of more than {@code max(4 * limit, 64 KiB)} encoded bytes, or a list of more than
+ *     {@code max(8 * limit, 256 KiB)} decoded bytes. The HTTP/2 setting is advisory: compliant
+ *     clients do not send a larger list.
  * @param maxDrainSize most bytes of a request body the handler left unread that the server reads
  *     and discards to keep an HTTP/1.1 connection (default: 1 MiB), counted in wire bytes: a
  *     chunked body counts its framing and trailers too. Past it the connection is closed instead,

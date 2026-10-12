@@ -5,6 +5,47 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-032 — an HTTP/2 header list past 8,192 bytes ended the whole connection
+
+- **Date**: 2026-10-12
+- **Status**: FIXED (commit `fix(http): answer 431 per stream for an oversized HTTP/2 header list
+  (CHAPPE-032)`, branch `pr/ybl/chappe-h2-header-list`)
+- **Module**: `chappe-http` (`h2/Http2Connection`, `h2/Http2Settings`, `h2/HpackDecoder`)
+- **Symptom**: chappe advertised a fixed `SETTINGS_MAX_HEADER_LIST_SIZE` of 8,192 bytes, whatever
+  `maxHeaderSize`: raising `maxHeaderSize` did not help HTTP/2, and a header section HTTP/1.1
+  accepted could fail over HTTP/2. A list past 8,192 bytes, or a block of more than 8,192 encoded
+  bytes, ended the connection with `GOAWAY(ENHANCE_YOUR_CALM)`, cutting every other stream on it,
+  where HTTP/1.1 answers `431` on the request alone.
+- **Minimal reproduction**: `chappe-tests/.../Http2HeaderBlockLimitTest`
+  (`aHeaderListOverTheLimitGets431OnItsStreamOnly`: a 12 KiB header got GOAWAY instead of `431`;
+  `theAdvertisedLimitDerivesFromMaxHeaderSize`: the SETTINGS carried 8,192;
+  `aRaisedMaxHeaderSizeLetsALargeHeaderListThrough`: a 20 KiB header with `maxHeaderSize(32768)` got
+  GOAWAY).
+- **Cause**: `Http2Connection` built its settings and its HPACK decoder from `Http2Settings.DEFAULT`
+  and never read `config.maxHeaderSize()`. One limit served both purposes: the polite limit the
+  server advertises and the abuse cap of CHAPPE-024. `HpackDecoder` threw at that limit in the middle
+  of the block, so the dynamic table could not stay in sync for a stream that went on.
+- **Fix**: three limits, computed once per connection with saturating arithmetic.
+  - **S**, the advertised `SETTINGS_MAX_HEADER_LIST_SIZE` = `maxHeaderSize + 32 * 100` (11,392 by
+    default): room for the 32-octet per-field overhead of RFC 9113 §6.5.2 on the 100 fields the
+    HTTP/1.1 parser accepts. A list past S is still decoded whole, so the HPACK context stays in
+    sync (RFC 7541 §2.3.2); the request never reaches the handler, and its stream gets `431 Request
+    Header Fields Too Large`, then `RST_STREAM(NO_ERROR)` if its body has not ended, as an early
+    response does (CHAPPE-023). Trailers past S get `RST_STREAM(ENHANCE_YOUR_CALM)`, since the
+    response may be under way. A stream that is not served (refused or reset) is decoded under the
+    hard cap only and never gets a `431`.
+  - **H_enc**, the encoded block cap = `max(4 * S, 64 KiB)` (65,536 by default): a HEADERS block
+    plus its CONTINUATION frames past it ends the connection with `GOAWAY(ENHANCE_YOUR_CALM)` before
+    the fragment is buffered (the CHAPPE-024 flood defence; the heap per connection stays bounded by
+    it).
+  - **H_dec**, the decoded list cap = `max(8 * S, 256 KiB)` (262,144 by default): a list past it (an
+    HPACK amplification: a one-byte reference can stand for a 4 KiB dynamic table entry) ends the
+    connection with `GOAWAY(ENHANCE_YOUR_CALM)`.
+- **Note**: `SETTINGS_MAX_HEADER_LIST_SIZE` is advisory (RFC 9113 §6.5.2): compliant clients do
+  not send a larger list, so the `431` serves the clients that ignore the setting.
+
+---
+
 ## CHAPPE-031 — a very large or negative idleTimeout killed the accept loop
 
 - **Date**: 2026-10-12
@@ -320,13 +361,11 @@ cause hypothesis, and status.
     peer that stopped reading its socket could block any HTTP/2 write indefinitely, and with it the
     stream WINDOW_UPDATE a body read sends: a request body read could block behind it, beyond
     `readTimeout`. Each flush is now bounded by `writeTimeout`.
-  - (b) The HTTP/2 header-list limit is a fixed 8,192 bytes (`Http2Settings.DEFAULT`), not derived
-    from `ServerConfig.maxHeaderSize`, so raising `maxHeaderSize` does not help HTTP/2, and a header
-    section that fits HTTP/1.1 can fail over HTTP/2. Past it, the connection ends with
-    `GOAWAY(ENHANCE_YOUR_CALM)`, which cuts every other stream, where HTTP/1.1 answers `431` on the
-    request. Fix: derive `SETTINGS_MAX_HEADER_LIST_SIZE` from `maxHeaderSize` (with room for the
-    32-byte per-field overhead), and between it and a hard accumulation cap, decode with a discarding
-    sink and answer `431` on the stream.
+  - (b) (FIXED in CHAPPE-032) The HTTP/2 header-list limit was a fixed 8,192 bytes
+    (`Http2Settings.DEFAULT`), not derived from `ServerConfig.maxHeaderSize`, and past it the
+    connection ended with `GOAWAY(ENHANCE_YOUR_CALM)`, which cut every other stream. The limit is now
+    derived from `maxHeaderSize`, a list past it gets `431` on its stream, and only the hard caps end
+    the connection.
   - (c) Once a stream id has been evicted from the ring of the last 256 reset or refused ids
     (`ResetStreams`, CHAPPE-023), each DATA frame the client still sends on it is answered with its
     own `RST_STREAM(STREAM_CLOSED)`: one frame out for each frame in. The client pays for it in
