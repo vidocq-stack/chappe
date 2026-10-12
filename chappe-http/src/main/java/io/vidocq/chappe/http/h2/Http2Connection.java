@@ -458,7 +458,9 @@ public final class Http2Connection {
             });
             if (!withinLimit) {
                 // Trailers past the advertised limit: the response may already be under way, so no
-                // 431; a stream error, and the connection lives on (CHAPPE-032).
+                // 431; a stream error, and the connection lives on (CHAPPE-032). Fields past the
+                // limit never reach the sink, so a pseudo-header among them goes undetected: the
+                // stream is reset all the same, only with ENHANCE_YOUR_CALM, not PROTOCOL_ERROR.
                 resetStream(stream, Http2ErrorCode.ENHANCE_YOUR_CALM);
                 return;
             }

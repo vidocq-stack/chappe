@@ -76,8 +76,9 @@ import javax.net.ssl.SSLContext;
  *     measured as RFC 9113 §6.5.2 does. A header list past it is still decoded, so the HPACK
  *     context stays intact, and its stream alone gets {@code 431}; trailers past it reset their
  *     stream. The hard caps end the connection with {@code GOAWAY(ENHANCE_YOUR_CALM)}: a header
- *     block of more than {@code max(4 * limit, 64 KiB)} encoded bytes, or a list of more than
- *     {@code max(8 * limit, 256 KiB)} decoded bytes. The HTTP/2 setting is advisory: compliant
+ *     block of more than {@code max(4 * S, 64 KiB)} encoded bytes, or a list of more than
+ *     {@code max(8 * S, 256 KiB)} decoded bytes, where S is the advertised
+ *     {@code SETTINGS_MAX_HEADER_LIST_SIZE} above. The HTTP/2 setting is advisory: compliant
  *     clients do not send a larger list.
  * @param maxDrainSize most bytes of a request body the handler left unread that the server reads
  *     and discards to keep an HTTP/1.1 connection (default: 1 MiB), counted in wire bytes: a
