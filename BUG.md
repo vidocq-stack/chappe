@@ -5,6 +5,52 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-034 — concurrent HTTP/2 responses could reach the wire out of HPACK order
+
+- **Date**: 2026-10-12
+- **Status**: FIXED (commit `fix(http): encode and write each HTTP/2 header block atomically
+  (CHAPPE-034)`, branch `pr/ybl/chappe-h2-header-list`)
+- **Module**: `chappe-http` (`h2/Http2FrameWriter`, `h2/Http2Connection`, `grpc/GrpcCallImpl`,
+  `grpc/GrpcWebCallImpl`)
+- **Symptom**: when several streams of one connection answered at the same time, the client
+  decoded a response with another stream's header values, values under the wrong name, missing
+  fields, or failed with an invalid HPACK index (`COMPRESSION_ERROR`). From then on the
+  connection's HPACK context stayed broken. The response headers, the trailers and the gRPC /
+  gRPC-Web headers and trailers were all affected.
+- **Minimal reproduction**: `chappe-tests/.../Http2ConcurrentHeaderEncodingTest`
+  (`concurrentResponsesDecodeInTheOrderTheyWereEncoded`): 64 streams per round, 30 rounds, on one
+  h2c connection; every handler waits on a latch so all 64 answer at once, with an `x-echo` value
+  that repeats across rounds, an `x-nonce` new in each round, and for one stream in three a
+  trailer. The client decodes every block in order with chappe's own `HpackDecoder`. Before the
+  fix it failed in round 0 on 5 runs out of 5 (wrong `x-echo`, missing `x-nonce`, or
+  `Invalid HPACK index: 122`).
+- **Cause**: `HpackEncoder` inserts into its dynamic table as it encodes (literals with
+  incremental indexing), so the peer must decode the blocks in the order they were encoded
+  (RFC 7541 §2.2). `Http2Connection.sendResponse` and the gRPC calls encoded a block with
+  `hpackEncoder().encode(...)` and wrote it with a separate `frameWriter.writeHeaders(...)`. The
+  encoder's lock and the writer's lock were taken one after the other, never together: stream A
+  encodes, stream B encodes, B takes the write lock first, and the peer applies B's insertions
+  before A's.
+- **Fix**:
+  - `Http2FrameWriter.writeHeaderBlock(streamId, encoder, endStream)` runs the encoding callback
+    and writes HEADERS and its CONTINUATION frames under the write lock, in one step. The
+    pre-encoded `writeHeaders(byte[])` is removed, so no block can be written apart from its
+    encoding.
+  - `sendResponse` goes through it for its headers and trailers. `GrpcCallImpl` (initial headers,
+    trailers-only response, trailers) and `GrpcWebCallImpl` use the new
+    `Http2Connection.writeResponseHeaders` and `writeTrailers`, which do the same. The public
+    `hpackEncoder()` accessor is removed.
+  - In `sendResponse`, the RFC 9113 §5.4.2 check (no block for a stream the peer reset) runs inside
+    the callback, under the same lock, right before encoding; it now covers the trailers too. The
+    gRPC paths keep sending on a cancelled stream, as before: their deadline cancels the stream
+    itself, then sends `DEADLINE_EXCEEDED` (`Http2GrpcTransportTest.deadlineExceededViaGrpcTimeout`).
+  - A write that fails once the block is encoded closes the transport: the peer's HPACK state is
+    undefined from then on. An encoding failure (an invalid field) sends nothing and leaves the
+    table untouched, as before.
+  - The lock spans one header block only: no body write or flow-control wait runs under it.
+  - Mutation check: encoding before taking the write lock makes the test fail again (3 runs out of
+    3).
+
 ## CHAPPE-033 — the HPACK decoder followed the peer's table size and trusted declared lengths
 
 - **Date**: 2026-10-12
@@ -71,10 +117,9 @@ cause hypothesis, and status.
     of type `COMPRESSION_ERROR` (RFC 9113 §4.3), so the connection ends with a `GOAWAY`.
   - As a safety net, a `RuntimeException` that reaches `Http2Connection.run()` now ends the
     connection with `GOAWAY(INTERNAL_ERROR)`.
-- **Not covered**: the encoder's output order. Each response encodes its block, then writes it,
-  outside one shared lock, so two concurrent responses can reach the wire in the opposite order
-  from their encoding, and the peer's table then diverges from ours. Suspected from reading the
-  code, not reproduced: it needs its own entry once a repro exists.
+- **Not covered**: the encoder's output order. The lock added here guards the encoder's table
+  only; a block encoded under it could still be written after a block encoded later. That race
+  is now reproduced and fixed as CHAPPE-034.
 
 ---
 

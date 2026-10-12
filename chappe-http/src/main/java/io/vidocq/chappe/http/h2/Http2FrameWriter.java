@@ -173,34 +173,48 @@ public final class Http2FrameWriter {
         }
     }
 
-    public void writeHeaders(int streamId, byte[] encodedHeaders, boolean endStream) throws IOException {
+    /**
+     * Produces an HPACK header block. Called by {@link #writeHeaderBlock} under the write lock.
+     */
+    @FunctionalInterface
+    public interface HeaderBlockEncoder {
+
+        /**
+         * Encodes the block, updating the encoder's dynamic table.
+         *
+         * @return the encoded block
+         * @throws IOException to send nothing, before the dynamic table is touched (for instance for a
+         *     stream the peer reset)
+         */
+        byte[] encode() throws IOException;
+    }
+
+    /**
+     * Encodes a header block and writes it as one HEADERS frame and as many CONTINUATION frames as
+     * {@code maxFrameSize} needs, both under the write lock (CHAPPE-034). The HPACK encoder inserts
+     * into its dynamic table as it encodes, so the blocks must reach the wire in the order they were
+     * encoded: encoding outside the lock let two streams write their blocks in the opposite order,
+     * and the peer's table then no longer matched the encoder's (RFC 7541 §2.2). Nothing else is
+     * written between the frames of the block (RFC 9113 §6.10).
+     * <p>
+     * A failure of {@code encoder} sends nothing. A write that fails once the block is encoded closes
+     * the transport: the peer's HPACK context is then undefined, so the connection cannot go on.
+     *
+     * @param streamId the stream the block belongs to
+     * @param encoder encodes the block; it runs under the write lock and must not block on I/O
+     * @param endStream whether the HEADERS frame carries END_STREAM
+     * @throws IOException if {@code encoder} fails, or the write fails (the transport is then closed)
+     */
+    public void writeHeaderBlock(int streamId, HeaderBlockEncoder encoder, boolean endStream) throws IOException {
         writeLock.lock();
         try {
-            int totalLen = encodedHeaders.length;
-            int offset = 0;
-
-            while (offset < totalLen || totalLen == 0) {
-                int chunkLen = Math.min(maxFrameSize, totalLen - offset);
-                boolean isFirst = (offset == 0);
-                boolean isLast = (offset + chunkLen >= totalLen);
-
-                if (isFirst) {
-                    int flags = 0;
-                    if (isLast) flags |= Http2Frame.FLAG_END_HEADERS;
-                    if (endStream) flags |= Http2Frame.FLAG_END_STREAM;
-                    writeFrameHeader(chunkLen, Http2Frame.TYPE_HEADERS, flags, streamId);
-                } else {
-                    int flags = isLast ? Http2Frame.FLAG_END_HEADERS : 0;
-                    writeFrameHeader(chunkLen, Http2Frame.TYPE_CONTINUATION, flags, streamId);
-                }
-
-                writeBytes(encodedHeaders, offset, chunkLen);
-                offset += chunkLen;
-
-                if (totalLen == 0) break;
+            byte[] encodedHeaders = encoder.encode();
+            try {
+                writeHeaderFrames(streamId, encodedHeaders, endStream);
+            } catch (IOException | RuntimeException e) {
+                closeTransport(e);
+                throw e;
             }
-
-            flush();
         } finally {
             writeLock.unlock();
         }
@@ -236,6 +250,44 @@ public final class Http2FrameWriter {
     // -------------------------------------------------------------------------
     // Internal helpers
     // -------------------------------------------------------------------------
+
+    /** Writes an encoded block as HEADERS and CONTINUATION frames, then flushes. Called under the lock. */
+    private void writeHeaderFrames(int streamId, byte[] encodedHeaders, boolean endStream) throws IOException {
+        int totalLen = encodedHeaders.length;
+        int offset = 0;
+
+        while (offset < totalLen || totalLen == 0) {
+            int chunkLen = Math.min(maxFrameSize, totalLen - offset);
+            boolean isFirst = (offset == 0);
+            boolean isLast = (offset + chunkLen >= totalLen);
+
+            if (isFirst) {
+                int flags = 0;
+                if (isLast) flags |= Http2Frame.FLAG_END_HEADERS;
+                if (endStream) flags |= Http2Frame.FLAG_END_STREAM;
+                writeFrameHeader(chunkLen, Http2Frame.TYPE_HEADERS, flags, streamId);
+            } else {
+                int flags = isLast ? Http2Frame.FLAG_END_HEADERS : 0;
+                writeFrameHeader(chunkLen, Http2Frame.TYPE_CONTINUATION, flags, streamId);
+            }
+
+            writeBytes(encodedHeaders, offset, chunkLen);
+            offset += chunkLen;
+
+            if (totalLen == 0) break;
+        }
+
+        flush();
+    }
+
+    /** Closes the transport after a failed header block write, keeping {@code failure} as the cause. */
+    private void closeTransport(Exception failure) {
+        try {
+            closeable.close();
+        } catch (IOException e) {
+            failure.addSuppressed(e);
+        }
+    }
 
     private void writeFrameHeader(int payloadLen, int type, int flags, int streamId) throws IOException {
         ensureCapacity(FRAME_HEADER_SIZE);

@@ -148,16 +148,14 @@ public final class GrpcCallImpl implements GrpcCall {
                 for (var entry : responseHeadersBuilder.build()) {
                     combined.add(entry.name(), entry.value());
                 }
-                byte[] encoded = connection.hpackEncoder().encode(200, combined.build());
-                connection.frameWriter().writeHeaders(stream.streamId(), encoded, true);
+                connection.writeResponseHeaders(stream, 200, combined.build(), true);
                 initialHeadersSent = true;
                 stream.halfCloseLocal();
                 return;
             }
 
             // Streaming finished: emit separate trailer HEADERS with END_STREAM=1.
-            byte[] encodedTrailers = connection.hpackEncoder().encodeTrailers(responseTrailersBuilder.build());
-            connection.frameWriter().writeHeaders(stream.streamId(), encodedTrailers, true);
+            connection.writeTrailers(stream, responseTrailersBuilder.build());
             stream.halfCloseLocal();
         }
     }
@@ -233,8 +231,7 @@ public final class GrpcCallImpl implements GrpcCall {
         for (var entry : responseHeadersBuilder.build()) {
             builder.add(entry.name(), entry.value());
         }
-        byte[] encoded = connection.hpackEncoder().encode(200, builder.build());
-        connection.frameWriter().writeHeaders(stream.streamId(), encoded, false);
+        connection.writeResponseHeaders(stream, 200, builder.build(), false);
         initialHeadersSent = true;
     }
 

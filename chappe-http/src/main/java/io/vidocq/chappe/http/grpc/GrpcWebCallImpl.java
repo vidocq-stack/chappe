@@ -251,8 +251,7 @@ public final class GrpcWebCallImpl implements GrpcCall {
         for (var entry : responseHeadersBuilder.build()) {
             builder.add(entry.name(), entry.value());
         }
-        byte[] encoded = connection.hpackEncoder().encode(200, builder.build());
-        connection.frameWriter().writeHeaders(stream.streamId(), encoded, false);
+        connection.writeResponseHeaders(stream, 200, builder.build(), false);
         initialHeadersSent = true;
     }
 

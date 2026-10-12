@@ -901,18 +901,12 @@ public final class Http2Connection {
 
         // A reset (RST_STREAM) or the end of the connection releases the body while it is sent.
         if (body != null) stream.attachResponseBody(body);
-        if (stream.isCancelled()) {
-            // RFC 9113 §5.4.2: no frame for a stream the peer reset. Checked before HPACK encoding,
-            // which would otherwise update the dynamic table for a header block never sent.
-            throw new IOException("stream " + streamId + " reset before its response");
-        }
-
-        // Encode response headers via HPACK
-        byte[] encodedHeaders = hpackEncoder.encode(response.status().code(), response.headers());
+        int status = response.status().code();
+        Headers headers = response.headers();
 
         if (hasBody) {
             // HEADERS (without END_STREAM, body follows)
-            frameWriter.writeHeaders(streamId, encodedHeaders, false);
+            sendHeaderBlock(stream, () -> hpackEncoder.encode(status, headers), false);
 
             try (InputStream is = body.asInputStream()) {
                 byte[] buf = new byte[DATA_CHUNK_SIZE];
@@ -948,9 +942,8 @@ public final class Http2Connection {
             boolean hasTrailers = trailers != null && !trailers.isEmpty();
 
             if (hasTrailers) {
-                byte[] encodedTrailers = hpackEncoder.encodeTrailers(trailers);
                 // RFC 9113 §8.1: trailer HEADERS frame with END_STREAM=1
-                frameWriter.writeHeaders(streamId, encodedTrailers, true);
+                sendHeaderBlock(stream, () -> hpackEncoder.encodeTrailers(trailers), true);
             } else {
                 // Final empty DATA frame with END_STREAM
                 frameWriter.writeData(streamId, new byte[0], 0, 0, true);
@@ -964,13 +957,12 @@ public final class Http2Connection {
 
             if (hasTrailers) {
                 // Initial HEADERS without END_STREAM, then trailer HEADERS with END_STREAM
-                frameWriter.writeHeaders(streamId, encodedHeaders, false);
-                byte[] encodedTrailers = hpackEncoder.encodeTrailers(trailers);
-                frameWriter.writeHeaders(streamId, encodedTrailers, true);
+                sendHeaderBlock(stream, () -> hpackEncoder.encode(status, headers), false);
+                sendHeaderBlock(stream, () -> hpackEncoder.encodeTrailers(trailers), true);
                 stream.halfCloseLocal();
             } else {
                 // Usual case: a single HEADERS with END_STREAM
-                frameWriter.writeHeaders(streamId, encodedHeaders, true);
+                sendHeaderBlock(stream, () -> hpackEncoder.encode(status, headers), true);
             }
         }
     }
@@ -984,9 +976,49 @@ public final class Http2Connection {
         return frameWriter;
     }
 
-    /** Shared HPACK encoder — direct access for built-in transports. */
-    public HpackEncoder hpackEncoder() {
-        return hpackEncoder;
+    /**
+     * Encodes and writes the response header block of {@code stream} in one step under the frame
+     * writer's lock, so blocks reach the wire in the order the HPACK encoder produced them
+     * (CHAPPE-034). Used by the gRPC transports, which send their headers whether or not the stream
+     * was cancelled (a gRPC deadline cancels it, then sends {@code DEADLINE_EXCEEDED}).
+     *
+     * @throws IOException if the write failed (the connection is then closed)
+     * @throws IllegalArgumentException if a field cannot be encoded; nothing is then sent
+     */
+    public void writeResponseHeaders(Http2Stream stream, int status, Headers headers, boolean endStream)
+            throws IOException {
+        frameWriter.writeHeaderBlock(stream.streamId(), () -> hpackEncoder.encode(status, headers), endStream);
+    }
+
+    /**
+     * Encodes and writes the trailer block of {@code stream}, with END_STREAM, as
+     * {@link #writeResponseHeaders} does for the response header block (CHAPPE-034).
+     *
+     * @throws IOException if the write failed (the connection is then closed)
+     */
+    public void writeTrailers(Http2Stream stream, Headers trailers) throws IOException {
+        frameWriter.writeHeaderBlock(stream.streamId(), () -> hpackEncoder.encodeTrailers(trailers), true);
+    }
+
+    /**
+     * Encodes and writes a header block of a response {@code sendResponse} sends, as
+     * {@link #writeResponseHeaders} does, unless the stream was reset: no frame for a stream the
+     * peer reset (RFC 9113 §5.4.2). The check runs under the write lock, right before the encoding,
+     * which would otherwise update the dynamic table for a block never sent.
+     *
+     * @throws IOException if the stream was reset, or the write failed (the connection is then closed)
+     */
+    private void sendHeaderBlock(Http2Stream stream, Http2FrameWriter.HeaderBlockEncoder encoder, boolean endStream)
+            throws IOException {
+        frameWriter.writeHeaderBlock(
+                stream.streamId(),
+                () -> {
+                    if (stream.isCancelled()) {
+                        throw new IOException("stream " + stream.streamId() + " reset before its header block");
+                    }
+                    return encoder.encode();
+                },
+                endStream);
     }
 
     /**
