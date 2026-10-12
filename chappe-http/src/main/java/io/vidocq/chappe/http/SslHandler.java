@@ -21,6 +21,7 @@ package io.vidocq.chappe.http;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.net.SocketTimeoutException;
 import java.nio.ByteBuffer;
 import java.nio.channels.ClosedChannelException;
 import java.nio.channels.ReadableByteChannel;
@@ -30,6 +31,8 @@ import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.LockSupport;
 import java.util.concurrent.locks.ReentrantLock;
 
 import javax.net.ssl.SSLEngine;
@@ -110,10 +113,30 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
     // Handshake (single-threaded, before concurrent read/write)
     // -------------------------------------------------------------------------
 
+    /** Runs the TLS handshake with no time bound; see {@link #doHandshake(java.time.Duration)}. */
     public void doHandshake() throws IOException {
+        doHandshake(null);
+    }
+
+    /**
+     * Runs the TLS handshake within {@code timeout} in total ({@code null}, zero or negative: no
+     * bound). The deadline covers the whole handshake, so a client that sends nothing, half a
+     * ClientHello, or one byte at a time is cut when it expires: a watchdog closes the socket and
+     * this method throws {@link SocketTimeoutException} (CHAPPE-028). A handshake the engine rejects
+     * still ends with its alert and the bounded lingering close (CHAPPE-027), outside this deadline.
+     */
+    public void doHandshake(java.time.Duration timeout) throws IOException {
+        HandshakeDeadline deadline = HandshakeDeadline.arm(timeout, channel);
         try {
-            runHandshake();
+            try {
+                runHandshake();
+            } finally {
+                // Before the rejected-handshake path below: the alert and the lingering close
+                // keep their own budgets and must not be cut by this deadline.
+                deadline.disarm();
+            }
         } catch (SSLException e) {
+            if (deadline.fired()) throw deadline.timedOut(e);
             // A rejected handshake (no or untrusted client certificate, no shared protocol...)
             // leaves JSSE's fatal alert in the engine: send it, so the client learns why
             // instead of seeing a bare close (CHAPPE-027). Then half-close and drain, bounded:
@@ -123,8 +146,100 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
                 LingeringClose.halfCloseAndDrain(channel, netInBuffer.clear());
             }
             throw e;
+        } catch (IOException e) {
+            // The watchdog's close wakes a blocked read or write with an AsynchronousCloseException
+            if (deadline.fired()) throw deadline.timedOut(e);
+            throw e;
         }
+        // The handshake ended just as the deadline fired: the socket is closed, do not hand it on
+        if (deadline.fired()) throw deadline.timedOut(null);
         tlsInfo = describe(engine.getSession());
+    }
+
+    /**
+     * The total deadline of one handshake (CHAPPE-028), on the pattern of {@link TimedReadChannel}:
+     * one watchdog virtual thread parks until the deadline, then closes the socket. The end of the
+     * handshake ({@link #disarm()}) and the watchdog race on one compare-and-set from {@code ARMED}:
+     * exactly one wins, so the handshake either completes on an open socket or fails with {@link
+     * SocketTimeoutException} on a closed one, never both.
+     */
+    private static final class HandshakeDeadline {
+
+        private static final int ARMED = 0;
+        private static final int DISARMED = 1;
+        private static final int FIRED = 2;
+
+        /** No bound: never armed, never fires. */
+        private static final HandshakeDeadline NONE = new HandshakeDeadline(0, null);
+
+        private final AtomicInteger state;
+        private final long deadlineNanos;
+        private final long timeoutMillis;
+        private final Closeable closeable;
+        private final Thread watchdog;
+
+        private HandshakeDeadline(long timeoutNanos, Closeable closeable) {
+            this.closeable = closeable;
+            this.timeoutMillis = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(timeoutNanos);
+            if (closeable == null) {
+                this.state = new AtomicInteger(DISARMED);
+                this.deadlineNanos = 0;
+                this.watchdog = null;
+            } else {
+                this.state = new AtomicInteger(ARMED);
+                this.deadlineNanos = System.nanoTime() + timeoutNanos;
+                this.watchdog =
+                        Thread.ofVirtual().name("chappe-handshake-watchdog").unstarted(this::watch);
+            }
+        }
+
+        /**
+         * A started deadline {@code timeout} from now that closes {@code closeable} when it fires,
+         * or a no-op one for a {@code null}, zero or negative {@code timeout}. A timeout above
+         * {@link TimedReadChannel#MAX_TIMEOUT} is saturated, so the arithmetic cannot overflow.
+         */
+        static HandshakeDeadline arm(java.time.Duration timeout, Closeable closeable) {
+            if (timeout == null || timeout.isZero() || timeout.isNegative()) return NONE;
+            java.time.Duration bounded =
+                    timeout.compareTo(TimedReadChannel.MAX_TIMEOUT) > 0 ? TimedReadChannel.MAX_TIMEOUT : timeout;
+            var deadline = new HandshakeDeadline(bounded.toNanos(), closeable);
+            deadline.watchdog.start();
+            return deadline;
+        }
+
+        /** Sleeps to the deadline, re-checking the state at every wake-up, then fires if still armed. */
+        private void watch() {
+            while (state.get() == ARMED) {
+                long wait = deadlineNanos - System.nanoTime();
+                if (wait > 0) {
+                    LockSupport.parkNanos(this, wait); // unparked by disarm(), or spurious: loop
+                } else {
+                    if (state.compareAndSet(ARMED, FIRED)) {
+                        try {
+                            closeable.close();
+                        } catch (IOException _) {
+                            // already closing
+                        }
+                    }
+                    return;
+                }
+            }
+        }
+
+        /** Ends the deadline if it has not fired; the watchdog then exits. Idempotent. */
+        void disarm() {
+            if (state.compareAndSet(ARMED, DISARMED)) LockSupport.unpark(watchdog);
+        }
+
+        boolean fired() {
+            return state.get() == FIRED;
+        }
+
+        SocketTimeoutException timedOut(IOException cause) {
+            var timedOut = new SocketTimeoutException("TLS handshake timed out after " + timeoutMillis + " ms");
+            if (cause != null) timedOut.initCause(cause);
+            return timedOut;
+        }
     }
 
     /**

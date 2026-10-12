@@ -386,9 +386,9 @@ final class ChappeServer implements Server {
         }
         engine.setSSLParameters(sslParams);
 
-        // Handshake
+        // Handshake, bounded as a whole by idleTimeout (CHAPPE-028)
         var sslHandler = new SslHandler(channel, engine, config.writeTimeout());
-        sslHandler.doHandshake();
+        sslHandler.doHandshake(config.idleTimeout());
 
         // Connection metadata, once per connection, after the handshake (CHAPPE-026)
         var connectionInfo = ConnectionInfo.of(channel, sslHandler.tlsInfo());

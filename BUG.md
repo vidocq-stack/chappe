@@ -5,6 +5,43 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-028 — a TLS client that never completed its handshake held its virtual thread forever
+
+- **Date**: 2026-10-12
+- **Status**: FIXED (commit `fix(tls): bound the TLS handshake by the idle timeout (CHAPPE-028)`,
+  branch `pr/ybl/chappe-timeouts`)
+- **Module**: `chappe-http` (`SslHandler`), `chappe-core` (`ChappeServer`)
+- **Symptom**: on a TLS listener, a client that connected and sent nothing, sent only part of its
+  ClientHello, or sent it one byte at a time, was never disconnected: its connection and virtual
+  thread stayed open for as long as the client liked (a slowloris at the TLS layer). `readTimeout`
+  and `idleTimeout` did not apply to the handshake.
+- **Minimal reproduction**: `chappe-tests/.../TlsHandshakeTimeoutTest`
+  (`aClientThatNeverSendsAClientHelloIsClosed`, `aPartialClientHelloIsClosed`,
+  `aDripFeedingClientIsStillCutAtTheDeadline`): before the fix the client read hit its own 5 s
+  `SO_TIMEOUT` instead of the server's close.
+- **Cause**: `SslHandler.runHandshake()` blocks in `channel.read(netInBuffer)` on `NEED_UNWRAP`
+  (and in `channel.write` on `NEED_WRAP`) with no bound. A partial ClientHello leaves the engine in
+  `BUFFER_UNDERFLOW` and the loop reads again. Same class as CHAPPE-005 (the idle timeout that was
+  a silent no-op).
+- **Fix**: `SslHandler.doHandshake(Duration)` arms one total deadline for the whole handshake, and
+  `ChappeServer.handleTlsConnection` passes `idleTimeout`. A watchdog virtual thread (same pattern
+  as `TimedReadChannel`) closes the socket at the deadline, which wakes the blocked read or write;
+  the handshake then fails with `SocketTimeoutException("TLS handshake timed out after N ms")`. The
+  end of the handshake and the watchdog race on one compare-and-set, so exactly one wins. A total
+  deadline, not a per-read one, so a drip-feeding client is cut too. The deadline is disarmed
+  before the rejected-handshake path of CHAPPE-027 runs, so the alert and the lingering close keep
+  their own budgets. `doHandshake()` without argument keeps no bound.
+- **Follow-ups (OPEN)**:
+  - the HTTP/1.1-over-TLS pre-read right after the handshake (`ChappeServer`, around
+    `sslHandler.read(readBuffer)`) has no bound: a client that completes the handshake and then
+    sends nothing holds its thread;
+  - the HTTP/2 connection preface read over TLS (`Http2Connection.validateClientPreface`) has no
+    bound either;
+  - a dedicated `handshakeTimeout` setting (shorter default than `idleTimeout`, separate from the
+    keep-alive idle bound) is not provided.
+
+---
+
 ## CHAPPE-027 — a TLS handshake the server rejected ended with a bare close, without its alert
 
 - **Date**: 2026-10-11
@@ -26,10 +63,10 @@ cause hypothesis, and status.
   the alert, and rethrows; the server closes the socket as before. In the same commit, `SslHandler`
   refuses TLS 1.2 client-initiated renegotiation, so the `TlsInfo` read at the handshake cannot go
   stale.
-- **Follow-up (OPEN, pre-existing, not fixed here)**: the TLS handshake itself has no timeout.
-  `SslHandler.doHandshake()` reads without a bound, so a client that connects and never completes
-  the handshake holds its virtual thread (same class as CHAPPE-005). `readTimeout` and
-  `idleTimeout` do not cover it.
+- **Follow-up (FIXED in CHAPPE-028)**: the TLS handshake itself had no timeout.
+  `SslHandler.doHandshake()` read without a bound, so a client that connected and never completed
+  the handshake held its virtual thread (same class as CHAPPE-005). The handshake is now bounded
+  by `idleTimeout` as a total deadline.
 
 ---
 
