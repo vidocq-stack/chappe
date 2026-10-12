@@ -35,18 +35,52 @@ public final class HpackDecoder {
     }
 
     private final HpackDynamicTable dynamicTable;
-    private final int maxHeaderListSize;
+    private final int softLimit;
+    private final int hardLimit;
 
+    /**
+     * A decoder with a single limit: a header list past {@code maxHeaderListSize} ends the
+     * connection, as if both limits of {@link #HpackDecoder(int, int, int)} were equal.
+     */
     public HpackDecoder(int dynamicTableMaxSize, int maxHeaderListSize) {
+        this(dynamicTableMaxSize, maxHeaderListSize, maxHeaderListSize);
+    }
+
+    /**
+     * A decoder with a soft and a hard header-list limit, both measured as RFC 9113 §6.5.2 does:
+     * the octets of each name and value, plus 32 per field.
+     *
+     * @param dynamicTableMaxSize the maximum size of the HPACK dynamic table
+     * @param softLimit past it, {@link #decode} stops forwarding fields and returns {@code false},
+     *     but still decodes the whole block
+     * @param hardLimit past it, {@link #decode} throws ENHANCE_YOUR_CALM; not below {@code softLimit}
+     */
+    public HpackDecoder(int dynamicTableMaxSize, int softLimit, int hardLimit) {
+        if (softLimit < 0 || hardLimit < softLimit) {
+            throw new IllegalArgumentException(
+                    "Expected 0 <= softLimit <= hardLimit, got " + softLimit + " and " + hardLimit);
+        }
         this.dynamicTable = new HpackDynamicTable(dynamicTableMaxSize);
-        this.maxHeaderListSize = maxHeaderListSize;
+        this.softLimit = softLimit;
+        this.hardLimit = hardLimit;
     }
 
     /**
      * Decodes a full header block and emits the pairs into the sink.
+     *
+     * <p>The whole block is always decoded, so the dynamic table stays in sync with the peer's
+     * encoder (RFC 7541 §2.3.2) even when the list is too large to serve. Fields reach the sink
+     * only while the running size stays within the soft limit. Names and values are decoded as
+     * ISO-8859-1, one char per octet, so {@link String#length()} is the octet count.
+     *
+     * @return {@code true} if the whole list is within the soft limit
+     * @throws Http2ConnectionException ENHANCE_YOUR_CALM as soon as the running size exceeds the
+     *     hard limit (the connection is then closed, so the rest of the block does not matter), or
+     *     the error the sink or the HPACK decoding raises
      */
-    public void decode(ByteBuffer headerBlock, HeaderSink sink) throws Http2ConnectionException {
-        int totalSize = 0;
+    public boolean decode(ByteBuffer headerBlock, HeaderSink sink) throws Http2ConnectionException {
+        long totalSize = 0;
+        boolean within = true;
 
         while (headerBlock.hasRemaining()) {
             int b = headerBlock.get(headerBlock.position()) & 0xFF;
@@ -85,14 +119,20 @@ public final class HpackDecoder {
                 continue;
             }
 
-            totalSize += name.length() + value.length() + 32;
-            if (totalSize > maxHeaderListSize) {
+            // Octets, since both decodeString and HpackHuffman decode ISO-8859-1 (RFC 9113 §6.5.2).
+            totalSize += (long) name.length() + value.length() + 32;
+            if (totalSize > hardLimit) {
                 throw new Http2ConnectionException(
-                        Http2ErrorCode.ENHANCE_YOUR_CALM, "Header list exceeds max size " + maxHeaderListSize);
+                        Http2ErrorCode.ENHANCE_YOUR_CALM, "Header list exceeds max size " + hardLimit);
             }
 
-            sink.accept(name, value);
+            if (totalSize <= softLimit) {
+                sink.accept(name, value);
+            } else {
+                within = false;
+            }
         }
+        return within;
     }
 
     /** Updates the maximum dynamic table size (from SETTINGS). */
