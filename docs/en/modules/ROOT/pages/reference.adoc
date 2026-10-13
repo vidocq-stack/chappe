@@ -278,6 +278,12 @@ The mode is applied at the handshake only. A TLS 1.2 client-initiated renegotiat
 
 | `tls()` [.tag-new]#NEW#
 | `Optional<TlsInfo>`: the TLS session, present exactly when `isSecure()` is `true`, empty on cleartext. All HTTP/2 streams of a connection share it.
+
+| `connectionId()` [.tag-new]#NEW#
+| `OptionalLong`: an identifier of the connection, unique within the running server and stable for its lifetime. Every HTTP/1.1 keep-alive request and every HTTP/2 stream of one connection reports the same value.
+
+| `streamId()` [.tag-new]#NEW#
+| `OptionalInt`: the HTTP/2 stream identifier (odd and positive), empty over HTTP/1.1.
 |===
 
 [source,java]
@@ -286,7 +292,7 @@ public record TlsInfo(String protocol, String cipherSuite, byte[] sessionId,
                       List<X509Certificate> peerCertificates) { }
 ----
 
-`TlsInfo` is immutable: the constructor copies `sessionId` and `peerCertificates`, `sessionId()` returns a copy, and `equals`/`hashCode` compare the session id by content. `peerCertificates()` is empty under `NONE`. Wrappers built on `ForwardingRequest` forward `tls()`.
+`TlsInfo` is immutable: the constructor copies `sessionId` and `peerCertificates`, `sessionId()` returns a copy, and `equals`/`hashCode` compare the session id by content. `peerCertificates()` is empty under `NONE`. Wrappers built on `ForwardingRequest` forward `tls()`, `connectionId()` and `streamId()`.
 
 == `chappe serve` CLI configuration
 

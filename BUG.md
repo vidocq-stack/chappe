@@ -5,6 +5,25 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-035 — Request exposes no connection identity nor the HTTP/2 stream id
+
+- **Date**: 2026-10-14
+- **Status**: FIXED (commit `79b485e`, branch `pr/ybl/chappe-connection-ids`)
+- **Module**: `chappe-api` (`Request`, `ForwardingRequest`), `chappe-http` (`ConnectionInfo`,
+  `HttpRequestImpl`, `h2/Http2Connection`)
+- **Symptom**: a handler could not tell which connection carried a request, nor which HTTP/2
+  stream; needed by foy BUG-20261009-09.
+- **Minimal reproduction**: `chappe-tests/.../ConnectionInfoTest`
+  (`keepAliveRequestsShareTheConnectionId`, `http2StreamsShareTheConnectionIdAndCarryTheirStreamId`):
+  `Request` had no way to read either value.
+- **Cause**: `ConnectionInfo` carried addresses and TLS only, and the stream id stayed in
+  `Http2Stream`.
+- **Fix**: `ConnectionInfo` gains an `id` assigned from a process-wide counter;
+  `Request.connectionId()` (`OptionalLong`) and `Request.streamId()` (`OptionalInt`, empty over
+  HTTP/1.1) are forwarded by `ForwardingRequest`.
+
+---
+
 ## CHAPPE-034 — concurrent HTTP/2 responses could reach the wire out of HPACK order
 
 - **Date**: 2026-10-12
