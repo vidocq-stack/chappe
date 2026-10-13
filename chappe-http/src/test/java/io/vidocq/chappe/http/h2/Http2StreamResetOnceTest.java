@@ -50,7 +50,7 @@ class Http2StreamResetOnceTest {
     private final Http2Connection connection = new Http2Connection(
             Channels.newChannel(new ByteArrayInputStream(new byte[0])),
             (WritableByteChannel) Channels.newChannel(wire),
-            new ConnectionInfo(null, null, null),
+            new ConnectionInfo(0, null, null, null),
             _ -> Response.ok("unused"),
             ServerConfig.DEFAULT,
             ByteBuffer.allocate(0));

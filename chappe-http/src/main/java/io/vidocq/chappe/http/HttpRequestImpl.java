@@ -26,6 +26,8 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
+import java.util.OptionalLong;
 
 import io.vidocq.chappe.api.*;
 
@@ -121,7 +123,14 @@ public final class HttpRequestImpl implements Request, Headers {
         this.remoteAddress = info.remoteAddress();
         this.localAddress = info.localAddress();
         this.tls = info.tls();
+        this.connectionId = info.id();
+        this.hasConnectionId = true;
         setSecure(info.secure());
+    }
+
+    /** Sets the HTTP/2 stream id, once, when the stream is created; {@link #reset()} keeps it. */
+    public void initStreamId(int streamId) {
+        this.streamId = streamId;
     }
 
     // --- Enrichment fields (connection + request) ---
@@ -132,6 +141,9 @@ public final class HttpRequestImpl implements Request, Headers {
     private java.net.InetSocketAddress localAddress;
     private boolean secure;
     private TlsInfo tls;
+    private long connectionId;
+    private boolean hasConnectionId;
+    private int streamId; // 0 = unset (HTTP/1.1)
     private String scheme = "http";
 
     // --- Lazily computed fields ---
@@ -405,6 +417,16 @@ public final class HttpRequestImpl implements Request, Headers {
     @Override
     public Optional<TlsInfo> tls() {
         return Optional.ofNullable(tls);
+    }
+
+    @Override
+    public OptionalLong connectionId() {
+        return hasConnectionId ? OptionalLong.of(connectionId) : OptionalLong.empty();
+    }
+
+    @Override
+    public OptionalInt streamId() {
+        return streamId > 0 ? OptionalInt.of(streamId) : OptionalInt.empty();
     }
 
     // --- Private helpers ---

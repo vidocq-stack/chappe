@@ -347,6 +347,7 @@ public final class Http2Connection {
                 config.readTimeout(),
                 increment -> creditStreamWindow(streamId, increment));
         stream.request().initConnectionInfo(connectionInfo);
+        stream.request().initStreamId(streamId);
         // maxRequestSize caps the body; a call routed to a gRPC handler is exempted at dispatch (CHAPPE-025).
         stream.bodyLimit(config.maxRequestSize());
         stream.open();

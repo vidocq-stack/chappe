@@ -197,6 +197,78 @@ class ConnectionInfoTest {
         }
     }
 
+    /** {@code connection id|stream id}, each {@code none} when absent. */
+    private static String ids(Request req) {
+        return req.connectionId().isPresent()
+                ? req.connectionId().getAsLong() + "|"
+                        + (req.streamId().isPresent()
+                                ? String.valueOf(req.streamId().getAsInt())
+                                : "none")
+                : "none|none";
+    }
+
+    private void startClear(Handler handler) {
+        server = Server.builder().port(0).handler(handler).build();
+        server.start();
+    }
+
+    @Test
+    void keepAliveRequestsShareTheConnectionId() throws Exception {
+        startClear(req -> Response.ok(ids(req)));
+        try (var client =
+                HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build()) {
+            var bodies = new HashSet<String>();
+            for (int i = 0; i < 3; i++) bodies.add(send(client, "http", "/").body());
+            assertEquals(1, bodies.size(), "one connection id for every request: " + bodies);
+            var parts = bodies.iterator().next().split("\\|");
+            assertTrue(Long.parseLong(parts[0]) > 0, "positive: " + bodies);
+            assertEquals("none", parts[1], "HTTP/1.1 has no stream id");
+        }
+    }
+
+    @Test
+    void separateConnectionsGetDistinctIds() throws Exception {
+        startClear(req -> Response.ok(ids(req)));
+        var seen = new HashSet<String>();
+        for (int i = 0; i < 2; i++) {
+            try (var client =
+                    HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build()) {
+                seen.add(send(client, "http", "/").body().split("\\|")[0]);
+            }
+        }
+        assertEquals(2, seen.size(), "distinct connection ids: " + seen);
+    }
+
+    @Test
+    void http2StreamsShareTheConnectionIdAndCarryTheirStreamId() throws Exception {
+        startTls(req -> Response.ok(ids(req)));
+        try (var client = tlsClient(HttpClient.Version.HTTP_2)) {
+            var connections = new HashSet<String>();
+            var streams = new HashSet<Integer>();
+            for (int i = 0; i < 3; i++) {
+                var response = send(client, "https", "/");
+                assertEquals(HttpClient.Version.HTTP_2, response.version());
+                var parts = response.body().split("\\|");
+                connections.add(parts[0]);
+                streams.add(Integer.parseInt(parts[1]));
+            }
+            assertEquals(1, connections.size(), "one connection id: " + connections);
+            assertTrue(Long.parseLong(connections.iterator().next()) > 0);
+            assertEquals(3, streams.size(), "distinct stream ids: " + streams);
+            streams.forEach(id -> assertTrue(id > 0 && id % 2 == 1, "odd positive: " + id));
+        }
+    }
+
+    @Test
+    void aMountedHandlerSeesTheIds() throws Exception {
+        startTls(Router.builder().mount("/app", req -> Response.ok(ids(req))).build());
+        try (var client = tlsClient(HttpClient.Version.HTTP_2)) {
+            var parts = send(client, "https", "/app/x").body().split("\\|");
+            assertTrue(Long.parseLong(parts[0]) > 0, "connection id through the mount");
+            assertTrue(Integer.parseInt(parts[1]) > 0, "stream id through the mount");
+        }
+    }
+
     @Test
     void cleartextHttp11HasNoTlsSession() throws Exception {
         server = Server.builder()

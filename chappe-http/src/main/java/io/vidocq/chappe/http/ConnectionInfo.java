@@ -22,6 +22,7 @@ package io.vidocq.chappe.http;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.channels.SocketChannel;
+import java.util.concurrent.atomic.AtomicLong;
 
 import io.vidocq.chappe.api.TlsInfo;
 
@@ -30,11 +31,14 @@ import io.vidocq.chappe.api.TlsInfo;
  * requests and HTTP/2 streams alike. Built once by the server engine when the connection is
  * ready, after the TLS handshake on a TLS listener, and never changed.
  *
+ * @param id the connection identifier, unique within the JVM and positive when built by {@link #of}
  * @param remoteAddress the client's address, or {@code null} if the socket could not report it
  * @param localAddress the server's address, or {@code null} if the socket could not report it
  * @param tls the TLS session, or {@code null} on a cleartext connection
  */
-public record ConnectionInfo(InetSocketAddress remoteAddress, InetSocketAddress localAddress, TlsInfo tls) {
+public record ConnectionInfo(long id, InetSocketAddress remoteAddress, InetSocketAddress localAddress, TlsInfo tls) {
+
+    private static final AtomicLong NEXT_ID = new AtomicLong();
 
     /** {@code true} on a TLS connection. */
     public boolean secure() {
@@ -43,7 +47,7 @@ public record ConnectionInfo(InetSocketAddress remoteAddress, InetSocketAddress 
 
     /** Reads the socket's addresses; one the socket cannot report (already closed) stays {@code null}. */
     public static ConnectionInfo of(SocketChannel channel, TlsInfo tls) {
-        return new ConnectionInfo(address(channel, true), address(channel, false), tls);
+        return new ConnectionInfo(NEXT_ID.incrementAndGet(), address(channel, true), address(channel, false), tls);
     }
 
     private static InetSocketAddress address(SocketChannel channel, boolean remote) {

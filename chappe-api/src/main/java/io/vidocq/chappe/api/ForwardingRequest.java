@@ -22,6 +22,8 @@ package io.vidocq.chappe.api;
 import java.net.URI;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
+import java.util.OptionalLong;
 
 /**
  * {@link Request} wrapper that forwards <em>every</em> method to
@@ -152,5 +154,15 @@ public interface ForwardingRequest extends Request {
     @Override
     default Optional<TlsInfo> tls() {
         return delegate().tls();
+    }
+
+    @Override
+    default OptionalLong connectionId() {
+        return delegate().connectionId();
+    }
+
+    @Override
+    default OptionalInt streamId() {
+        return delegate().streamId();
     }
 }

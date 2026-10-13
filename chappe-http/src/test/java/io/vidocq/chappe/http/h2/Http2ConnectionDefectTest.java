@@ -64,7 +64,7 @@ class Http2ConnectionDefectTest {
         var connection = new Http2Connection(
                 failing,
                 (WritableByteChannel) Channels.newChannel(wire),
-                new ConnectionInfo(null, null, null),
+                new ConnectionInfo(0, null, null, null),
                 _ -> Response.ok("unused"),
                 ServerConfig.DEFAULT,
                 ByteBuffer.allocate(1024).flip()); // empty, in read mode

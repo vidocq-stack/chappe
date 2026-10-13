@@ -22,6 +22,8 @@ package io.vidocq.chappe.api;
 import java.net.URI;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
+import java.util.OptionalLong;
 
 /**
  * HTTP request — read-only view exposed to {@link Handler handlers}.
@@ -159,5 +161,23 @@ public interface Request {
      */
     default Optional<TlsInfo> tls() {
         return Optional.empty();
+    }
+
+    /**
+     * An identifier of the connection that carried this request, unique within the running
+     * server and stable for the connection's lifetime: every HTTP/1.1 keep-alive request and
+     * every HTTP/2 stream of one connection reports the same value. Empty when the request
+     * does not come from a server connection.
+     */
+    default OptionalLong connectionId() {
+        return OptionalLong.empty();
+    }
+
+    /**
+     * The HTTP/2 stream identifier of this request (odd and positive for a client-initiated
+     * stream), or empty over HTTP/1.1.
+     */
+    default OptionalInt streamId() {
+        return OptionalInt.empty();
     }
 }
