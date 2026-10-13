@@ -280,7 +280,7 @@ The mode is applied at the handshake only. A TLS 1.2 client-initiated renegotiat
 | `Optional<TlsInfo>`: the TLS session, present exactly when `isSecure()` is `true`, empty on cleartext. All HTTP/2 streams of a connection share it.
 
 | `connectionId()` [.tag-new]#NEW#
-| `OptionalLong`: an identifier of the connection, unique within the running server and stable for its lifetime. Every HTTP/1.1 keep-alive request and every HTTP/2 stream of one connection reports the same value.
+| `OptionalLong`: an identifier of the connection, positive and unique for the JVM lifetime, and stable for the connection's lifetime. Every HTTP/1.1 keep-alive request and every HTTP/2 stream of one connection reports the same value.
 
 | `streamId()` [.tag-new]#NEW#
 | `OptionalInt`: the HTTP/2 stream identifier (odd and positive), empty over HTTP/1.1.

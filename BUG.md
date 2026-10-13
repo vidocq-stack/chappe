@@ -18,7 +18,7 @@ cause hypothesis, and status.
   `Request` had no way to read either value.
 - **Cause**: `ConnectionInfo` carried addresses and TLS only, and the stream id stayed in
   `Http2Stream`.
-- **Fix**: `ConnectionInfo` gains an `id` assigned from a process-wide counter;
+- **Fix**: `ConnectionInfo` gains an `id` assigned from a JVM-wide counter;
   `Request.connectionId()` (`OptionalLong`) and `Request.streamId()` (`OptionalInt`, empty over
   HTTP/1.1) are forwarded by `ForwardingRequest`.
 

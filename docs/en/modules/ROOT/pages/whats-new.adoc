@@ -30,4 +30,5 @@ New in the `{project-version}` development line — everything listed here lande
 == New features
 
 * **TLS client certificates** — `Server.Builder.tls(SSLContext, ClientAuth)` asks clients for a certificate per listener: `WANT` (optional) or `NEED` (required). `tls(SSLContext)` keeps meaning `NONE`. xref:usage.adoc#client-certificates[Usage — client certificates].
+* **`Request.connectionId()` / `Request.streamId()`** — the connection's JVM-unique id and the HTTP/2 stream id (CHAPPE-035). xref:reference.adoc#connection-metadata[Reference — connection metadata].
 * **`Request.tls()`** — the TLS session of the connection: protocol, cipher suite, session id and the client's certificate chain. xref:usage.adoc#request-tls[Usage — reading the TLS session].

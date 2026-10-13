@@ -260,6 +260,16 @@ class ConnectionInfoTest {
     }
 
     @Test
+    void tlsHttp11ReportsAPositiveConnectionId() throws Exception {
+        startTls(req -> Response.ok(ids(req)));
+        try (var client = tlsClient(HttpClient.Version.HTTP_1_1)) {
+            var parts = send(client, "https", "/").body().split("\\|");
+            assertTrue(Long.parseLong(parts[0]) > 0, "connection id");
+            assertEquals("none", parts[1], "no stream id over HTTP/1.1");
+        }
+    }
+
+    @Test
     void aMountedHandlerSeesTheIds() throws Exception {
         startTls(Router.builder().mount("/app", req -> Response.ok(ids(req))).build());
         try (var client = tlsClient(HttpClient.Version.HTTP_2)) {
@@ -290,7 +300,7 @@ class ConnectionInfoTest {
         server = Server.builder()
                 .port(0)
                 .handler(req -> {
-                    seen.complete(describe(req) + "|" + req.version().name());
+                    seen.complete(describe(req) + "|" + req.version().name() + "|" + ids(req));
                     return Response.ok("ok");
                 })
                 .build();
@@ -304,9 +314,15 @@ class ConnectionInfoTest {
             writeFrame(out, 0x1, 0x5, 1, getHeaders()); // HEADERS, END_STREAM | END_HEADERS
             out.flush();
 
+            var described = seen.get(5, TimeUnit.SECONDS);
             assertEquals(
                     "false|http|127.0.0.1|" + server.port() + "|no-tls|no-tls|no-tls|HTTP_2",
-                    seen.get(5, TimeUnit.SECONDS));
+                    described.substring(0, described.lastIndexOf("|", described.lastIndexOf("|") - 1)));
+            var idParts = described
+                    .substring(described.lastIndexOf("|", described.lastIndexOf("|") - 1) + 1)
+                    .split("\\|");
+            assertTrue(Long.parseLong(idParts[0]) > 0, "connection id: " + described);
+            assertEquals("1", idParts[1], "stream id: " + described);
         }
     }
 

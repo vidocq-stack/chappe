@@ -124,7 +124,6 @@ public final class HttpRequestImpl implements Request, Headers {
         this.localAddress = info.localAddress();
         this.tls = info.tls();
         this.connectionId = info.id();
-        this.hasConnectionId = true;
         setSecure(info.secure());
     }
 
@@ -142,7 +141,6 @@ public final class HttpRequestImpl implements Request, Headers {
     private boolean secure;
     private TlsInfo tls;
     private long connectionId;
-    private boolean hasConnectionId;
     private int streamId; // 0 = unset (HTTP/1.1)
     private String scheme = "http";
 
@@ -190,7 +188,8 @@ public final class HttpRequestImpl implements Request, Headers {
         pathQueryParsed = false;
         queryParams = null;
         pathParams = Collections.emptyMap();
-        // Per-request fields (NOT connection-level: remoteAddress, localAddress, secure, scheme, tls)
+        // Per-request fields (NOT connection-level: remoteAddress, localAddress, secure, scheme, tls,
+        // connectionId, streamId)
         contextPath = "";
         pathInfoCache = null;
         attributes.clear();
@@ -421,7 +420,7 @@ public final class HttpRequestImpl implements Request, Headers {
 
     @Override
     public OptionalLong connectionId() {
-        return hasConnectionId ? OptionalLong.of(connectionId) : OptionalLong.empty();
+        return connectionId > 0 ? OptionalLong.of(connectionId) : OptionalLong.empty();
     }
 
     @Override

@@ -31,7 +31,7 @@ import io.vidocq.chappe.api.TlsInfo;
  * requests and HTTP/2 streams alike. Built once by the server engine when the connection is
  * ready, after the TLS handshake on a TLS listener, and never changed.
  *
- * @param id the connection identifier, unique within the JVM and positive when built by {@link #of}
+ * @param id the connection identifier, positive and unique for the JVM lifetime when built by {@link #of}; {@code 0} means unknown
  * @param remoteAddress the client's address, or {@code null} if the socket could not report it
  * @param localAddress the server's address, or {@code null} if the socket could not report it
  * @param tls the TLS session, or {@code null} on a cleartext connection

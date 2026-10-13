@@ -164,8 +164,8 @@ public interface Request {
     }
 
     /**
-     * An identifier of the connection that carried this request, unique within the running
-     * server and stable for the connection's lifetime: every HTTP/1.1 keep-alive request and
+     * An identifier of the connection that carried this request, positive and unique for the JVM
+     * lifetime, and stable for the connection's lifetime: every HTTP/1.1 keep-alive request and
      * every HTTP/2 stream of one connection reports the same value. Empty when the request
      * does not come from a server connection.
      */
