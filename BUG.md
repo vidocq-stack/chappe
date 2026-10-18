@@ -5,6 +5,27 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-036 — The TLS handshake read the socket before unwrapping buffered records
+
+- **Date**: 2026-10-18
+- **Status**: FIXED on `fix/24-handshake-unwrap-first` (chappe#24)
+- **Module**: `chappe-http` (`SslHandler.runHandshake`)
+- **Symptom**: a TLS 1.2 client with a certificate, on a listener asking for one, never completed its
+  handshake: the server waited on the socket while the client waited for the server's `Finished`, until
+  the handshake deadline (`idleTimeout`). Latent since chappe#29 added client certificates.
+- **Minimal reproduction**: `chappe-tests/.../TlsBufferedClientFlightTest` (TLSv1.2): a hand-driven
+  `SSLEngine` client sends its last flight in one write. Before the fix: no `Finished` within 5 s. A probe
+  in `runHandshake` showed the server unwrap 1043 of 1094 bytes, stop on `NEED_TASK` with 51 bytes left
+  (`ChangeCipherSpec` and `Finished`), then block on `channel.read`.
+- **Cause**: the `NEED_UNWRAP` case read the socket first, and its unwrap loop stops when the engine asks
+  for a task or a wrap, so whole records could stay buffered: the read-before-unwrap shape of CHAPPE-004 bug
+  C, left in the handshake. The JDK's TLS 1.3 client sends its last flight as one record, so TLS 1.3 did not
+  show it.
+- **Fix**: the handshake unwraps what is buffered first and reads the socket only when nothing is buffered or
+  the last unwrap returned `BUFFER_UNDERFLOW`, as `readInternal` does.
+
+---
+
 ## CHAPPE-035 — Request exposes no connection identity nor the HTTP/2 stream id
 
 - **Date**: 2026-10-14

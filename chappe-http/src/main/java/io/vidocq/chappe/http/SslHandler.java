@@ -291,13 +291,22 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
     private void runHandshake() throws IOException {
         engine.beginHandshake();
         HandshakeStatus hs = engine.getHandshakeStatus();
+        boolean needsBytes = true;
 
         while (hs != HandshakeStatus.FINISHED && hs != HandshakeStatus.NOT_HANDSHAKING) {
             switch (hs) {
                 case NEED_UNWRAP -> {
-                    int bytesRead = channel.read(netInBuffer);
-                    if (bytesRead < 0) {
-                        throw new IOException("Channel closed during TLS handshake");
+                    // Unwrap what is already buffered before touching the socket: the loop below stops when
+                    // the engine asks for a task or a wrap, possibly with whole records left (a TLS 1.2 client
+                    // sends Certificate..CertificateVerify, ChangeCipherSpec and Finished in one write, then
+                    // waits for the server's Finished). Reading first would block on a client that has sent
+                    // everything. Read only when nothing is buffered or the engine needs more bytes
+                    // (BUFFER_UNDERFLOW), as readInternal does (CHAPPE-004, chappe#24).
+                    if (needsBytes || netInBuffer.position() == 0) {
+                        int bytesRead = channel.read(netInBuffer);
+                        if (bytesRead < 0) {
+                            throw new IOException("Channel closed during TLS handshake");
+                        }
                     }
                     netInBuffer.flip();
 
@@ -318,6 +327,7 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
                             && result.getStatus() == Status.OK
                             && result.getHandshakeStatus() == HandshakeStatus.NEED_UNWRAP);
 
+                    needsBytes = result.getStatus() == Status.BUFFER_UNDERFLOW;
                     netInBuffer.compact();
                     hs = result.getHandshakeStatus();
                 }
