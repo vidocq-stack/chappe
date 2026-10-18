@@ -438,6 +438,8 @@ Served zero-copy by `StaticFileHandler.preferPrecompressed(true)`.
 | gRPC over HTTP/2          | OK | transport framing (5-byte prefix), trailers, unary / server-stream / client-stream / bidi, gRPC-Web via `grpcWeb()`
 | RFC 9114 (HTTP/3)         | planned | QUIC via the JDK, targeting JDK 26+ — see link:{repo-chappe}/blob/main/ROADMAP.md[ROADMAP.md]
 | RFC 8441 (WebSocket H2)   | planned | WebSocket runs over HTTP/1.1 today
+| RFC 9113 §8.4 (server push) | not supported | no `PUSH_PROMISE` is ever sent; deprecated by browsers and by Servlet 6.1
+| RFC 8297 (103 Early Hints) | not supported | no API to send an informational response; `100 Continue` is written by Chappe itself
 |===
 
 == Compatibility
