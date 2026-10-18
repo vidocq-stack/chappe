@@ -111,10 +111,12 @@ public final class HpackEncoder {
         // All fields are checked before the first one is encoded: a failure must leave the dynamic
         // table untouched, or it would no longer match the peer's (CHAPPE-008). The fields are read
         // once into a snapshot, so a custom Headers cannot hand back other text after the check.
-        var fields = new ArrayList<Headers.Entry>(Math.max(0, headers.size()));
+        var fields = new ArrayList<String[]>(Math.max(0, headers.size()));
         for (var entry : headers) {
             HeaderFields.requireValid("response header", entry.name(), entry.value());
-            fields.add(entry);
+            String name = entry.name().toLowerCase(Locale.ROOT);
+            String value = trimWhitespace(entry.value());
+            if (!connectionSpecific(name, value)) fields.add(new String[] {name, value});
         }
         var out = new ByteArrayOutputStream(256);
         lock.lock();
@@ -126,8 +128,8 @@ public final class HpackEncoder {
             encodeHeader(out, ":status", statusValue);
 
             // Regular headers
-            for (var entry : fields) {
-                encodeHeader(out, entry.name().toLowerCase(Locale.ROOT), entry.value());
+            for (String[] field : fields) {
+                encodeHeader(out, field[0], field[1]);
             }
         } finally {
             lock.unlock();
@@ -136,12 +138,42 @@ public final class HpackEncoder {
     }
 
     /**
+     * Whether a field must not be sent over HTTP/2: a connection-specific field, or {@code te} with
+     * another value than {@code trailers} (RFC 9113 §8.2.2). A message carrying one is malformed, and
+     * strict clients reset the stream, so it is dropped (CHAPPE-018).
+     *
+     * @param name the lower-case field name
+     */
+    static boolean connectionSpecific(String name, String value) {
+        return switch (name) {
+            case "connection", "keep-alive", "proxy-connection", "transfer-encoding", "upgrade" -> true;
+            case "te" -> !value.equalsIgnoreCase("trailers");
+            default -> false;
+        };
+    }
+
+    /**
+     * {@code value} without leading or trailing SP and HTAB: RFC 9113 §8.2.1 makes a value with
+     * either malformed, and RFC 9110 §5.5 never counts them in the value (CHAPPE-018).
+     */
+    static String trimWhitespace(String value) {
+        int start = 0, end = value.length();
+        while (start < end && isWhitespace(value.charAt(start))) start++;
+        while (end > start && isWhitespace(value.charAt(end - 1))) end--;
+        return start == 0 && end == value.length() ? value : value.substring(start, end);
+    }
+
+    private static boolean isWhitespace(char c) {
+        return c == ' ' || c == '\t';
+    }
+
+    /**
      * Encodes HTTP/2 trailers (HEADERS frame sent after the body).
      * <p>
      * Unlike {@link #encode(int, Headers)}, does not emit pseudo-headers:
      * RFC 9113 §8.1 forbids pseudo-headers in trailers.
      * A trailer whose name is not a token or whose value is not a valid field value is dropped,
-     * as over HTTP/1.1.
+     * as over HTTP/1.1; so is a connection-specific one, and surrounding whitespace is trimmed (CHAPPE-018).
      */
     public byte[] encodeTrailers(Headers trailers) {
         var out = new ByteArrayOutputStream(64);
@@ -152,7 +184,10 @@ public final class HpackEncoder {
                 if (!HeaderFields.isValid(entry.name(), entry.value())) {
                     continue; // dropped, as over HTTP/1.1 (CHAPPE-008)
                 }
-                encodeHeader(out, entry.name().toLowerCase(Locale.ROOT), entry.value());
+                String name = entry.name().toLowerCase(Locale.ROOT);
+                String value = trimWhitespace(entry.value());
+                if (connectionSpecific(name, value)) continue; // CHAPPE-018
+                encodeHeader(out, name, value);
             }
         } finally {
             lock.unlock();

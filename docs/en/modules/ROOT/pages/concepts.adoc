@@ -86,6 +86,7 @@ Where the rule is checked:
 
 Encode any other text before setting it, for example with RFC 8187 (`filename*=UTF-8''…`) or percent-encoding.
 
+[#filters]
 == Filters
 
 A `Filter` is a declarative middleware. It turns a `Handler` into another `Handler`:
@@ -104,6 +105,8 @@ Helpers shipped on `Filter`:
 * `Filter.addHeaderIf(predicate, name, value)` — conditional header (predicate evaluated per request).
 * `Filter.addHeaderIfEnv(envVar, expected, name, value)` — gate on an environment variable (typical: staging).
 * `Filter.gzip()` / `Filter.gzip(threshold)` — on-the-fly compression negotiated through `Accept-Encoding`.
+
+[.tag-new]#NEW# These helpers keep the handler's trailers: the filtered response asks the original for them once the body has been read, so trailers computed from the body survive.
 
 WARNING: Chappe recognises a connection takeover by the type of the response: a handler returns a
 `WebSocketUpgrade` or a `ConnectionUpgrade`, and the connection checks it with `instanceof`. A

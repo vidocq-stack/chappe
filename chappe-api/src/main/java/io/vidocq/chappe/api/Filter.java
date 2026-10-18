@@ -123,11 +123,7 @@ public interface Filter {
                 hb.add(e.name(), e.value());
             }
             hb.add(name, value);
-            return Response.builder()
-                    .status(r.status())
-                    .headers(hb.build())
-                    .body(r.body())
-                    .build();
+            return withHeaders(r, hb.build(), r.body());
         };
     }
 
@@ -192,11 +188,7 @@ public interface Filter {
             }
             hb.add("Content-Encoding", "gzip");
             hb.add("Vary", "Accept-Encoding");
-            return Response.builder()
-                    .status(r.status())
-                    .headers(hb.build())
-                    .body(Body.of(compressed))
-                    .build();
+            return withHeaders(r, hb.build(), Body.of(compressed));
         };
     }
 
@@ -298,5 +290,34 @@ public interface Filter {
                 || ct.startsWith("application/xhtml+xml")
                 || ct.endsWith("+json")
                 || ct.endsWith("+xml");
+    }
+
+    /**
+     * {@code original} with other headers and body, and the same status and trailers. The trailers are
+     * still asked of {@code original}, once the body has been read, so trailers computed from the body
+     * survive the filter (CHAPPE-019); rebuilding the response used to drop them.
+     */
+    private static Response withHeaders(Response original, Headers headers, Body body) {
+        return new Response() {
+            @Override
+            public StatusCode status() {
+                return original.status();
+            }
+
+            @Override
+            public Headers headers() {
+                return headers;
+            }
+
+            @Override
+            public Body body() {
+                return body;
+            }
+
+            @Override
+            public Headers trailers() {
+                return original.trailers();
+            }
+        };
     }
 }

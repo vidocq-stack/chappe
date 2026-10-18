@@ -106,6 +106,8 @@ HTTP/2 (RFC 9113) is carried by `chappe-http`: framing, HPACK (RFC 7541) with Hu
 
 Without TLS, Chappe supports HTTP/2 cleartext (h2c) with **prior knowledge** only: a client that opens the connection with the HTTP/2 preface (`PRI * HTTP/2.0`) is routed straight to the HTTP/2 pipeline; any other cleartext connection is parsed as HTTP/1.1. There is no `Upgrade: h2c` handshake (RFC 9113 deprecated it).
 
+[.tag-new]#NEW# A response's connection-specific fields (`Connection`, `Keep-Alive`, `Proxy-Connection`, `Transfer-Encoding`, `Upgrade`, and `TE` other than `trailers`) are not sent over HTTP/2: RFC 9113 §8.2.2 makes a message carrying one malformed. Chappe leaves them out of the headers and the trailers, and trims leading and trailing spaces and tabs from every value (§8.2.1). Over HTTP/1.1 they are sent as set.
+
 Not supported over HTTP/2:
 
 * **Server push** (RFC 9113 §8.4): Chappe never sends `PUSH_PROMISE`; the client's `SETTINGS_ENABLE_PUSH` is read and has no effect. Browsers no longer accept push, and the Servlet specification deprecates it, so a container on Chappe such as Foy answers `newPushBuilder()` with `null`.

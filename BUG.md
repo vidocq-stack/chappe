@@ -662,7 +662,7 @@ cause hypothesis, and status.
 ## CHAPPE-019 — Filter.addHeaderIf and Filter.gzip drop the response trailers
 
 - **Date**: 2026-10-11
-- **Status**: OPEN (pre-existing, found in the CHAPPE-008 review)
+- **Status**: FIXED on `fix/018-019-h2-headers-trailers`: `Filter.withHeaders` returns a response delegating `trailers()` to the original, so they are still computed after the body (`FilterTrailersTest`)
 - **Module**: `chappe-api` (`Filter`)
 - **Symptom**: `Filter.addHeaderIf` (so `addHeader` and `addHeaderIfEnv`) and `Filter.gzip` rebuild
   the response with `Response.builder().status().headers().body()`. The rebuilt response has no
@@ -681,7 +681,7 @@ cause hypothesis, and status.
 ## CHAPPE-018 — HTTP/2 responses keep connection-specific headers and padded values
 
 - **Date**: 2026-10-11
-- **Status**: OPEN (found in the CHAPPE-008 review)
+- **Status**: FIXED on `fix/018-019-h2-headers-trailers`: `HpackEncoder` drops the connection-specific fields (and `te` other than `trailers`) from response headers and trailers, and trims surrounding SP/HTAB from values (`HpackEncoderResponseFieldsTest`)
 - **Module**: `chappe-http` (`h2/Http2Connection`, `h2/HpackEncoder`)
 - **Symptom**: on the response side, HTTP/2 sends whatever header fields the application set:
   - connection-specific fields (`Connection`, `Keep-Alive`, `Proxy-Connection`,
