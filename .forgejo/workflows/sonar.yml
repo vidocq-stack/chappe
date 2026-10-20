@@ -1,0 +1,30 @@
+# SonarQube analysis, pilot of the rollout (Vidocq/vidocq#284): main on every
+# push, pull requests on every update, on https://sonar.dev.vidocq.io (SonarQube
+# Community Build with the community branch plugin).
+#
+# Report mode: the job never fails on a finding, and the pull request gets one
+# comment, kept up to date, with the quality gate. Not a required check. Pull
+# requests from forks receive no secrets and skip the analysis.
+#
+# Prerequisites: org secret SONAR_TOKEN, org variable SONAR_HOST_URL,
+#                org secret VIDOCQ_BOT_TOKEN (the pull-request comment).
+name: sonar
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  sonar:
+    runs-on: vidocq-runner
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # whole history: new-code detection and blame
+      - uses: https://codefloe.com/Vidocq/ci/setup-maven@main
+      - uses: https://codefloe.com/Vidocq/ci/sonar-analysis@main
+        with:
+          sonar-token: ${{ secrets.SONAR_TOKEN }}
+          host-url: ${{ vars.SONAR_HOST_URL }}
+          bot-token: ${{ secrets.VIDOCQ_BOT_TOKEN }}
