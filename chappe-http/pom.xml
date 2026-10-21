@@ -15,6 +15,10 @@
     <name>Chappe HTTP</name>
     <description>Implémentation des protocoles HTTP/1.1 et HTTP/2</description>
 
+    <properties>
+        <japicmp.skip>false</japicmp.skip>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>io.vidocq.chappe</groupId>
@@ -27,4 +31,26 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <!-- The API compatibility report (quality profile): the packages module-info.java exports. -->
+                <plugin>
+                    <groupId>com.github.siom79.japicmp</groupId>
+                    <artifactId>japicmp-maven-plugin</artifactId>
+                    <configuration>
+                        <parameter>
+                            <includes>
+                                <include>io.vidocq.chappe.http</include>
+                                <include>io.vidocq.chappe.http.grpc</include>
+                                <include>io.vidocq.chappe.http.h2</include>
+                                <include>io.vidocq.chappe.http.ws</include>
+                            </includes>
+                        </parameter>
+                    </configuration>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
 </project>

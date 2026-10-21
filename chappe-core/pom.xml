@@ -15,6 +15,10 @@
     <name>Chappe Core</name>
     <description>Moteur serveur HTTP avec virtual threads et lifecycle</description>
 
+    <properties>
+        <japicmp.skip>false</japicmp.skip>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>io.vidocq.chappe</groupId>
@@ -31,4 +35,23 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <!-- The API compatibility report (quality profile): the packages module-info.java exports. -->
+                <plugin>
+                    <groupId>com.github.siom79.japicmp</groupId>
+                    <artifactId>japicmp-maven-plugin</artifactId>
+                    <configuration>
+                        <parameter>
+                            <includes>
+                                <include>io.vidocq.chappe.core</include>
+                            </includes>
+                        </parameter>
+                    </configuration>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
 </project>

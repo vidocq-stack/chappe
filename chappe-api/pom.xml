@@ -20,9 +20,28 @@
         <maven.build.timestamp.format>yyyy-MM-dd'T'HH:mm:ss'Z'</maven.build.timestamp.format>
         <!-- Default si git-commit-id ne s'exécute pas (build hors d'un repo git). -->
         <git.commit.id>unknown</git.commit.id>
+        <japicmp.skip>false</japicmp.skip>
     </properties>
 
     <build>
+        <pluginManagement>
+            <plugins>
+                <!-- The API compatibility report (quality profile): the packages module-info.java exports. -->
+                <plugin>
+                    <groupId>com.github.siom79.japicmp</groupId>
+                    <artifactId>japicmp-maven-plugin</artifactId>
+                    <configuration>
+                        <parameter>
+                            <includes>
+                                <include>io.vidocq.chappe.api</include>
+                                <include>io.vidocq.chappe.api.client</include>
+                            </includes>
+                        </parameter>
+                    </configuration>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+
         <resources>
             <resource>
                 <directory>src/main/resources</directory>
