@@ -1,0 +1,71 @@
+# OWASP ZAP against chappe serve, nightly (Vidocq/vidocq#273): the dynamic counterpart of the analysis.
+#
+# The job builds the chappe CLI and serves etc/zap/site with etc/zap/chappe.yml, which sets the security
+# headers an operator would, so that ZAP reports Chappe's own behaviour rather than a header left to the
+# operator. ZAP's automation plan (etc/zap/plan.yaml) crawls the site, runs the passive rules and a bounded
+# active scan (path traversal, injections, hidden files...). etc/zap/check.py then compares the alerts with
+# etc/zap/accepted.tsv: an alert of risk Low or above that is not accepted fails the job. Slack hears of
+# failures only: a nightly that reports every green night is noise nobody reads.
+#
+# ZAP is a pinned release, more than two weeks old when it was chosen, checked by SHA-256.
+name: ZAP nightly
+
+on:
+  schedule:
+    # 03:30 UTC, when the shared runners are idle.
+    - cron: '30 3 * * *'
+  # So that a maintainer can ask for a scan without waiting for the night.
+  workflow_dispatch:
+
+jobs:
+  zap:
+    runs-on: vidocq-runner
+    env:
+      ZAP_VERSION: 2.17.0
+      ZAP_SHA256: 94c8f767b1c2e94f0db66b3ae56514d5e3f5a728ee1b6c798e0c8fe2d61fbff0
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: https://codefloe.com/Vidocq/ci/setup-maven@main
+
+      - name: Build the chappe CLI
+        run: mvn -B -ntp -pl chappe-cli -am package -DskipTests
+
+      - name: Fetch ZAP
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 --retry-delay 5 -o "$RUNNER_TEMP/zap.zip" \
+            "https://github.com/zaproxy/zaproxy/releases/download/v${ZAP_VERSION}/ZAP_${ZAP_VERSION}_Crossplatform.zip"
+          echo "${ZAP_SHA256}  $RUNNER_TEMP/zap.zip" | sha256sum -c -
+          # Python's zipfile rather than unzip, which the job image may lack; zap.sh then runs through bash.
+          python3 -m zipfile -e "$RUNNER_TEMP/zap.zip" "$RUNNER_TEMP"
+
+      - name: Scan chappe serve
+        run: |
+          set -uo pipefail
+          java --enable-preview -jar chappe-cli/target/chappe-cli-*-shaded.jar serve --config etc/zap/chappe.yml \
+            > "$RUNNER_TEMP/chappe.log" 2>&1 &
+          pid=$!
+          for _ in $(seq 1 60); do curl -fs -o /dev/null http://127.0.0.1:18080/ && break; sleep 0.5; done
+          export ZAP_TARGET=http://127.0.0.1:18080/ ZAP_REPORT_DIR="$RUNNER_TEMP/zap-report"
+          mkdir -p "$ZAP_REPORT_DIR"   # ZAP's report job does not create it
+          bash "$RUNNER_TEMP/ZAP_${ZAP_VERSION}/zap.sh" -cmd -dir "$RUNNER_TEMP/zap-home" -autorun "$PWD/etc/zap/plan.yaml"
+          status=$?
+          kill "$pid" 2>/dev/null || true
+          if [ "$status" -ne 0 ]; then
+            echo "::error::ZAP failed (exit $status)"
+            tail -20 "$RUNNER_TEMP/chappe.log"
+            exit 1
+          fi
+          python3 etc/zap/check.py "$ZAP_REPORT_DIR/zap.json" etc/zap/accepted.tsv
+
+      # Main only: a run dispatched on a branch, to try a change of this workflow, tells nobody.
+      - name: Notify Slack on failure
+        if: failure() && github.ref == 'refs/heads/main'
+        uses: https://codefloe.com/Vidocq/ci/notify-slack@main
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          status: failure
+          repo: ${{ github.repository }}
+          ref: ${{ github.ref_name }}
+          run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_number }}

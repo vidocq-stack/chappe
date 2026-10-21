@@ -1,0 +1,3 @@
+# ZAP alerts accepted in the nightly scan of chappe serve (zap-nightly.yml): the plugin id, a tab, then why.
+# Any other alert of risk Low or above fails the nightly. Accept an alert only with its reason.
+10036	Server and X-Chappe-Build carry Chappe's version and build on purpose, for observability behind a reverse proxy (chappe-cli/README.md); a production switch to hide them is not decided yet.

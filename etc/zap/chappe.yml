@@ -1,0 +1,19 @@
+# chappe serve as the nightly ZAP scan runs it (zap-nightly.yml): the site next to this file, with the
+# security headers an operator sets through headers.always, so that what ZAP reports is Chappe's own
+# behaviour rather than a header left to the operator.
+server:
+  port: 18080
+  bind: 127.0.0.1
+static:
+  root: etc/zap/site
+  fallback: /404.html
+  index-files: [index.html]
+headers:
+  always:
+    X-Content-Type-Options: "nosniff"
+    X-Frame-Options: "DENY"
+    Content-Security-Policy: "default-src 'self'; frame-ancestors 'none'; form-action 'self'"
+    Referrer-Policy: "strict-origin-when-cross-origin"
+logging:
+  level: INFO
+  access-log: false
