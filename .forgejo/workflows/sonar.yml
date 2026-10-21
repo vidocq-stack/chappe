@@ -37,3 +37,6 @@ jobs:
           # Pilot of Error Prone in the analysis (Vidocq/vidocq#269): the action's default, plus the
           # errorprone profile, whose warnings the action imports as external issues.
           maven-args: -B -ntp -Pquality,errorprone -Dmaven.test.failure.ignore=true install
+          # Infer's RacerD over the main sources (Vidocq/vidocq#269): data races in Chappe's concurrent code, found
+          # in seconds. Needs the trixie job image (glibc 2.38 or later).
+          infer: 'true'
