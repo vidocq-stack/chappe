@@ -88,6 +88,10 @@ import javax.net.ssl.SSLContext;
  * @param clientAuth whether TLS clients are asked for a certificate (default: {@link ClientAuth#NONE}); anything but {@code NONE} requires an {@code sslContext}
  * @param alpnProtocols negotiated ALPN protocols (default: {@code ["h2", "http/1.1"]})
  * @param shutdownGracePeriod drain timeout before forced shutdown (default: 30s)
+ * @param exposeBuildInfo whether responses carry Chappe's version and build, in {@code Server} and in
+ *     {@code X-Chappe-Build} (default: {@code false}: {@code Server: Chappe} alone, no {@code X-Chappe-Build}).
+ *     The build identifies the binary behind a proxy, and tells an attacker which version to aim at: turn it
+ *     on for diagnosis, not on a server the internet reaches
  */
 public record ServerConfig(
         String host,
@@ -102,7 +106,8 @@ public record ServerConfig(
         SSLContext sslContext,
         ClientAuth clientAuth,
         List<String> alpnProtocols,
-        Duration shutdownGracePeriod) {
+        Duration shutdownGracePeriod,
+        boolean exposeBuildInfo) {
 
     /**
      * Validates the components the server cannot run with.
@@ -119,6 +124,41 @@ public record ServerConfig(
         if (maxDrainSize < 0) throw new IllegalArgumentException("maxDrainSize must be >= 0, got " + maxDrainSize);
     }
 
+    /**
+     * The configuration without {@code exposeBuildInfo}, which it leaves off: the canonical constructor of the
+     * releases before that component.
+     */
+    public ServerConfig(
+            String host,
+            int port,
+            int backlog,
+            Duration readTimeout,
+            Duration writeTimeout,
+            Duration idleTimeout,
+            long maxRequestSize,
+            int maxHeaderSize,
+            long maxDrainSize,
+            SSLContext sslContext,
+            ClientAuth clientAuth,
+            List<String> alpnProtocols,
+            Duration shutdownGracePeriod) {
+        this(
+                host,
+                port,
+                backlog,
+                readTimeout,
+                writeTimeout,
+                idleTimeout,
+                maxRequestSize,
+                maxHeaderSize,
+                maxDrainSize,
+                sslContext,
+                clientAuth,
+                alpnProtocols,
+                shutdownGracePeriod,
+                false);
+    }
+
     /** Default configuration (cleartext). */
     public static final ServerConfig DEFAULT = new ServerConfig(
             "0.0.0.0",
@@ -133,7 +173,8 @@ public record ServerConfig(
             null,
             ClientAuth.NONE,
             List.of("h2", "http/1.1"),
-            Duration.ofSeconds(30));
+            Duration.ofSeconds(30),
+            false);
 
     /** {@code true} if TLS is enabled. */
     public boolean tlsEnabled() {

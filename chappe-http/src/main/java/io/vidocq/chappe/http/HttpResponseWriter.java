@@ -67,11 +67,14 @@ public final class HttpResponseWriter {
     private static final byte[] DATE_PREFIX = "Date: ".getBytes(StandardCharsets.US_ASCII);
     private static final byte[] CONTENT_TYPE_TEXT =
             "Content-Type: text/plain; charset=utf-8\r\n".getBytes(StandardCharsets.US_ASCII);
-    private static final byte[] SERVER_HEADER_LINE =
+    // Server: the product alone by default, so that a public server does not tell which version to aim at;
+    // the version and build only when the server exposes its build info (ServerConfig.exposeBuildInfo).
+    private static final byte[] SERVER_DISCREET_LINE = "Server: Chappe\r\n".getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] SERVER_BUILD_LINE =
             ("Server: " + BuildInfo.serverHeader() + "\r\n").getBytes(StandardCharsets.US_ASCII);
-    // X-Chappe-Build: duplicate of the Server header under a non-standard name that
-    // reverse proxies (NPM/openresty) usually do not rewrite.
-    // Helps identify the binary behind a proxy that sets its own Server header.
+    // X-Chappe-Build, written only with the build: the Server value under a non-standard name that reverse
+    // proxies (NPM/openresty) usually do not rewrite, to identify the binary behind a proxy that sets its
+    // own Server header.
     private static final byte[] X_CHAPPE_BUILD_LINE =
             ("X-Chappe-Build: " + BuildInfo.serverHeader() + "\r\n").getBytes(StandardCharsets.US_ASCII);
 
@@ -105,6 +108,12 @@ public final class HttpResponseWriter {
     // Buffer for putAsciiLong (avoids new byte[20] per Content-Length)
     private final byte[] digitsBuf = new byte[20];
 
+    // The identity of this writer's responses: the Server line, the X-Chappe-Build line or null, and the
+    // pre-encoded head of the fast path that holds them.
+    private final byte[] serverLine;
+    private final byte[] buildLine;
+    private final byte[] fast200Prefix;
+
     // Bound for a single blocking channel.write() call within the current
     // write()/writeError() invocation — set at entry, read by flush(). This
     // writer is owned by exactly one HttpConnection and used single-threaded,
@@ -116,13 +125,34 @@ public final class HttpResponseWriter {
     // invalid header found after that can no longer be answered with a 500 (CHAPPE-008).
     private boolean headFlushed;
 
-    // Fast path: pre-encoded headers for 200 OK keep-alive (without Date, without body)
-    private static final byte[] FAST_200_KA_PREFIX = ("HTTP/1.1 200 OK\r\n"
+    // Fast path: pre-encoded headers for 200 OK keep-alive (without Date, without body), without the build
+    // or with it
+    private static final byte[] FAST_200_KA_PREFIX_DISCREET = ("HTTP/1.1 200 OK\r\n"
+                    + "Connection: keep-alive\r\n"
+                    + "Content-Type: text/plain; charset=utf-8\r\n"
+                    + "Server: Chappe\r\n")
+            .getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] FAST_200_KA_PREFIX_BUILD = ("HTTP/1.1 200 OK\r\n"
                     + "Connection: keep-alive\r\n"
                     + "Content-Type: text/plain; charset=utf-8\r\n"
                     + "Server: " + BuildInfo.serverHeader() + "\r\n"
                     + "X-Chappe-Build: " + BuildInfo.serverHeader() + "\r\n")
             .getBytes(StandardCharsets.US_ASCII);
+
+    /** A writer whose responses name Chappe without its version. */
+    public HttpResponseWriter() {
+        this(false);
+    }
+
+    /**
+     * A writer whose responses name Chappe, with its version and build in {@code Server} and in
+     * {@code X-Chappe-Build} when {@code exposeBuildInfo} is {@code true} ({@code ServerConfig.exposeBuildInfo}).
+     */
+    public HttpResponseWriter(boolean exposeBuildInfo) {
+        this.serverLine = exposeBuildInfo ? SERVER_BUILD_LINE : SERVER_DISCREET_LINE;
+        this.buildLine = exposeBuildInfo ? X_CHAPPE_BUILD_LINE : null;
+        this.fast200Prefix = exposeBuildInfo ? FAST_200_KA_PREFIX_BUILD : FAST_200_KA_PREFIX_DISCREET;
+    }
 
     public void write(
             Response response,
@@ -185,14 +215,14 @@ public final class HttpResponseWriter {
             putBytes(CRLF, buffer, channel);
         }
 
-        // Server header (build info) — unless the app set its own identity
+        // Server header — unless the app set its own identity
         if (!response.headers().contains("Server")) {
-            putBytes(SERVER_HEADER_LINE, buffer, channel);
+            putBytes(serverLine, buffer, channel);
         }
-        // X-Chappe-Build: non-standard header that survives behind reverse proxies
-        // that rewrite the Server header (NPM, openresty, oauth2-proxy).
-        if (!response.headers().contains("X-Chappe-Build")) {
-            putBytes(X_CHAPPE_BUILD_LINE, buffer, channel);
+        // X-Chappe-Build, when the build is exposed: non-standard header that survives behind reverse
+        // proxies that rewrite the Server header (NPM, openresty, oauth2-proxy).
+        if (buildLine != null && !response.headers().contains("X-Chappe-Build")) {
+            putBytes(buildLine, buffer, channel);
         }
 
         // Content-Length ou Transfer-Encoding: chunked
@@ -238,7 +268,7 @@ public final class HttpResponseWriter {
     private void writeFastPath(Body body, long contentLength, ByteBuffer buffer, WritableByteChannel channel)
             throws IOException {
         // Status + Connection
-        putBytes(FAST_200_KA_PREFIX, buffer, channel);
+        putBytes(fast200Prefix, buffer, channel);
         // Date
         putBytes(DATE_PREFIX, buffer, channel);
         putBytes(getDateValue(), buffer, channel);
@@ -275,8 +305,10 @@ public final class HttpResponseWriter {
 
         byte[] bodyBytes = message.getBytes(StandardCharsets.UTF_8);
         putBytes(CONTENT_TYPE_TEXT, buffer, channel);
-        putBytes(SERVER_HEADER_LINE, buffer, channel);
-        putBytes(X_CHAPPE_BUILD_LINE, buffer, channel);
+        putBytes(serverLine, buffer, channel);
+        if (buildLine != null) {
+            putBytes(buildLine, buffer, channel);
+        }
         putBytes(CONTENT_LENGTH_PREFIX, buffer, channel);
         putAsciiLong(bodyBytes.length, buffer, channel);
         putBytes(CRLF, buffer, channel);

@@ -34,8 +34,12 @@ import io.vidocq.chappe.cli.yaml.YamlNode;
  */
 public record ChappeConfig(Server server, Static staticCfg, Headers headers, Logging logging) {
 
-    public record Server(Integer port, String bind) {
-        public static final Server EMPTY = new Server(null, null);
+    /**
+     * The {@code server} section. {@code exposeBuildInfo} ({@code expose-build-info}) puts Chappe's version and
+     * build in {@code Server} and {@code X-Chappe-Build}; off when absent.
+     */
+    public record Server(Integer port, String bind, Boolean exposeBuildInfo) {
+        public static final Server EMPTY = new Server(null, null, null);
     }
 
     public record Static(
@@ -70,7 +74,10 @@ public record ChappeConfig(Server server, Static staticCfg, Headers headers, Log
 
     private static Server parseServer(YamlNode.Map m) {
         if (m == null) return Server.EMPTY;
-        return new Server(m.integer("port").orElse(null), m.string("bind").orElse(null));
+        return new Server(
+                m.integer("port").orElse(null),
+                m.string("bind").orElse(null),
+                m.bool("expose-build-info").orElse(null));
     }
 
     private static Static parseStatic(YamlNode.Map m) {

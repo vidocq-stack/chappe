@@ -28,8 +28,8 @@ import java.util.Properties;
  * Java version. Loaded once when the class is initialized from
  * {@code chappe-build.properties} (generated at build time by Maven filtering).
  * <p>
- * Exposed on every response via the HTTP {@code Server} header and useful for
- * precisely tracking the binary running in staging/prod.
+ * Exposed in the HTTP {@code Server} and {@code X-Chappe-Build} headers when the server exposes its build
+ * ({@link ServerConfig#exposeBuildInfo()}), and useful for precisely tracking the binary running in staging.
  *
  * <pre>{@code
  * BuildInfo.serverHeader();
@@ -43,6 +43,7 @@ public final class BuildInfo {
     private static final String BUILD_TIMESTAMP;
     private static final String JAVA_VERSION;
     private static final String SERVER_HEADER;
+    private static final String UNKNOWN = "unknown";
 
     static {
         Properties p = new Properties();
@@ -51,16 +52,27 @@ public final class BuildInfo {
         } catch (IOException _) {
             // Missing or unreadable resource: keep default values.
         }
-        VERSION = p.getProperty("chappe.version", "unknown");
-        GIT_COMMIT = p.getProperty("chappe.git.commit", "unknown");
-        BUILD_TIMESTAMP = p.getProperty("chappe.build.timestamp", "unknown");
-        JAVA_VERSION = p.getProperty("chappe.java.version", System.getProperty("java.version", "unknown"));
+        VERSION = value(p, "chappe.version");
+        GIT_COMMIT = value(p, "chappe.git.commit");
+        BUILD_TIMESTAMP = value(p, "chappe.build.timestamp");
+        String javaVersion = value(p, "chappe.java.version");
+        JAVA_VERSION = UNKNOWN.equals(javaVersion) ? System.getProperty("java.version", UNKNOWN) : javaVersion;
 
         // Compact format similar to "Server: nginx/1.25.3"
         SERVER_HEADER = "Chappe/" + VERSION + "+" + GIT_COMMIT + " (" + BUILD_TIMESTAMP + ")";
     }
 
     private BuildInfo() {}
+
+    /**
+     * The value of {@code key}, or {@code "unknown"} when it is missing, blank, or left as the {@code ${...}}
+     * placeholder of a build that could not fill it: without git-commit-id, the commit read
+     * {@code ${git.commit.id.abbrev}} (CHAPPE-038).
+     */
+    static String value(Properties properties, String key) {
+        String value = properties.getProperty(key);
+        return (value == null || value.isBlank() || value.startsWith("${")) ? UNKNOWN : value;
+    }
 
     /** Maven version (e.g. {@code 0.2.0}). */
     public static String version() {

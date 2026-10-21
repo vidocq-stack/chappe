@@ -94,4 +94,17 @@ class ChappeConfigTest {
                 """));
         assertEquals("/index.html", c.staticCfg().spaFallback());
     }
+
+    @Test
+    void exposeBuildInfoKeyRecognised() {
+        var c = ChappeConfig.from(YamlReader.parse("""
+                server:
+                  expose-build-info: true
+                """));
+        assertEquals(Boolean.TRUE, c.server().exposeBuildInfo());
+        assertNull(ChappeConfig.from(YamlReader.parse("""
+                        server:
+                          port: 9000
+                        """)).server().exposeBuildInfo());
+    }
 }

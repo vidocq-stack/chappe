@@ -118,4 +118,15 @@ class CliArgsTest {
         assertNull(a.root());
         assertTrue(a.extraHeaders().isEmpty());
     }
+
+    @Test
+    void exposeBuildInfoFlags() {
+        assertEquals(
+                Boolean.TRUE,
+                CliArgs.parse(new String[] {"serve", "--expose-build-info"}).exposeBuildInfo());
+        assertEquals(
+                Boolean.FALSE,
+                CliArgs.parse(new String[] {"serve", "--no-expose-build-info"}).exposeBuildInfo());
+        assertNull(CliArgs.parse(new String[] {"serve"}).exposeBuildInfo());
+    }
 }

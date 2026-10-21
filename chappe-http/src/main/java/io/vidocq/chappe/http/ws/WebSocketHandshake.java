@@ -41,10 +41,19 @@ public final class WebSocketHandshake {
     /** RFC 6455 §1.3 "Magic GUID" — concatenated to {@code Sec-WebSocket-Key} before SHA-1. */
     public static final String GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
-    private static final byte[] PROLOGUE = ("HTTP/1.1 101 Switching Protocols\r\n"
+    // The 101 names Chappe as every response does: without its version by default, with its build when the
+    // server exposes it (ServerConfig.exposeBuildInfo).
+    private static final byte[] PROLOGUE_DISCREET = ("HTTP/1.1 101 Switching Protocols\r\n"
+                    + "Upgrade: websocket\r\n"
+                    + "Connection: Upgrade\r\n"
+                    + "Server: Chappe\r\n"
+                    + "Sec-WebSocket-Accept: ")
+            .getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] PROLOGUE_BUILD = ("HTTP/1.1 101 Switching Protocols\r\n"
                     + "Upgrade: websocket\r\n"
                     + "Connection: Upgrade\r\n"
                     + "Server: " + BuildInfo.serverHeader() + "\r\n"
+                    + "X-Chappe-Build: " + BuildInfo.serverHeader() + "\r\n"
                     + "Sec-WebSocket-Accept: ")
             .getBytes(StandardCharsets.US_ASCII);
 
@@ -62,6 +71,17 @@ public final class WebSocketHandshake {
     /** Writes the 101 response with the computed accept value and an optional subprotocol. */
     public static void writeResponse(WritableByteChannel channel, String secWebSocketKey, String subprotocol)
             throws IOException {
+        writeResponse(channel, secWebSocketKey, subprotocol, false);
+    }
+
+    /**
+     * Writes the {@code 101 Switching Protocols} response, naming Chappe with its version and build when
+     * {@code exposeBuildInfo} is {@code true}, as every response does then.
+     */
+    public static void writeResponse(
+            WritableByteChannel channel, String secWebSocketKey, String subprotocol, boolean exposeBuildInfo)
+            throws IOException {
+        byte[] prologue = exposeBuildInfo ? PROLOGUE_BUILD : PROLOGUE_DISCREET;
         var accept = computeAccept(secWebSocketKey);
         var sb = new StringBuilder(accept.length() + 64);
         sb.append(accept).append("\r\n");
@@ -71,8 +91,8 @@ public final class WebSocketHandshake {
         sb.append("\r\n");
         var tail = sb.toString().getBytes(StandardCharsets.US_ASCII);
 
-        var buf = ByteBuffer.allocate(PROLOGUE.length + tail.length);
-        buf.put(PROLOGUE).put(tail).flip();
+        var buf = ByteBuffer.allocate(prologue.length + tail.length);
+        buf.put(prologue).put(tail).flip();
         while (buf.hasRemaining()) {
             channel.write(buf);
         }

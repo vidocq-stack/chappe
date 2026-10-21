@@ -32,7 +32,7 @@ cause hypothesis, and status.
 ## CHAPPE-038 — The build identity shows `${git.commit.id.abbrev}` when git-commit-id does not run
 
 - **Date**: 2026-10-21
-- **Status**: OPEN
+- **Status**: FIXED on `feat/discreet-server-header` (2026-10-22)
 - **Module**: `chappe-api` (`BuildInfo`, `chappe-build.properties`), shown by `chappe-http` (`HttpResponseWriter`)
 - **Symptom**: the `Server` and `X-Chappe-Build` headers of every response, and the startup line of
   `chappe serve`, read `Chappe/0.4.0-SNAPSHOT+${git.commit.id.abbrev} (2026-10-21T21:33:00Z)` when the build
@@ -46,8 +46,9 @@ cause hypothesis, and status.
   `chappe-api/pom.xml` gives a default to `git.commit.id` (`unknown`), not to `git.commit.id.abbrev`. Maven
   leaves the placeholder as is, so `BuildInfo` finds the property, with that text, and its own `unknown`
   fallback never applies.
-- **Fix (proposed)**: a default `git.commit.id.abbrev` in `chappe-api/pom.xml`, and `BuildInfo` treating a
-  value still in the `${…}` form as unknown, under a unit test.
+- **Fix**: a default `git.commit.id.abbrev` (`unknown`) in `chappe-api/pom.xml`, and `BuildInfo` reading a
+  missing, blank or still `${…}` value as `unknown` (`BuildInfoTest`). The headers no longer carry the build
+  by default either: `Server: Chappe` unless the server exposes it (`exposeBuildInfo`).
 
 ---
 

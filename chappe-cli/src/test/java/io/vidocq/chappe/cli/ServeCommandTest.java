@@ -20,6 +20,7 @@
 package io.vidocq.chappe.cli;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -32,6 +33,7 @@ import java.nio.file.Path;
 import java.util.Map;
 
 import io.vidocq.chappe.api.Server;
+import io.vidocq.chappe.cli.yaml.YamlReader;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -183,5 +185,25 @@ class ServeCommandTest {
     @SuppressWarnings("unused")
     private static Map<String, String> envOverride() {
         return Map.of(); // placeholder for future env override hook
+    }
+
+    @Test
+    void theBuildIsExposedOnlyWhenAskedFor() {
+        var serve = new String[] {"serve"};
+        var yamlOn = ChappeConfig.from(YamlReader.parse("""
+                server:
+                  expose-build-info: true
+                """));
+        assertFalse(
+                ServeCommand.Effective.resolve(CliArgs.parse(serve), ChappeConfig.EMPTY)
+                        .exposeBuildInfo(),
+                "off by default");
+        assertTrue(
+                ServeCommand.Effective.resolve(CliArgs.parse(serve), yamlOn).exposeBuildInfo(),
+                "server.expose-build-info turns it on");
+        assertFalse(
+                ServeCommand.Effective.resolve(CliArgs.parse(new String[] {"serve", "--no-expose-build-info"}), yamlOn)
+                        .exposeBuildInfo(),
+                "the flag wins over the YAML");
     }
 }

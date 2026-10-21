@@ -61,7 +61,8 @@ public final class ServeCommand {
             boolean accessLog,
             String indexFile,
             Map<String, String> alwaysHeaders,
-            Map<String, String> stagingHeaders) {
+            Map<String, String> stagingHeaders,
+            boolean exposeBuildInfo) {
 
         public static Effective resolve(CliArgs args, ChappeConfig yaml) {
             Path root = args.root() != null
@@ -102,6 +103,10 @@ public final class ServeCommand {
                     new LinkedHashMap<>(yaml.headers().always());
             always.putAll(args.extraHeaders()); // CLI override / extension
             Map<String, String> staging = yaml.headers().staging();
+            // CLI > YAML; off by default, so that the server does not tell which version to aim at.
+            boolean exposeBuildInfo = args.exposeBuildInfo() != null
+                    ? args.exposeBuildInfo()
+                    : Boolean.TRUE.equals(yaml.server().exposeBuildInfo());
 
             return new Effective(
                     root,
@@ -114,7 +119,8 @@ public final class ServeCommand {
                     accessLog,
                     indexFile,
                     Map.copyOf(always),
-                    Map.copyOf(staging));
+                    Map.copyOf(staging),
+                    exposeBuildInfo);
         }
     }
 
@@ -154,6 +160,7 @@ public final class ServeCommand {
         Server server = Server.builder()
                 .port(cfg.port())
                 .host(cfg.host())
+                .exposeBuildInfo(cfg.exposeBuildInfo())
                 .handler(handler)
                 .build();
         server.start();

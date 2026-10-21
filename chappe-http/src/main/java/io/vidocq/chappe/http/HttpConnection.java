@@ -103,7 +103,7 @@ public final class HttpConnection {
         }
         this.writeBuffer = writeBuffer != null ? writeBuffer : ByteBuffer.allocateDirect(BUFFER_SIZE);
         this.parser = new HttpRequestParser();
-        this.writer = new HttpResponseWriter();
+        this.writer = new HttpResponseWriter(config.exposeBuildInfo());
         this.request = new HttpRequestImpl();
         this.context = new RequestContext(request);
 
@@ -232,7 +232,8 @@ public final class HttpConnection {
                     // 6a. WebSocket upgrade: switch to frame mode and end HTTP loop.
                     if (response instanceof WebSocketUpgrade upgrade) {
                         var key = request.headers().firstOrNull("Sec-WebSocket-Key");
-                        WebSocketHandshake.writeResponse(writeChannel, key, upgrade.subprotocol());
+                        WebSocketHandshake.writeResponse(
+                                writeChannel, key, upgrade.subprotocol(), config.exposeBuildInfo());
                         // Prefer the matched handshake request (carries route pathParams) over the raw one.
                         var handshakeReq = upgrade.handshakeRequest() != null ? upgrade.handshakeRequest() : request;
                         var wsConn = new WebSocketConnection(

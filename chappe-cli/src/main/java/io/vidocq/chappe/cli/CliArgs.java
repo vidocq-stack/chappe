@@ -39,12 +39,13 @@ public record CliArgs(
         String cacheControl,
         Boolean gzip,
         Boolean accessLog,
+        Boolean exposeBuildInfo,
         Map<String, String> extraHeaders,
         boolean help) {
 
     /** Sentinel indicating that help should be displayed. */
     public static final CliArgs HELP =
-            new CliArgs(null, null, null, null, null, null, null, null, null, Map.of(), true);
+            new CliArgs(null, null, null, null, null, null, null, null, null, null, Map.of(), true);
 
     /** Parses arguments. {@code argv[0]} must be {@code "serve"} (otherwise {@code --help}). */
     public static CliArgs parse(String[] argv) {
@@ -64,6 +65,7 @@ public record CliArgs(
         String cacheControl = null;
         Boolean gzip = null;
         Boolean accessLog = null;
+        Boolean exposeBuildInfo = null;
         LinkedHashMap<String, String> extraHeaders = new LinkedHashMap<>();
         boolean help = false;
 
@@ -119,6 +121,14 @@ public record CliArgs(
                     accessLog = Boolean.FALSE;
                     i++;
                 }
+                case "--expose-build-info" -> {
+                    exposeBuildInfo = Boolean.TRUE;
+                    i++;
+                }
+                case "--no-expose-build-info" -> {
+                    exposeBuildInfo = Boolean.FALSE;
+                    i++;
+                }
                 case "--header" -> {
                     String kv = requireValue(argv, ++i, a);
                     int eq = kv.indexOf('=');
@@ -142,6 +152,7 @@ public record CliArgs(
                 cacheControl,
                 gzip,
                 accessLog,
+                exposeBuildInfo,
                 Map.copyOf(extraHeaders),
                 help);
     }
@@ -173,6 +184,8 @@ public record CliArgs(
                   --access-log         Active l'access log Apache CLF sur stdout
                   --no-access-log      Désactive l'access log
                   --header KEY=VALUE   Ajoute un header (répétable, merge dans headers.always)
+                  --expose-build-info  Puts Chappe's version and build in Server and X-Chappe-Build
+                                       (off by default: Server: Chappe; --no-expose-build-info)
                   -h, --help           Affiche ce message
                 """;
     }

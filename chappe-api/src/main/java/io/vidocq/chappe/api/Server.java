@@ -146,6 +146,15 @@ public interface Server extends AutoCloseable {
         /** Drain delay before forced closure on stop (default: 30s). */
         Builder shutdownGracePeriod(Duration duration);
 
+        /**
+         * Whether responses carry Chappe's version and build: {@code Server: Chappe/<version>+<commit> (<build
+         * time>)}, and {@code X-Chappe-Build} with the same value, a name reverse proxies leave alone. Off by
+         * default: responses then say {@code Server: Chappe} and nothing more, so that a public server does not
+         * tell which version to aim at. Turn it on to identify a binary behind a proxy, not on a server the
+         * internet reaches.
+         */
+        Builder exposeBuildInfo(boolean expose);
+
         Server build();
     }
 }

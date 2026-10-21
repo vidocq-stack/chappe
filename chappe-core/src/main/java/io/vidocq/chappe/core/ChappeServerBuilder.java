@@ -49,6 +49,7 @@ final class ChappeServerBuilder implements Server.Builder {
     private ClientAuth clientAuth = ServerConfig.DEFAULT.clientAuth();
     private List<String> alpnProtocols = ServerConfig.DEFAULT.alpnProtocols();
     private Duration shutdownGracePeriod = ServerConfig.DEFAULT.shutdownGracePeriod();
+    private boolean exposeBuildInfo = ServerConfig.DEFAULT.exposeBuildInfo();
     private Handler handler;
 
     @Override
@@ -132,6 +133,12 @@ final class ChappeServerBuilder implements Server.Builder {
     }
 
     @Override
+    public Server.Builder exposeBuildInfo(boolean expose) {
+        this.exposeBuildInfo = expose;
+        return this;
+    }
+
+    @Override
     public Server build() {
         if (handler == null) {
             throw new IllegalStateException("Handler is required — call handler(Handler) before build()");
@@ -149,7 +156,8 @@ final class ChappeServerBuilder implements Server.Builder {
                 sslContext,
                 clientAuth,
                 alpnProtocols,
-                shutdownGracePeriod);
+                shutdownGracePeriod,
+                exposeBuildInfo);
         return new ChappeServer(config, handler);
     }
 }
