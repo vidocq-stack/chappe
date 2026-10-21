@@ -56,6 +56,7 @@ public final class BoundedReads {
             try {
                 Thread.sleep(timeout);
             } catch (InterruptedException _) {
+                Thread.currentThread().interrupt(); // keep the status, though this thread ends here
                 return; // data arrived, watchdog disarmed
             }
             if (!got.get()) {

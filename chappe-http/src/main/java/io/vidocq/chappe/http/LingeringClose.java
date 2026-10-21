@@ -36,7 +36,7 @@ final class LingeringClose {
     /** How long, and how much, the server drains before its full close. */
     static final Duration TIME = Duration.ofSeconds(2);
 
-    static final long MAX_BYTES = 1024 * 1024;
+    static final long MAX_BYTES = 1024L * 1024;
 
     private LingeringClose() {}
 

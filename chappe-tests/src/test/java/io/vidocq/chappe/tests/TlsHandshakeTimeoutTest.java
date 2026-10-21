@@ -333,16 +333,21 @@ class TlsHandshakeTimeoutTest {
             }
             long deadline = flightEnd + Duration.ofSeconds(8).toNanos();
             try {
-                while (System.nanoTime() < deadline) {
-                    out.write(0);
-                    out.flush();
-                    Thread.sleep(50);
-                }
+                writeUntil(out, deadline);
                 fail("the server never closed the rejected connection");
             } catch (IOException _) {
                 // the reset of the server's full close
             }
             return new RejectedHandshake(alert, records, elapsedMs(flightEnd));
+        }
+    }
+
+    /** Writes one byte every 50 ms until {@code deadline} ({@link System#nanoTime()}), or until a write fails. */
+    private static void writeUntil(OutputStream out, long deadline) throws IOException, InterruptedException {
+        while (System.nanoTime() < deadline) {
+            out.write(0);
+            out.flush();
+            Thread.sleep(50);
         }
     }
 

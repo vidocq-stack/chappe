@@ -317,7 +317,9 @@ public final class GrpcWebCallImpl implements GrpcCall {
                                 // lost connection
                             }
                         } catch (InterruptedException _) {
-                            // watchdog stopped because handler finished before deadline
+                            // watchdog stopped because handler finished before deadline;
+                            // keep the status, though this thread ends here
+                            Thread.currentThread().interrupt();
                         }
                     });
         }

@@ -142,33 +142,25 @@ public final class HpackStaticTable {
 
     private record Key(String name, String value) {}
 
-    // Cached references for ultra-hot names to enable identity comparisons.
-    // Compare with `==` before `equals()`: zero extra cost when caller passes interned
-    // String references (as HpackEncoder does using constants from this class).
-    private static final String N_METHOD = ENTRIES[2][0]; // ":method"
-    private static final String N_PATH = ENTRIES[4][0]; // ":path"
-    private static final String N_SCHEME = ENTRIES[6][0]; // ":scheme"
-    private static final String N_STATUS = ENTRIES[8][0]; // ":status"
-
     /**
      * Finds the 1-based index of the entry whose name and value both match exactly.
      *
      * @return 1-based index, or 0 if not found
      */
-    @SuppressWarnings("ReferenceEquality") // Intentional `==` comparisons: HPACK fast path
     public static int findExact(String name, String value) {
         // Inline fast path for pseudo-headers (>90% of HTTP/2 traffic).
-        // Avoids Key-record allocation + HashMap traversal on the hot path.
-        if (name == N_METHOD || ":method".equals(name)) {
+        // Avoids Key-record allocation + HashMap traversal on the hot path. String.equals tests
+        // identity first, so the interned names the encoder passes match at the cost of a `==`.
+        if (":method".equals(name)) {
             if ("GET".equals(value)) return 2;
             if ("POST".equals(value)) return 3;
-        } else if (name == N_PATH || ":path".equals(name)) {
+        } else if (":path".equals(name)) {
             if ("/".equals(value)) return 4;
             if ("/index.html".equals(value)) return 5;
-        } else if (name == N_SCHEME || ":scheme".equals(name)) {
+        } else if (":scheme".equals(name)) {
             if ("http".equals(value)) return 6;
             if ("https".equals(value)) return 7;
-        } else if (name == N_STATUS || ":status".equals(name)) {
+        } else if (":status".equals(name)) {
             return switch (value) {
                 case "200" -> 8;
                 case "204" -> 9;
@@ -189,13 +181,12 @@ public final class HpackStaticTable {
      *
      * @return 1-based index, or 0 if not found
      */
-    @SuppressWarnings("ReferenceEquality") // Intentional `==` comparisons: HPACK fast path
     public static int findByName(String name) {
         // Inline fast path for pseudo-headers (>90% of HTTP/2 traffic).
-        if (name == N_METHOD || ":method".equals(name)) return 2;
-        if (name == N_PATH || ":path".equals(name)) return 4;
-        if (name == N_SCHEME || ":scheme".equals(name)) return 6;
-        if (name == N_STATUS || ":status".equals(name)) return 8;
+        if (":method".equals(name)) return 2;
+        if (":path".equals(name)) return 4;
+        if (":scheme".equals(name)) return 6;
+        if (":status".equals(name)) return 8;
         Integer idx = NAME_FIRST_INDEX.get(name);
         return idx == null ? 0 : idx;
     }

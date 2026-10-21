@@ -188,19 +188,22 @@ class LingeringCloseTest {
             out.flush();
 
             long start = System.nanoTime();
-            byte[] chunk = "X".repeat(1024).getBytes(StandardCharsets.US_ASCII);
             assertThrows(
                     IOException.class,
-                    () -> {
-                        while (System.nanoTime() - start < 15_000_000_000L) {
-                            out.write(chunk);
-                            out.flush();
-                            Thread.sleep(20);
-                        }
-                    },
+                    () -> keepSending(out, start),
                     "the server must eventually close a connection that keeps sending after an error");
             long elapsedMs = (System.nanoTime() - start) / 1_000_000;
             assertTrue(elapsedMs < 8_000, "lingering must be bounded, took " + elapsedMs + " ms");
+        }
+    }
+
+    /** Sends 1 KiB every 20 ms for 15 s from {@code start}, or until a write fails. */
+    private static void keepSending(OutputStream out, long start) throws IOException, InterruptedException {
+        byte[] chunk = "X".repeat(1024).getBytes(StandardCharsets.US_ASCII);
+        while (System.nanoTime() - start < 15_000_000_000L) {
+            out.write(chunk);
+            out.flush();
+            Thread.sleep(20);
         }
     }
 

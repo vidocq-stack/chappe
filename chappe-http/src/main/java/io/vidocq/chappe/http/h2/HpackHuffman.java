@@ -170,7 +170,7 @@ public final class HpackHuffman {
     public static String decode(ByteBuffer src, int length) {
         // The shortest code is 5 bits, so length octets decode to at most length * 8 / 5 symbols.
         // Callers check length against the bytes actually available before calling.
-        byte[] out = new byte[(int) Math.min((long) length * 8 / 5 + 1, Integer.MAX_VALUE - 8)];
+        byte[] out = new byte[(int) Math.min((long) length * 8 / 5 + 1, Integer.MAX_VALUE - 8L)];
         int outLen = 0;
 
         Node node = ROOT;

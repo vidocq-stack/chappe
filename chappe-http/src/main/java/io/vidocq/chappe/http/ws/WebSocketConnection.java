@@ -109,8 +109,8 @@ public final class WebSocketConnection implements WebSocket {
             return;
         }
 
-        int currentDataOpcode = -1; // -1 = no data message currently being assembled
-        ByteArrayOutputStream messageBuf = null;
+        int currentDataOpcode = -1; // opcode of the data message being assembled
+        ByteArrayOutputStream messageBuf = null; // not null exactly while a message is being assembled
 
         try {
             while (open && !closeReceived) {
@@ -130,12 +130,12 @@ public final class WebSocketConnection implements WebSocket {
 
                 // -- Data frames (TEXT / BINARY / CONTINUATION) --
                 if (frame.opcode() == WebSocketFrame.OP_CONTINUATION) {
-                    if (currentDataOpcode == -1) {
+                    if (messageBuf == null) {
                         throw new WebSocketProtocolException(
                                 CloseCodes.PROTOCOL_ERROR, "CONTINUATION without prior data frame");
                     }
                 } else {
-                    if (currentDataOpcode != -1) {
+                    if (messageBuf != null) {
                         throw new WebSocketProtocolException(
                                 CloseCodes.PROTOCOL_ERROR, "New data frame while previous message incomplete");
                     }

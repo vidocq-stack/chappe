@@ -79,6 +79,7 @@ public final class BoundedWrites {
             try {
                 Thread.sleep(timeout);
             } catch (InterruptedException _) {
+                Thread.currentThread().interrupt(); // keep the status, though this thread ends here
                 return; // write completed, watchdog disarmed
             }
             if (!got.get()) {

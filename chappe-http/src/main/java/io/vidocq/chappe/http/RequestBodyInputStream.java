@@ -51,7 +51,7 @@ abstract class RequestBodyInputStream extends InputStream {
         try {
             return readByte();
         } catch (IOException | RuntimeException e) {
-            tooLarge |= e instanceof RequestBodyTooLargeException;
+            if (e instanceof RequestBodyTooLargeException) tooLarge = true;
             failed = true;
             throw e;
         }
@@ -62,7 +62,7 @@ abstract class RequestBodyInputStream extends InputStream {
         try {
             return readBytes(b, off, len);
         } catch (IOException | RuntimeException e) {
-            tooLarge |= e instanceof RequestBodyTooLargeException;
+            if (e instanceof RequestBodyTooLargeException) tooLarge = true;
             failed = true;
             throw e;
         }
