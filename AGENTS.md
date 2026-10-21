@@ -33,7 +33,7 @@ Use Java 25 with preview enabled. Keep packages and Java modules under `io.vidoc
 
 ## Testing Guidelines
 
-Tests use JUnit Jupiter from JUnit 6 and Surefire with `--enable-preview`. Name test classes `*Test` and place socket-based integration tests in `chappe-tests` or protocol cases in `chappe-conformance`. Prefer real `HttpClient` or raw socket checks over HTTP mocking. Add focused tests near the changed module, then run a narrow command first, for example `mvn -ntp -pl chappe-http test`.
+Tests use JUnit Jupiter from JUnit 6 and Surefire with `--enable-preview`. The architecture rules (no dependency outside the JDK, no reflection, no platform thread or `ThreadLocal`, the api/http/core layers) are ArchUnit tests in `chappe-tests`, package `architecture`: a change that breaks one fails the build. Name test classes `*Test` and place socket-based integration tests in `chappe-tests` or protocol cases in `chappe-conformance`. Prefer real `HttpClient` or raw socket checks over HTTP mocking. Add focused tests near the changed module, then run a narrow command first, for example `mvn -ntp -pl chappe-http test`.
 
 ## Commit & Pull Request Guidelines
 

@@ -170,7 +170,8 @@ Find root causes. Avoid temporary fixes. Maintain senior engineering standards.
 
 ### Zero dependency
 If a feature requires an external dependency, it has no place in Chappe.
-The only exception is the test framework (JUnit).
+The only exceptions are two test-scope libraries, never shipped: the test framework (JUnit), and ArchUnit,
+which checks the architecture rules (`chappe-tests`, package `architecture`; Vidocq/vidocq#289).
 
 ## Documentation (Antora) conventions
 

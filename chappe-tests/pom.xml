@@ -41,6 +41,15 @@
             <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- The architecture rules as tests (Vidocq/vidocq#289): test scope only, never shipped, the second
+             exception to Chappe's zero-dependency rule after JUnit (CLAUDE.md). ArchUnit's core, run from plain
+             JUnit tests rather than its JUnit 5 engine. Apache-2.0; brings slf4j-api. -->
+        <dependency>
+            <groupId>com.tngtech.archunit</groupId>
+            <artifactId>archunit</artifactId>
+            <version>1.5.1</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
