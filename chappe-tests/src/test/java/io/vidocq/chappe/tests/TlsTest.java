@@ -120,9 +120,13 @@ class TlsTest {
                             return new X509Certificate[0];
                         }
 
-                        public void checkClientTrusted(X509Certificate[] c, String a) {}
+                        public void checkClientTrusted(X509Certificate[] c, String a) {
+                            // trusts everything: the test server's certificate is self-signed
+                        }
 
-                        public void checkServerTrusted(X509Certificate[] c, String a) {}
+                        public void checkServerTrusted(X509Certificate[] c, String a) {
+                            // trusts everything: the test server's certificate is self-signed
+                        }
                     }
                 },
                 null);
@@ -226,7 +230,7 @@ class TlsTest {
         Thread runner = Thread.ofVirtual().name("tls-test-client").start(task);
         try {
             return task.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
-        } catch (TimeoutException e) {
+        } catch (TimeoutException _) {
             Path dump = Files.createTempFile("chappe-tls-timeout-", ".txt");
             Files.delete(dump); // dumpThreads refuses an existing file
             ManagementFactory.getPlatformMXBean(HotSpotDiagnosticMXBean.class)
@@ -280,10 +284,8 @@ class TlsTest {
                         // NEED_WRAP right after the ServerHello (compatibility ChangeCipherSpec),
                         // leaving the rest of the flight buffered. Reading first then waits for
                         // bytes the server has already sent, while the server waits for us.
-                        if (needMoreBytes || netIn.position() == 0) {
-                            if (ch.read(netIn) < 0) {
-                                throw new IOException("peer closed during client handshake");
-                            }
+                        if ((needMoreBytes || netIn.position() == 0) && ch.read(netIn) < 0) {
+                            throw new IOException("peer closed during client handshake");
                         }
                         netIn.flip();
                         SSLEngineResult r;

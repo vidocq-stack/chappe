@@ -132,9 +132,9 @@ class Http2SettingsTest {
                     out.flush();
                     serverSettingsAcked = true;
                 }
-                if (frame.type() == 0x04 && (frame.flags() & 0x01) != 0) {
-                    // Our SETTINGS was ACKed
-                    if (serverSettingsAcked) break;
+                if (frame.type() == 0x04 && (frame.flags() & 0x01) != 0 && serverSettingsAcked) {
+                    // Our SETTINGS was ACKed, and we already ACKed the server's
+                    break;
                 }
             }
 

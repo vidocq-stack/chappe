@@ -142,10 +142,15 @@ class ChunkedTransferTest {
         try (var socket = new Socket("127.0.0.1", port)) {
             socket.setSoTimeout(5000);
             var out = socket.getOutputStream();
-            write(
-                    out,
-                    "POST /echo HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n"
-                            + "Connection: close\r\n\r\n5\r\nHello\r\n");
+            write(out, """
+                    POST /echo HTTP/1.1\r
+                    Host: localhost\r
+                    Transfer-Encoding: chunked\r
+                    Connection: close\r
+                    \r
+                    5\r
+                    Hello\r
+                    """);
             out.flush();
             // The second chunk is sent only once the first read returned.
             assertEquals("Hello", firstRead.get(5, java.util.concurrent.TimeUnit.SECONDS));
@@ -171,7 +176,7 @@ class ChunkedTransferTest {
                     try {
                         outcome.complete("body:"
                                 + new String(req.body().asInputStream().readAllBytes(), StandardCharsets.US_ASCII));
-                    } catch (IOException e) {
+                    } catch (IOException _) {
                         outcome.complete("IOException");
                     }
                     return Response.ok("done");
@@ -181,10 +186,15 @@ class ChunkedTransferTest {
         port = server.port();
         try (var socket = new Socket("127.0.0.1", port)) {
             var out = socket.getOutputStream();
-            write(
-                    out,
-                    "POST /echo HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n"
-                            + "5\r\nHello\r\n3\r\nab");
+            write(out, """
+                    POST /echo HTTP/1.1\r
+                    Host: localhost\r
+                    Transfer-Encoding: chunked\r
+                    \r
+                    5\r
+                    Hello\r
+                    3\r
+                    ab""");
             out.flush();
             socket.shutdownOutput();
             assertEquals("IOException", outcome.get(5, java.util.concurrent.TimeUnit.SECONDS));

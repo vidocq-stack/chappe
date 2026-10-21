@@ -233,6 +233,7 @@ class ExtensionSpiTest {
                         out.write("streaming ".getBytes());
                         out.write("body".getBytes());
                     } catch (IOException _) {
+                        // a failed write truncates the body: the assertion on the response reports it
                     }
                 }))
                 .build());
@@ -366,8 +367,8 @@ class ExtensionSpiTest {
 
     @Test
     void builderRequiresAtLeastOneSource() {
-        assertThrows(
-                IllegalStateException.class, () -> StaticFileHandler.builder().build());
+        var builder = StaticFileHandler.builder();
+        assertThrows(IllegalStateException.class, builder::build);
     }
 
     // -- Upstream bugs reported by vidocq-rest-cassini-extension --

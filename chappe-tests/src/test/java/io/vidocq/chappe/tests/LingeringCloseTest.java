@@ -70,7 +70,7 @@ class LingeringCloseTest {
             try {
                 request.body().asInputStream().readAllBytes();
                 return Response.ok("read ok");
-            } catch (IOException e) {
+            } catch (IOException _) {
                 return Response.ok("read failed");
             }
         }

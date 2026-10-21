@@ -36,6 +36,8 @@ import io.vidocq.chappe.api.StatusCode;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 /**
  * HTTP/2 integration tests (cleartext h2c).
@@ -85,18 +87,18 @@ class Http2Test {
         if (server != null) server.stop();
     }
 
-    @Test
-    void http2GetRoot() throws IOException, InterruptedException {
-        var response = get("/");
+    @ParameterizedTest(name = "GET {0}")
+    @CsvSource(
+            delimiter = '|',
+            value = {
+                "/ | Hello HTTP/2!",
+                "/echo-path | /echo-path",
+                "/json | {\"protocol\":\"h2c\"}",
+            })
+    void http2Get(String path, String expectedBody) throws IOException, InterruptedException {
+        var response = get(path);
         assertEquals(200, response.statusCode());
-        assertEquals("Hello HTTP/2!", response.body());
-    }
-
-    @Test
-    void http2GetPath() throws IOException, InterruptedException {
-        var response = get("/echo-path");
-        assertEquals(200, response.statusCode());
-        assertEquals("/echo-path", response.body());
+        assertEquals(expectedBody, response.body());
     }
 
     @Test
@@ -108,13 +110,6 @@ class Http2Test {
         var response = client.send(request, HttpResponse.BodyHandlers.ofString());
         assertEquals(200, response.statusCode());
         assertEquals("http2 body", response.body());
-    }
-
-    @Test
-    void http2JsonResponse() throws IOException, InterruptedException {
-        var response = get("/json");
-        assertEquals(200, response.statusCode());
-        assertEquals("{\"protocol\":\"h2c\"}", response.body());
     }
 
     @Test

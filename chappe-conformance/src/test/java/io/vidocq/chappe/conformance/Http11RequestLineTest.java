@@ -30,6 +30,8 @@ import io.vidocq.chappe.api.Server;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 /**
  * HTTP/1.1 conformance tests for the request line.
@@ -75,7 +77,11 @@ class Http11RequestLineTest {
 
     @Test
     void validGetRequest() {
-        String response = RawHttp.sendAndReceive(port, "GET / HTTP/1.1\r\n" + "Host: localhost\r\n" + "\r\n");
+        String response = RawHttp.sendAndReceive(port, """
+                GET / HTTP/1.1\r
+                Host: localhost\r
+                \r
+                """);
 
         assertEquals(200, RawHttp.extractStatusCode(response));
         assertEquals("OK", RawHttp.extractBody(response));
@@ -95,48 +101,23 @@ class Http11RequestLineTest {
         assertEquals(body, RawHttp.extractBody(response));
     }
 
-    @Test
-    void allMethodsGet() {
-        String response = RawHttp.sendAndReceive(port, "GET / HTTP/1.1\r\n" + "Host: localhost\r\n" + "\r\n");
+    @ParameterizedTest(name = "{0} {1}")
+    @CsvSource({"GET, /", "DELETE, /echo", "OPTIONS, /"})
+    void allMethodsWithoutBody(String method, String path) {
+        String response = RawHttp.sendAndReceive(port, """
+                %s %s HTTP/1.1\r
+                Host: localhost\r
+                \r
+                """.formatted(method, path));
         assertEquals(200, RawHttp.extractStatusCode(response));
     }
 
-    @Test
-    void allMethodsPost() {
-        String body = "test";
+    @ParameterizedTest(name = "{0} {1}")
+    @CsvSource({"POST, /echo, test", "PUT, /echo, test", "PATCH, /echo, patch"})
+    void allMethodsWithBody(String method, String path, String body) {
         String response = RawHttp.sendAndReceive(
                 port,
-                "POST /echo HTTP/1.1\r\n" + "Host: localhost\r\n"
-                        + "Content-Length: "
-                        + body.length() + "\r\n" + "\r\n"
-                        + body);
-        assertEquals(200, RawHttp.extractStatusCode(response));
-    }
-
-    @Test
-    void allMethodsPut() {
-        String body = "test";
-        String response = RawHttp.sendAndReceive(
-                port,
-                "PUT /echo HTTP/1.1\r\n" + "Host: localhost\r\n"
-                        + "Content-Length: "
-                        + body.length() + "\r\n" + "\r\n"
-                        + body);
-        assertEquals(200, RawHttp.extractStatusCode(response));
-    }
-
-    @Test
-    void allMethodsDelete() {
-        String response = RawHttp.sendAndReceive(port, "DELETE /echo HTTP/1.1\r\n" + "Host: localhost\r\n" + "\r\n");
-        assertEquals(200, RawHttp.extractStatusCode(response));
-    }
-
-    @Test
-    void allMethodsPatch() {
-        String body = "patch";
-        String response = RawHttp.sendAndReceive(
-                port,
-                "PATCH /echo HTTP/1.1\r\n" + "Host: localhost\r\n"
+                method + " " + path + " HTTP/1.1\r\n" + "Host: localhost\r\n"
                         + "Content-Length: "
                         + body.length() + "\r\n" + "\r\n"
                         + body);
@@ -145,21 +126,23 @@ class Http11RequestLineTest {
 
     @Test
     void allMethodsHead() {
-        String response = RawHttp.sendAndReceive(port, "HEAD / HTTP/1.1\r\n" + "Host: localhost\r\n" + "\r\n");
+        String response = RawHttp.sendAndReceive(port, """
+                HEAD / HTTP/1.1\r
+                Host: localhost\r
+                \r
+                """);
         assertEquals(200, RawHttp.extractStatusCode(response));
         // HEAD responses must not contain a body
         assertEquals("", RawHttp.extractBody(response));
     }
 
     @Test
-    void allMethodsOptions() {
-        String response = RawHttp.sendAndReceive(port, "OPTIONS / HTTP/1.1\r\n" + "Host: localhost\r\n" + "\r\n");
-        assertEquals(200, RawHttp.extractStatusCode(response));
-    }
-
-    @Test
     void unknownMethod() {
-        String response = RawHttp.sendAndReceive(port, "FOOBAR / HTTP/1.1\r\n" + "Host: localhost\r\n" + "\r\n");
+        String response = RawHttp.sendAndReceive(port, """
+                FOOBAR / HTTP/1.1\r
+                Host: localhost\r
+                \r
+                """);
 
         // Unknown method should return 501 Not Implemented
         int status = RawHttp.extractStatusCode(response);
@@ -168,7 +151,11 @@ class Http11RequestLineTest {
 
     @Test
     void http10Version() {
-        String response = RawHttp.sendAndReceive(port, "GET / HTTP/1.0\r\n" + "Host: localhost\r\n" + "\r\n");
+        String response = RawHttp.sendAndReceive(port, """
+                GET / HTTP/1.0\r
+                Host: localhost\r
+                \r
+                """);
 
         assertEquals(200, RawHttp.extractStatusCode(response));
         // HTTP/1.0 default is Connection: close
@@ -178,7 +165,11 @@ class Http11RequestLineTest {
 
     @Test
     void unsupportedVersion() {
-        String response = RawHttp.sendAndReceive(port, "GET / HTTP/2.0\r\n" + "Host: localhost\r\n" + "\r\n");
+        String response = RawHttp.sendAndReceive(port, """
+                GET / HTTP/2.0\r
+                Host: localhost\r
+                \r
+                """);
 
         int status = RawHttp.extractStatusCode(response);
         assertEquals(400, status, "Unsupported HTTP version should return 400 Bad Request");
@@ -187,7 +178,10 @@ class Http11RequestLineTest {
     @Test
     void missingHostHeader() {
         // RFC 9112 requires Host header for HTTP/1.1, but we are lenient for now
-        String response = RawHttp.sendAndReceive(port, "GET / HTTP/1.1\r\n" + "\r\n");
+        String response = RawHttp.sendAndReceive(port, """
+                GET / HTTP/1.1\r
+                \r
+                """);
 
         int status = RawHttp.extractStatusCode(response);
         // Should still work (lenient mode)

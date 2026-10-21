@@ -52,7 +52,7 @@ class FixedLengthRequestBodyTest {
                     try {
                         outcome.complete("body:"
                                 + new String(req.body().asInputStream().readAllBytes(), StandardCharsets.US_ASCII));
-                    } catch (IOException e) {
+                    } catch (IOException _) {
                         outcome.complete("IOException");
                     }
                     return Response.ok("done");
@@ -82,7 +82,7 @@ class FixedLengthRequestBodyTest {
                         int b;
                         while ((b = in.read()) != -1) sb.append((char) b);
                         outcome.complete("body:" + sb);
-                    } catch (IOException e) {
+                    } catch (IOException _) {
                         outcome.complete("IOException");
                     }
                     return Response.ok("done");
@@ -108,7 +108,7 @@ class FixedLengthRequestBodyTest {
                 .handler(req -> {
                     try {
                         outcome.complete("read:" + req.body().asInputStream().read(new byte[4], 0, 0));
-                    } catch (IOException e) {
+                    } catch (IOException _) {
                         outcome.complete("IOException");
                     }
                     return Response.ok("done");

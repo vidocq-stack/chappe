@@ -155,6 +155,8 @@ class ResponseWriteCoalescingTest {
         }
 
         @Override
-        public void close() {}
+        public void close() {
+            // nothing to release: the channel only records what is written to it
+        }
     }
 }

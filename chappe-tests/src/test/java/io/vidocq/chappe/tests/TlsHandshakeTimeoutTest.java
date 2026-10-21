@@ -96,7 +96,7 @@ class TlsHandshakeTimeoutTest {
                         // Spans the handshake deadline inside the handler: no keep-alive gap is timed
                         try {
                             Thread.sleep(idleTimeout.multipliedBy(2));
-                        } catch (InterruptedException e) {
+                        } catch (InterruptedException _) {
                             Thread.currentThread().interrupt();
                         }
                     }

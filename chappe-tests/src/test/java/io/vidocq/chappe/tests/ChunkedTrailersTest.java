@@ -179,7 +179,7 @@ class ChunkedTrailersTest {
                     String body;
                     try {
                         body = new String(req.body().asInputStream().readAllBytes(), StandardCharsets.UTF_8);
-                    } catch (IOException e) {
+                    } catch (IOException _) {
                         return Response.of(io.vidocq.chappe.api.StatusCode.INTERNAL_SERVER_ERROR);
                     }
                     return Response.ok(

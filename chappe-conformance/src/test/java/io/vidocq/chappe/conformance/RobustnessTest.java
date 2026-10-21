@@ -210,10 +210,7 @@ class RobustnessTest {
         }
 
         // Wait a bit for server to process
-        try {
-            Thread.sleep(100);
-        } catch (InterruptedException _) {
-        }
+        sleep(100);
         assertTrue(server.isRunning(), "Server must survive oversized headers");
     }
 
@@ -258,7 +255,7 @@ class RobustnessTest {
     private static void sleep(long millis) {
         try {
             Thread.sleep(millis);
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
         }
     }

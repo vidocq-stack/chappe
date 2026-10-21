@@ -98,7 +98,7 @@ class TlsBufferedClientFlightTest {
             engine.setEnabledProtocols(new String[] {protocol});
             try {
                 handshake(engine, socket.getInputStream(), socket.getOutputStream());
-            } catch (SocketTimeoutException stuck) {
+            } catch (SocketTimeoutException _) {
                 fail("the server never finished the handshake: no Finished within 5 s");
             }
 
@@ -106,7 +106,7 @@ class TlsBufferedClientFlightTest {
                 int first;
                 try {
                     first = socket.getInputStream().read();
-                } catch (SocketTimeoutException stuck) {
+                } catch (SocketTimeoutException _) {
                     first = -2;
                 }
                 assertTrue(first >= 0, "the server never finished the handshake: no NewSessionTicket within 5 s");

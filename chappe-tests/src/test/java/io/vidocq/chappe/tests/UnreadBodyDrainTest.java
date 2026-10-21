@@ -276,28 +276,32 @@ class UnreadBodyDrainTest {
     @Test
     void theDrainBudgetDefaultsToOneMebibyteAndRefusesANegativeValue() {
         assertEquals(1024L * 1024, ServerConfig.DEFAULT.maxDrainSize());
-        assertThrows(IllegalArgumentException.class, () -> Server.builder().maxDrainSize(-1));
+        var builder = Server.builder();
+        assertThrows(IllegalArgumentException.class, () -> builder.maxDrainSize(-1));
     }
 
     @Test
     void aServerConfigBuiltDirectlyRefusesANegativeDrainBudget() {
+        assertThrows(IllegalArgumentException.class, () -> defaultConfigWithDrainBudget(-1L));
+    }
+
+    /** A {@code ServerConfig} built directly: the default one, but for its drain budget. */
+    private static ServerConfig defaultConfigWithDrainBudget(long maxDrainSize) {
         var d = ServerConfig.DEFAULT;
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> new ServerConfig(
-                        d.host(),
-                        d.port(),
-                        d.backlog(),
-                        d.readTimeout(),
-                        d.writeTimeout(),
-                        d.idleTimeout(),
-                        d.maxRequestSize(),
-                        d.maxHeaderSize(),
-                        -1L,
-                        d.sslContext(),
-                        d.clientAuth(),
-                        d.alpnProtocols(),
-                        d.shutdownGracePeriod()));
+        return new ServerConfig(
+                d.host(),
+                d.port(),
+                d.backlog(),
+                d.readTimeout(),
+                d.writeTimeout(),
+                d.idleTimeout(),
+                d.maxRequestSize(),
+                d.maxHeaderSize(),
+                maxDrainSize,
+                d.sslContext(),
+                d.clientAuth(),
+                d.alpnProtocols(),
+                d.shutdownGracePeriod());
     }
 
     private static Response readTenBytes(Request request) throws IOException {

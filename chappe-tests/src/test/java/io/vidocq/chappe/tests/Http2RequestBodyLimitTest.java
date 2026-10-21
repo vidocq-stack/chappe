@@ -133,7 +133,7 @@ class Http2RequestBodyLimitTest {
         public int read(byte[] b, int off, int len) throws IOException {
             try {
                 if (closed.await(20, TimeUnit.SECONDS)) throw new IOException("body closed");
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
                 throw new InterruptedIOException();
             }

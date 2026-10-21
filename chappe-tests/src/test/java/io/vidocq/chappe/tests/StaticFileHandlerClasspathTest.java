@@ -53,7 +53,7 @@ class StaticFileHandlerClasspathTest {
 
     @Test
     void rootResolvesToIndex() throws Exception {
-        Response r = handler.handle(req("/", ""));
+        Response r = handler.handle(req("/", "/"));
         assertEquals(StatusCode.OK, r.status());
         assertTrue(bodyAsString(r).contains("hello root"));
     }

@@ -163,7 +163,7 @@ class ServeCommandTest {
     }
 
     @Test
-    void rootMissingRaisesAtStart(@TempDir Path tmp) {
+    void rootMissingRaisesAtStart() {
         CliArgs args = CliArgs.parse(new String[] {"serve", "--port", "0"});
         ServeCommand.Effective eff = ServeCommand.Effective.resolve(args, ChappeConfig.EMPTY);
         try {

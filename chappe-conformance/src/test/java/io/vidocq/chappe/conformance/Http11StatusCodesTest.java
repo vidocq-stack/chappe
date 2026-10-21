@@ -60,8 +60,11 @@ class Http11StatusCodesTest {
 
     @Test
     void notFound404() {
-        String response =
-                RawHttp.sendAndReceive(port, "GET /nonexistent HTTP/1.1\r\n" + "Host: localhost\r\n" + "\r\n");
+        String response = RawHttp.sendAndReceive(port, """
+                GET /nonexistent HTTP/1.1\r
+                Host: localhost\r
+                \r
+                """);
 
         assertEquals(404, RawHttp.extractStatusCode(response), "Request to unknown path should return 404 Not Found");
     }
@@ -70,8 +73,12 @@ class Http11StatusCodesTest {
     void methodNotAllowed404() {
         // Route /exists only handles GET. Sending POST → router returns 404
         // (router returns 404 for unmatched method+path combinations)
-        String response = RawHttp.sendAndReceive(
-                port, "POST /exists HTTP/1.1\r\n" + "Host: localhost\r\n" + "Content-Length: 4\r\n" + "\r\n" + "test");
+        String response = RawHttp.sendAndReceive(port, """
+                POST /exists HTTP/1.1\r
+                Host: localhost\r
+                Content-Length: 4\r
+                \r
+                test""");
 
         int status = RawHttp.extractStatusCode(response);
         // Router may return 404 (no route matched) or 405 (method not allowed)
@@ -83,10 +90,12 @@ class Http11StatusCodesTest {
         // Send a POST with Content-Length exceeding maxRequestSize
         // Default maxRequestSize is 10MB, so we use a large Content-Length header
         // to signal the intent (without actually sending the data)
-        String response = RawHttp.sendAndReceive(
-                port,
-                "POST /exists HTTP/1.1\r\n" + "Host: localhost\r\n" + "Content-Length: 999999999\r\n" + "\r\n",
-                2_000);
+        String response = RawHttp.sendAndReceive(port, """
+                POST /exists HTTP/1.1\r
+                Host: localhost\r
+                Content-Length: 999999999\r
+                \r
+                """, 2_000);
 
         int status = RawHttp.extractStatusCode(response);
         // RFC 9110 §15.5.14: 413 Content Too Large
@@ -106,8 +115,11 @@ class Http11StatusCodesTest {
 
     @Test
     void customStatusCode() {
-        String response =
-                RawHttp.sendAndReceive(port, "GET /custom-status HTTP/1.1\r\n" + "Host: localhost\r\n" + "\r\n");
+        String response = RawHttp.sendAndReceive(port, """
+                GET /custom-status HTTP/1.1\r
+                Host: localhost\r
+                \r
+                """);
 
         assertEquals(204, RawHttp.extractStatusCode(response), "Custom status code 204 should be returned correctly");
     }

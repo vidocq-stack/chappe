@@ -66,8 +66,11 @@ class Http11KeepAliveTest {
         // HTTP/1.1 default is keep-alive: send 3 requests on the same socket
         try (Socket socket = RawHttp.openConnection(port, 5_000)) {
             for (int i = 0; i < 3; i++) {
-                String response =
-                        RawHttp.sendAndReceiveOnSocket(socket, "GET / HTTP/1.1\r\n" + "Host: localhost\r\n" + "\r\n");
+                String response = RawHttp.sendAndReceiveOnSocket(socket, """
+                        GET / HTTP/1.1\r
+                        Host: localhost\r
+                        \r
+                        """);
 
                 assertEquals(
                         200,
@@ -82,8 +85,12 @@ class Http11KeepAliveTest {
     void connectionClose() {
         // Send Connection: close → response should have Connection: close
         // and server closes the connection after the response
-        String response = RawHttp.sendAndReceive(
-                port, "GET / HTTP/1.1\r\n" + "Host: localhost\r\n" + "Connection: close\r\n" + "\r\n");
+        String response = RawHttp.sendAndReceive(port, """
+                GET / HTTP/1.1\r
+                Host: localhost\r
+                Connection: close\r
+                \r
+                """);
 
         assertEquals(200, RawHttp.extractStatusCode(response));
         String connectionHeader = RawHttp.extractHeader(response, "Connection");
@@ -93,7 +100,11 @@ class Http11KeepAliveTest {
     @Test
     void http10NoKeepAlive() {
         // HTTP/1.0 without Connection: keep-alive → connection closes after response
-        String response = RawHttp.sendAndReceive(port, "GET / HTTP/1.0\r\n" + "Host: localhost\r\n" + "\r\n");
+        String response = RawHttp.sendAndReceive(port, """
+                GET / HTTP/1.0\r
+                Host: localhost\r
+                \r
+                """);
 
         assertEquals(200, RawHttp.extractStatusCode(response));
         // Connection should be closed (Connection: close in response)
@@ -107,8 +118,17 @@ class Http11KeepAliveTest {
         // Server should return 2 responses in order
         try (Socket socket = RawHttp.openConnection(port, 5_000)) {
             // Send both requests at once
-            String request1 = "GET /a HTTP/1.1\r\n" + "Host: localhost\r\n" + "\r\n";
-            String request2 = "GET /b HTTP/1.1\r\n" + "Host: localhost\r\n" + "Connection: close\r\n" + "\r\n";
+            String request1 = """
+                    GET /a HTTP/1.1\r
+                    Host: localhost\r
+                    \r
+                    """;
+            String request2 = """
+                    GET /b HTTP/1.1\r
+                    Host: localhost\r
+                    Connection: close\r
+                    \r
+                    """;
 
             RawHttp.write(socket.getOutputStream(), request1 + request2);
 

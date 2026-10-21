@@ -75,30 +75,31 @@ class ResponseHeaderValidationTest {
 
     @Test
     void builderRejectsAValueAboveLatin1WithoutEchoingIt() {
-        var e = assertThrows(
-                IllegalArgumentException.class, () -> Response.builder().header("X-Evil", TRUNCATION_INJECTION));
+        var builder = Response.builder();
+        var e = assertThrows(IllegalArgumentException.class, () -> builder.header("X-Evil", TRUNCATION_INJECTION));
         assertTrue(e.getMessage().contains("X-Evil"), e.getMessage());
         assertFalse(e.getMessage().contains("Set-Cookie"), "the value must not be echoed: " + e.getMessage());
     }
 
     @Test
     void builderRejectsControlCharsInAValue() {
+        var builder = Response.builder();
         for (String value : List.of("a\r\nSet-Cookie: a=b", "a\rb", "a\nb", "a\0b", "a\u0001b", "a\u007Fb")) {
             assertThrows(
                     IllegalArgumentException.class,
-                    () -> Response.builder().header("X", value),
+                    () -> builder.header("X", value),
                     () -> "accepted " + value.chars().boxed().toList());
         }
-        assertThrows(IllegalArgumentException.class, () -> Response.builder().header("X", null));
+        assertThrows(IllegalArgumentException.class, () -> builder.header("X", null));
     }
 
     @Test
     void builderRejectsANameThatIsNotAToken() {
+        var builder = Response.builder();
         for (String name : List.of("", "a b", "a:b", "x:", "a\r\nb", "été", ":status")) {
-            assertThrows(
-                    IllegalArgumentException.class, () -> Response.builder().header(name, "v"), name);
+            assertThrows(IllegalArgumentException.class, () -> builder.header(name, "v"), name);
         }
-        assertThrows(IllegalArgumentException.class, () -> Response.builder().header(null, "v"));
+        assertThrows(IllegalArgumentException.class, () -> builder.header(null, "v"));
     }
 
     @Test
@@ -112,10 +113,13 @@ class ResponseHeaderValidationTest {
 
     @Test
     void builderValidatesHeadersAndTrailersGivenAsAWhole() {
-        assertThrows(IllegalArgumentException.class, () -> Response.builder().headers(Headers.of("X", "a\r\nb")));
-        assertThrows(IllegalArgumentException.class, () -> Response.builder().trailer("t", TRUNCATION_INJECTION));
-        assertThrows(IllegalArgumentException.class, () -> Response.builder().trailer("a b", "v"));
-        assertThrows(IllegalArgumentException.class, () -> Response.builder().trailers(Headers.of("t", "a\nb")));
+        var builder = Response.builder();
+        var badHeaders = Headers.of("X", "a\r\nb");
+        var badTrailers = Headers.of("t", "a\nb");
+        assertThrows(IllegalArgumentException.class, () -> builder.headers(badHeaders));
+        assertThrows(IllegalArgumentException.class, () -> builder.trailer("t", TRUNCATION_INJECTION));
+        assertThrows(IllegalArgumentException.class, () -> builder.trailer("a b", "v"));
+        assertThrows(IllegalArgumentException.class, () -> builder.trailers(badTrailers));
     }
 
     @Test
@@ -261,7 +265,7 @@ class ResponseHeaderValidationTest {
         Map<String, String> head;
         try {
             head = http2Exchange().headers.getFirst();
-        } catch (IOException reset) {
+        } catch (IOException _) {
             return; // a reset stream is fine: nothing was injected
         }
         assertFalse(String.valueOf(head.get("x-shift")).contains("\n"), head.toString());

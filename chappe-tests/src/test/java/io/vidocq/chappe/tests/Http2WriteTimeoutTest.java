@@ -279,7 +279,7 @@ class Http2WriteTimeoutTest {
             }
         } catch (EOFException _) {
             // the server closed the connection
-        } catch (SocketTimeoutException e) {
+        } catch (SocketTimeoutException _) {
             fail("the server never closed the connection: the HTTP/2 write was not bounded (received " + received
                     + " bytes)");
         }

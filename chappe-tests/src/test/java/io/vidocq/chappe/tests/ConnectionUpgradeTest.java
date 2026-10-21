@@ -44,6 +44,7 @@ import io.vidocq.chappe.api.Handler;
 import io.vidocq.chappe.api.Headers;
 import io.vidocq.chappe.api.Server;
 import io.vidocq.chappe.api.StatusCode;
+import io.vidocq.chappe.api.UpgradeHandler;
 import io.vidocq.chappe.api.UpgradedConnection;
 import io.vidocq.chappe.http.h2.HpackDecoder;
 
@@ -126,9 +127,14 @@ class ConnectionUpgradeTest {
 
         try (var socket = connect()) {
             var out = socket.getOutputStream();
-            out.write(("POST /TestServlet HTTP/1.1\r\nHost: h\r\nUpgrade: YES\r\nConnection: Upgrade\r\n"
-                            + "Content-type: application/x-www-form-urlencoded\r\n\r\nHello")
-                    .getBytes(StandardCharsets.US_ASCII));
+            out.write("""
+                    POST /TestServlet HTTP/1.1\r
+                    Host: h\r
+                    Upgrade: YES\r
+                    Connection: Upgrade\r
+                    Content-type: application/x-www-form-urlencoded\r
+                    \r
+                    Hello""".getBytes(StandardCharsets.US_ASCII));
             out.flush();
             InputStream in = socket.getInputStream();
             String head = readHead(in);
@@ -352,7 +358,7 @@ class ConnectionUpgradeTest {
     }
 
     @Test
-    void framingHeadersAreNotWritten() throws Exception {
+    void framingHeadersAreNotWritten() {
         var headers = Headers.builder()
                 .add("Upgrade", "echo")
                 .add("Content-Length", "12")
@@ -367,22 +373,27 @@ class ConnectionUpgradeTest {
 
     @Test
     void invalidHeadersAreRejectedAtConstruction() {
+        // The arguments are prepared here: only the constructor is expected to throw.
+        var injectedValue = Headers.of("Upgrade", "x\r\nSet-Cookie: a=b");
+        var badName = Headers.of("Bad Name", "v");
+        var wideValue = Headers.of("X-Wide", "Ā");
+        var injectedReason = StatusCode.of(299, "OK\r\nX-Injected: 1");
+        var noHeaders = Headers.empty();
+        UpgradeHandler noop = _ -> {};
+
         assertThrows(
                 IllegalArgumentException.class,
-                () -> new ConnectionUpgrade(
-                        StatusCode.SWITCHING_PROTOCOLS, Headers.of("Upgrade", "x\r\nSet-Cookie: a=b"), _ -> {}));
+                () -> new ConnectionUpgrade(StatusCode.SWITCHING_PROTOCOLS, injectedValue, noop));
         assertThrows(
                 IllegalArgumentException.class,
-                () -> new ConnectionUpgrade(StatusCode.SWITCHING_PROTOCOLS, Headers.of("Bad Name", "v"), _ -> {}));
+                () -> new ConnectionUpgrade(StatusCode.SWITCHING_PROTOCOLS, badName, noop));
         assertThrows(
                 IllegalArgumentException.class,
-                () -> new ConnectionUpgrade(StatusCode.SWITCHING_PROTOCOLS, Headers.of("X-Wide", "Ā"), _ -> {}));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> new ConnectionUpgrade(StatusCode.of(299, "OK\r\nX-Injected: 1"), Headers.empty(), _ -> {}));
+                () -> new ConnectionUpgrade(StatusCode.SWITCHING_PROTOCOLS, wideValue, noop));
+        assertThrows(IllegalArgumentException.class, () -> new ConnectionUpgrade(injectedReason, noHeaders, noop));
         assertThrows(
                 NullPointerException.class,
-                () -> new ConnectionUpgrade(StatusCode.SWITCHING_PROTOCOLS, Headers.empty(), null));
+                () -> new ConnectionUpgrade(StatusCode.SWITCHING_PROTOCOLS, noHeaders, null));
     }
 
     @Test

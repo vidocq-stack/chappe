@@ -80,17 +80,18 @@ class Http11BodyTest {
     void chunkedBody() {
         // Transfer-Encoding: chunked with multiple chunks
         // Format: <size-hex>\r\n<data>\r\n ... 0\r\n\r\n
-        String response = RawHttp.sendAndReceive(
-                port,
-                "POST /echo HTTP/1.1\r\n" + "Host: localhost\r\n"
-                        + "Transfer-Encoding: chunked\r\n"
-                        + "\r\n"
-                        + "5\r\n"
-                        + "Hello\r\n"
-                        + "7\r\n"
-                        + ", World\r\n"
-                        + "0\r\n"
-                        + "\r\n");
+        String response = RawHttp.sendAndReceive(port, """
+                POST /echo HTTP/1.1\r
+                Host: localhost\r
+                Transfer-Encoding: chunked\r
+                \r
+                5\r
+                Hello\r
+                7\r
+                , World\r
+                0\r
+                \r
+                """);
 
         assertEquals(200, RawHttp.extractStatusCode(response));
         assertEquals("Hello, World", RawHttp.extractBody(response));
@@ -100,15 +101,16 @@ class Http11BodyTest {
     void chunkedWithExtensions() {
         // RFC 9112 Section 7.1.1: chunk extensions should be ignored
         // Format: <size>;ext=val\r\n<data>\r\n
-        String response = RawHttp.sendAndReceive(
-                port,
-                "POST /echo HTTP/1.1\r\n" + "Host: localhost\r\n"
-                        + "Transfer-Encoding: chunked\r\n"
-                        + "\r\n"
-                        + "5;ext=val\r\n"
-                        + "Hello\r\n"
-                        + "0\r\n"
-                        + "\r\n");
+        String response = RawHttp.sendAndReceive(port, """
+                POST /echo HTTP/1.1\r
+                Host: localhost\r
+                Transfer-Encoding: chunked\r
+                \r
+                5;ext=val\r
+                Hello\r
+                0\r
+                \r
+                """);
 
         assertEquals(200, RawHttp.extractStatusCode(response));
         assertEquals("Hello", RawHttp.extractBody(response));
@@ -117,13 +119,14 @@ class Http11BodyTest {
     @Test
     void emptyChunkedBody() {
         // Immediately terminated chunked body: 0\r\n\r\n
-        String response = RawHttp.sendAndReceive(
-                port,
-                "POST /echo HTTP/1.1\r\n" + "Host: localhost\r\n"
-                        + "Transfer-Encoding: chunked\r\n"
-                        + "\r\n"
-                        + "0\r\n"
-                        + "\r\n");
+        String response = RawHttp.sendAndReceive(port, """
+                POST /echo HTTP/1.1\r
+                Host: localhost\r
+                Transfer-Encoding: chunked\r
+                \r
+                0\r
+                \r
+                """);
 
         assertEquals(200, RawHttp.extractStatusCode(response));
         assertEquals("", RawHttp.extractBody(response));
@@ -132,7 +135,11 @@ class Http11BodyTest {
     @Test
     void noBody() {
         // GET request with no Content-Length or Transfer-Encoding → body is empty
-        String response = RawHttp.sendAndReceive(port, "GET /nobody HTTP/1.1\r\n" + "Host: localhost\r\n" + "\r\n");
+        String response = RawHttp.sendAndReceive(port, """
+                GET /nobody HTTP/1.1\r
+                Host: localhost\r
+                \r
+                """);
 
         assertEquals(200, RawHttp.extractStatusCode(response));
         assertEquals("no-body-expected", RawHttp.extractBody(response));

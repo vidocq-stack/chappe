@@ -53,8 +53,8 @@ class TlsInfoTest {
 
         source.add(null);
         assertTrue(info.peerCertificates().isEmpty(), "the caller's list must not leak in");
-        assertThrows(UnsupportedOperationException.class, () -> info.peerCertificates()
-                .add(null));
+        var certificates = info.peerCertificates();
+        assertThrows(UnsupportedOperationException.class, () -> certificates.add(null));
     }
 
     @Test
@@ -78,8 +78,10 @@ class TlsInfoTest {
 
     @Test
     void protocolAndCipherSuiteAreRequired() {
-        assertThrows(NullPointerException.class, () -> new TlsInfo(null, SUITE, new byte[0], List.of()));
-        assertThrows(NullPointerException.class, () -> new TlsInfo("TLSv1.3", null, new byte[0], List.of()));
+        byte[] noSession = new byte[0];
+        List<X509Certificate> noChain = List.of();
+        assertThrows(NullPointerException.class, () -> new TlsInfo(null, SUITE, noSession, noChain));
+        assertThrows(NullPointerException.class, () -> new TlsInfo("TLSv1.3", null, noSession, noChain));
     }
 
     @Test

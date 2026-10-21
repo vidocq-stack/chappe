@@ -118,7 +118,7 @@ class WriteTimeoutTest {
                 while ((n = in.read(buf)) != -1) {
                     received += n;
                 }
-            } catch (SocketTimeoutException e) {
+            } catch (SocketTimeoutException _) {
                 fail("Server never closed the connection — write was not bounded (received " + received
                         + " bytes so far)");
             }
@@ -222,7 +222,7 @@ class WriteTimeoutTest {
     private static void sleep(long millis) {
         try {
             Thread.sleep(millis);
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
         }
     }

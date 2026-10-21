@@ -83,6 +83,7 @@ class StreamingBodyTest {
                                     pos.write(event.getBytes(StandardCharsets.UTF_8));
                                 }
                             } catch (IOException _) {
+                                // the consumer closed the pipe: the assertions on the response report it
                             }
                         });
                         return Response.builder()
@@ -136,6 +137,7 @@ class StreamingBodyTest {
                                     pos.write(event.getBytes(StandardCharsets.UTF_8));
                                 }
                             } catch (IOException _) {
+                                // the consumer closed the pipe: the assertions on the response report it
                             }
                         });
                         return Response.builder()

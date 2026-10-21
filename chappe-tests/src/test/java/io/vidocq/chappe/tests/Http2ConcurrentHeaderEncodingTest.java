@@ -85,7 +85,9 @@ class Http2ConcurrentHeaderEncodingTest {
                 .header("x-echo", echo(id))
                 .header("x-nonce", nonce(round, id));
         switch (id % 3) {
-            case 0 -> {}
+            case 0 -> {
+                // no body: the response carries headers only
+            }
             case 1 -> builder.body("body-" + id);
             default -> builder.body("body-" + id).trailer("x-trailer", echo(id));
         }

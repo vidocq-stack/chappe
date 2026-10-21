@@ -20,7 +20,6 @@
 package io.vidocq.chappe.tests;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.vidocq.chappe.http.grpc.GrpcCallImpl;
 
@@ -113,6 +112,6 @@ class GrpcTimeoutParserTest {
     void saturatesOnOverflow() {
         // 99999999H * 3600 * 1e9 > Long.MAX_VALUE -> saturates to MAX_VALUE
         long v = GrpcCallImpl.parseTimeoutNanos("99999999H");
-        assertTrue(v == Long.MAX_VALUE, "overflow must saturate to MAX_VALUE, got " + v);
+        assertEquals(Long.MAX_VALUE, v, "overflow must saturate to MAX_VALUE, got " + v);
     }
 }

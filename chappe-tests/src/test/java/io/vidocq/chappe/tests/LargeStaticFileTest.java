@@ -103,7 +103,7 @@ class LargeStaticFileTest {
                 int n;
                 try {
                     n = in.read(buf, 0, Math.min(CHUNK, body.length - total));
-                } catch (SocketException e) {
+                } catch (SocketException _) {
                     break;
                 }
                 if (n < 0) break;
@@ -113,7 +113,7 @@ class LargeStaticFileTest {
                 // sendfile(2) into EAGAIN-like behavior where transferTo may return 0.
                 try {
                     Thread.sleep(2);
-                } catch (InterruptedException ie) {
+                } catch (InterruptedException _) {
                     Thread.currentThread().interrupt();
                     break;
                 }

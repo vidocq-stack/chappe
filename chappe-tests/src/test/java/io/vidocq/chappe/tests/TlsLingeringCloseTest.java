@@ -106,9 +106,13 @@ class TlsLingeringCloseTest {
                             return new X509Certificate[0];
                         }
 
-                        public void checkClientTrusted(X509Certificate[] c, String a) {}
+                        public void checkClientTrusted(X509Certificate[] c, String a) {
+                            // trusts everything: the test server's certificate is self-signed
+                        }
 
-                        public void checkServerTrusted(X509Certificate[] c, String a) {}
+                        public void checkServerTrusted(X509Certificate[] c, String a) {
+                            // trusts everything: the test server's certificate is self-signed
+                        }
                     }
                 },
                 null);

@@ -96,7 +96,7 @@ class ServerLifecycleTest {
 
     /** A negative {@code idleTimeout} must not kill the accept loop either (CHAPPE-031). */
     @Test
-    void aNegativeIdleTimeoutDoesNotKillTheAcceptLoop() throws IOException {
+    void aNegativeIdleTimeoutDoesNotKillTheAcceptLoop() {
         try (var server = Server.builder()
                 .host("127.0.0.1")
                 .port(0)
@@ -104,9 +104,10 @@ class ServerLifecycleTest {
                 .handler(_ -> Response.ok("ok"))
                 .build()) {
             server.start();
+            int port = server.port();
             // The connection is handled, however briefly: a response or the server's close, never
             // the client's own SO_TIMEOUT behind a dead accept loop.
-            exchange(server.port());
+            assertDoesNotThrow(() -> exchange(port));
         }
     }
 
@@ -177,7 +178,8 @@ class ServerLifecycleTest {
 
     @Test
     void builderRequiresHandler() {
-        assertThrows(IllegalStateException.class, () -> Server.builder().port(0).build());
+        var builder = Server.builder().port(0);
+        assertThrows(IllegalStateException.class, builder::build);
     }
 
     @Test

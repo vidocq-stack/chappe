@@ -51,7 +51,7 @@ class ForwardingRequestParityTest {
             if (m.isSynthetic() || java.lang.reflect.Modifier.isStatic(m.getModifiers())) continue;
             try {
                 ForwardingRequest.class.getDeclaredMethod(m.getName(), m.getParameterTypes());
-            } catch (NoSuchMethodException e) {
+            } catch (NoSuchMethodException _) {
                 missing.add(m.getName() + Arrays.toString(m.getParameterTypes()));
             }
         }

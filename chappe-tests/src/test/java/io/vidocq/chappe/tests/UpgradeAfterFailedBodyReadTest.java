@@ -56,9 +56,18 @@ class UpgradeAfterFailedBodyReadTest {
      * A chunked body whose first size byte is invalid: the first read throws after consuming 'Z';
      * a drain would then resume on "0\r\n\r\n" and end the body cleanly.
      */
-    private static final String REQUEST = "POST /u HTTP/1.1\r\nHost: h\r\nUpgrade: echo\r\nConnection: Upgrade\r\n"
-            + "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n"
-            + "Transfer-Encoding: chunked\r\n\r\nZ0\r\n\r\n";
+    private static final String REQUEST = """
+            POST /u HTTP/1.1\r
+            Host: h\r
+            Upgrade: echo\r
+            Connection: Upgrade\r
+            Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r
+            Sec-WebSocket-Version: 13\r
+            Transfer-Encoding: chunked\r
+            \r
+            Z0\r
+            \r
+            """;
 
     private Server server;
 
@@ -101,7 +110,8 @@ class UpgradeAfterFailedBodyReadTest {
                 .handler(req -> {
                     try {
                         req.body().asInputStream().readAllBytes();
-                    } catch (IOException expected) {
+                    } catch (IOException _) {
+                        // expected: the invalid chunk size fails the read
                         bodyFailed.countDown();
                     }
                     return upgrade.get();
@@ -124,7 +134,7 @@ class UpgradeAfterFailedBodyReadTest {
         try {
             int n;
             while ((n = in.read(buf)) != -1) all.write(buf, 0, n);
-        } catch (SocketException reset) {
+        } catch (SocketException _) {
             // a reset ends the connection too
         }
         return all.toString(StandardCharsets.US_ASCII);

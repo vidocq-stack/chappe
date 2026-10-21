@@ -102,11 +102,14 @@ class WebSocketRfc6455Test {
 
     @Test
     void handshakeMissingVersionReturns426() {
-        var request = "GET /ws HTTP/1.1\r\n"
-                + "Host: 127.0.0.1\r\n"
-                + "Upgrade: websocket\r\n"
-                + "Connection: Upgrade\r\n"
-                + "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n";
+        var request = """
+                GET /ws HTTP/1.1\r
+                Host: 127.0.0.1\r
+                Upgrade: websocket\r
+                Connection: Upgrade\r
+                Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r
+                \r
+                """;
         var resp = RawHttp.sendAndReceive(port, request);
         assertEquals(426, RawHttp.extractStatusCode(resp));
         assertEquals("13", RawHttp.extractHeader(resp, "Sec-WebSocket-Version"));
@@ -114,11 +117,14 @@ class WebSocketRfc6455Test {
 
     @Test
     void handshakeMissingKeyReturns400() {
-        var request = "GET /ws HTTP/1.1\r\n"
-                + "Host: 127.0.0.1\r\n"
-                + "Upgrade: websocket\r\n"
-                + "Connection: Upgrade\r\n"
-                + "Sec-WebSocket-Version: 13\r\n\r\n";
+        var request = """
+                GET /ws HTTP/1.1\r
+                Host: 127.0.0.1\r
+                Upgrade: websocket\r
+                Connection: Upgrade\r
+                Sec-WebSocket-Version: 13\r
+                \r
+                """;
         var resp = RawHttp.sendAndReceive(port, request);
         assertEquals(400, RawHttp.extractStatusCode(resp));
     }

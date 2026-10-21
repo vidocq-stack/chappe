@@ -101,7 +101,7 @@ class Http2StreamAbortTest {
         public int read(byte[] b, int off, int len) throws IOException {
             try {
                 if (closed.await(20, TimeUnit.SECONDS)) throw new IOException("body closed");
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
                 throw new InterruptedIOException();
             }
@@ -232,7 +232,7 @@ class Http2StreamAbortTest {
     private static Response readOutcome(InputStream body, CompletableFuture<String> outcome) {
         try {
             outcome.complete("body:" + new String(body.readAllBytes(), StandardCharsets.US_ASCII));
-        } catch (IOException e) {
+        } catch (IOException _) {
             outcome.complete("IOException");
         }
         return Response.ok();

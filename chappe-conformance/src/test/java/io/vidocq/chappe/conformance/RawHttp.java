@@ -56,7 +56,7 @@ final class RawHttp {
             socket.setSoTimeout(timeoutMs);
             write(socket.getOutputStream(), rawRequest);
             socket.shutdownOutput();
-            return readAll(socket.getInputStream(), timeoutMs);
+            return readAll(socket.getInputStream());
         } catch (IOException e) {
             throw new RuntimeException("Failed to send/receive on port " + port, e);
         }
@@ -158,7 +158,7 @@ final class RawHttp {
     /**
      * Reads all available data from an InputStream until EOF or timeout.
      */
-    static String readAll(InputStream in, int timeoutMs) {
+    static String readAll(InputStream in) {
         try {
             var baos = new ByteArrayOutputStream();
             byte[] buf = new byte[4096];
@@ -167,7 +167,7 @@ final class RawHttp {
                 baos.write(buf, 0, read);
             }
             return baos.toString(StandardCharsets.UTF_8);
-        } catch (java.net.SocketTimeoutException e) {
+        } catch (java.net.SocketTimeoutException _) {
             // Timeout is expected when server keeps connection open
             return "";
         } catch (IOException e) {
@@ -182,7 +182,6 @@ final class RawHttp {
     static String readResponse(InputStream in) {
         try {
             var baos = new ByteArrayOutputStream();
-            byte[] buf = new byte[1];
             // Read until we find \r\n\r\n
             int crlfCount = 0;
             while (true) {
@@ -216,7 +215,7 @@ final class RawHttp {
             }
 
             return baos.toString(StandardCharsets.UTF_8);
-        } catch (java.net.SocketTimeoutException e) {
+        } catch (java.net.SocketTimeoutException _) {
             return "";
         } catch (IOException e) {
             throw new RuntimeException("Failed to read response", e);

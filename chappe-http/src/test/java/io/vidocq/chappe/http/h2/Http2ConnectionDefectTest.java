@@ -58,7 +58,9 @@ class Http2ConnectionDefectTest {
             }
 
             @Override
-            public void close() {}
+            public void close() {
+                // nothing to release: this channel holds no resource
+            }
         };
         var wire = new ByteArrayOutputStream();
         var connection = new Http2Connection(

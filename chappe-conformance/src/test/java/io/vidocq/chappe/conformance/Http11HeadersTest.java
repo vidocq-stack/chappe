@@ -80,12 +80,13 @@ class Http11HeadersTest {
     @Test
     void caseInsensitiveHeaders() {
         // Send "content-TYPE" (mixed case) and verify the server reads it correctly
-        String response = RawHttp.sendAndReceive(
-                port,
-                "GET /echo-header HTTP/1.1\r\n" + "Host: localhost\r\n"
-                        + "X-Echo-Header: content-TYPE\r\n"
-                        + "content-TYPE: text/plain\r\n"
-                        + "\r\n");
+        String response = RawHttp.sendAndReceive(port, """
+                GET /echo-header HTTP/1.1\r
+                Host: localhost\r
+                X-Echo-Header: content-TYPE\r
+                content-TYPE: text/plain\r
+                \r
+                """);
 
         assertEquals(200, RawHttp.extractStatusCode(response));
         assertEquals("text/plain", RawHttp.extractBody(response), "Header lookup should be case-insensitive");
@@ -94,12 +95,13 @@ class Http11HeadersTest {
     @Test
     void duplicateHeaders() {
         // Send two X-Custom headers — handler should see both via headers().all()
-        String response = RawHttp.sendAndReceive(
-                port,
-                "GET /echo-all-custom HTTP/1.1\r\n" + "Host: localhost\r\n"
-                        + "X-Custom: value1\r\n"
-                        + "X-Custom: value2\r\n"
-                        + "\r\n");
+        String response = RawHttp.sendAndReceive(port, """
+                GET /echo-all-custom HTTP/1.1\r
+                Host: localhost\r
+                X-Custom: value1\r
+                X-Custom: value2\r
+                \r
+                """);
 
         assertEquals(200, RawHttp.extractStatusCode(response));
         String body = RawHttp.extractBody(response);
@@ -111,8 +113,12 @@ class Http11HeadersTest {
     void spaceBeforeColon() {
         // RFC 9112 Section 5: No whitespace is allowed between the field name
         // and colon. A server MUST reject with 400.
-        String response = RawHttp.sendAndReceive(
-                port, "GET /echo-header HTTP/1.1\r\n" + "Host: localhost\r\n" + "X-Bad : value\r\n" + "\r\n");
+        String response = RawHttp.sendAndReceive(port, """
+                GET /echo-header HTTP/1.1\r
+                Host: localhost\r
+                X-Bad : value\r
+                \r
+                """);
 
         int status = RawHttp.extractStatusCode(response);
         assertEquals(400, status, "Space before colon in header should result in 400 Bad Request");
@@ -122,12 +128,13 @@ class Http11HeadersTest {
     void obsFoldRejected() {
         // RFC 9112 Section 5.2: obs-fold (continuation line starting with
         // space/tab) MUST be rejected with 400 by a server.
-        String response = RawHttp.sendAndReceive(
-                port,
-                "GET /echo-header HTTP/1.1\r\n" + "Host: localhost\r\n"
-                        + "X-Folded: first\r\n"
-                        + " continuation\r\n"
-                        + "\r\n");
+        String response = RawHttp.sendAndReceive(port, """
+                GET /echo-header HTTP/1.1\r
+                Host: localhost\r
+                X-Folded: first\r
+                 continuation\r
+                \r
+                """);
 
         int status = RawHttp.extractStatusCode(response);
         assertEquals(400, status, "Obsolete header folding (obs-fold) should be rejected with 400");

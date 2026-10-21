@@ -272,6 +272,7 @@ class TlsClientAuthTest {
 
     @Test
     void nullClientAuthIsRejected() {
-        assertThrows(NullPointerException.class, () -> Server.builder().tls(serverContext, null));
+        var builder = Server.builder();
+        assertThrows(NullPointerException.class, () -> builder.tls(serverContext, null));
     }
 }

@@ -35,6 +35,8 @@ import io.vidocq.chappe.api.StatusCode;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 class HttpGetTest {
 
@@ -73,31 +75,24 @@ class HttpGetTest {
         if (server != null) server.stop();
     }
 
-    @Test
-    void getRoot() throws IOException, InterruptedException {
-        var response = get("/");
+    @ParameterizedTest(name = "GET {0}")
+    @CsvSource(
+            delimiter = '|',
+            value = {
+                "/ | Hello, Chappe!",
+                "/echo-path | /echo-path",
+                "/echo-query?name=chappe | name=chappe",
+            })
+    void getReturnsTheExpectedBody(String path, String expectedBody) throws IOException, InterruptedException {
+        var response = get(path);
         assertEquals(200, response.statusCode());
-        assertEquals("Hello, Chappe!", response.body());
-    }
-
-    @Test
-    void getPath() throws IOException, InterruptedException {
-        var response = get("/echo-path");
-        assertEquals(200, response.statusCode());
-        assertEquals("/echo-path", response.body());
+        assertEquals(expectedBody, response.body());
     }
 
     @Test
     void getNotFound() throws IOException, InterruptedException {
         var response = get("/does-not-exist");
         assertEquals(404, response.statusCode());
-    }
-
-    @Test
-    void getWithQueryParams() throws IOException, InterruptedException {
-        var response = get("/echo-query?name=chappe");
-        assertEquals(200, response.statusCode());
-        assertEquals("name=chappe", response.body());
     }
 
     @Test

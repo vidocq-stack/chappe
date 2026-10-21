@@ -20,6 +20,7 @@
 package io.vidocq.chappe.tests;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -140,7 +141,7 @@ class GrpcurlConformanceTest {
         assertTrue(exited, "grpcurl did not finish within 15s, output=" + output);
         // grpcurl exits non-zero when grpc-status != 0 and prints the canonical
         // status ("Internal" for code 13).
-        assertTrue(p.exitValue() != 0, "grpcurl should exit with error for grpc-status=13, exit=" + p.exitValue());
+        assertNotEquals(0, p.exitValue(), "grpcurl should exit with error for grpc-status=13, exit=" + p.exitValue());
         assertTrue(
                 output.contains("Internal") || output.contains("INTERNAL") || output.contains("Code: Internal"),
                 "grpc-status trailers should indicate INTERNAL, output=\n" + output);
@@ -156,7 +157,7 @@ class GrpcurlConformanceTest {
                     .redirectErrorStream(true)
                     .start();
             return p.waitFor(5, TimeUnit.SECONDS) && p.exitValue() == 0;
-        } catch (IOException | InterruptedException e) {
+        } catch (IOException | InterruptedException _) {
             return false;
         }
     }

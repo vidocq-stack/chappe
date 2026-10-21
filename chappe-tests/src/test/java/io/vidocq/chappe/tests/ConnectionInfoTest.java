@@ -45,6 +45,7 @@ import io.vidocq.chappe.api.Request;
 import io.vidocq.chappe.api.Response;
 import io.vidocq.chappe.api.Router;
 import io.vidocq.chappe.api.Server;
+import io.vidocq.chappe.api.TlsInfo;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -87,8 +88,8 @@ class ConnectionInfoTest {
                 req.scheme(),
                 remote == null ? "null" : remote.getAddress().getHostAddress(),
                 local == null ? "null" : String.valueOf(local.getPort()),
-                req.tls().map(t -> t.protocol()).orElse("no-tls"),
-                req.tls().map(t -> t.cipherSuite()).orElse("no-tls"),
+                req.tls().map(TlsInfo::protocol).orElse("no-tls"),
+                req.tls().map(TlsInfo::cipherSuite).orElse("no-tls"),
                 req.tls().map(t -> String.valueOf(t.peerCertificates().size())).orElse("no-tls"));
     }
 

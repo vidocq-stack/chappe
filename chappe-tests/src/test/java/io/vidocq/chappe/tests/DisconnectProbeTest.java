@@ -51,11 +51,13 @@ class DisconnectProbeTest {
     @Test
     void callbackFiresWhenClientDisconnectsDuringSuspendedHandling() throws Exception {
         var disconnected = new CountDownLatch(1);
+        var handlerArmed = new CountDownLatch(1);
         var armed = new AtomicBoolean();
         server = Server.builder()
                 .port(0)
                 .handler(req -> {
                     armed.set(req.onDisconnect(disconnected::countDown));
+                    handlerArmed.countDown();
                     // Suspended response: wait for the disconnect (or time out).
                     boolean fired = disconnected.await(5, TimeUnit.SECONDS);
                     return Response.ok(fired ? "DISCONNECTED" : "TIMEOUT");
@@ -67,7 +69,7 @@ class DisconnectProbeTest {
             socket.getOutputStream()
                     .write(("GET /wait HTTP/1.1\r\nHost: x\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
             socket.getOutputStream().flush();
-            Thread.sleep(300); // let the handler arm the probe
+            assertTrue(handlerArmed.await(5, TimeUnit.SECONDS), "the handler should have armed the probe");
         } // client gone (FIN)
 
         assertTrue(
@@ -129,16 +131,18 @@ class DisconnectProbeTest {
     @Test
     void pipelinedBytesReadByTheProbeAreNotLost() throws Exception {
         var disconnected = new CountDownLatch(1);
+        var handlerArmed = new CountDownLatch(1);
         server = Server.builder()
                 .port(0)
                 .handler(req -> {
                     if (req.path().startsWith("/wait")) {
                         req.onDisconnect(disconnected::countDown);
+                        handlerArmed.countDown();
                         // Short suspension: long enough for the probe to poll (and
                         // swallow the pipelined bytes into the parse buffer).
                         try {
                             Thread.sleep(400);
-                        } catch (InterruptedException e) {
+                        } catch (InterruptedException _) {
                             Thread.currentThread().interrupt();
                         }
                         return Response.ok("FIRST");
@@ -153,7 +157,7 @@ class DisconnectProbeTest {
             var out = socket.getOutputStream();
             out.write(("GET /wait HTTP/1.1\r\nHost: x\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
             out.flush();
-            Thread.sleep(150); // probe armed and polling
+            assertTrue(handlerArmed.await(5, TimeUnit.SECONDS), "the handler should have armed the probe");
             // Pipelined second request — the probe will read these bytes into
             // the parse buffer; they must be served after the first response.
             out.write(("GET /second HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")

@@ -47,9 +47,12 @@ import org.junit.jupiter.api.Test;
  */
 class InterruptedBodyReadTest {
 
-    /** Body bytes: 4 filler bytes, then a whole request that must never be dispatched. */
-    private static final byte[] PART1 =
-            ("AAAA" + "GET /smuggled HTTP/1.1\r\nHost: localhost\r\n\r\n").getBytes(StandardCharsets.US_ASCII);
+    /** Body bytes: 4 filler bytes ("AAAA"), then a whole request that must never be dispatched. */
+    private static final byte[] PART1 = """
+            AAAAGET /smuggled HTTP/1.1\r
+            Host: localhost\r
+            \r
+            """.getBytes(StandardCharsets.US_ASCII);
 
     private Server server;
 
@@ -82,7 +85,7 @@ class InterruptedBodyReadTest {
                             }
                             partRead.countDown();
                             body.read(new byte[64]); // blocks: the client sends nothing more
-                        } catch (IOException interrupted) {
+                        } catch (IOException _) {
                             // the interrupt closed the channel
                         }
                     });
@@ -126,7 +129,7 @@ class InterruptedBodyReadTest {
         try {
             int n;
             while ((n = in.read(buf)) != -1) all.write(buf, 0, n);
-        } catch (SocketException reset) {
+        } catch (SocketException _) {
             // a reset ends the connection too
         }
         return all.toString(StandardCharsets.US_ASCII);
@@ -154,7 +157,7 @@ class InterruptedBodyReadTest {
             reader.interrupt();
             try {
                 reader.join(5000);
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             }
         }

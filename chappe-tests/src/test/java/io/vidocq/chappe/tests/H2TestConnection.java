@@ -191,7 +191,7 @@ final class H2TestConnection implements AutoCloseable {
         socket.setSoTimeout(millis);
         try {
             return read();
-        } catch (SocketTimeoutException e) {
+        } catch (SocketTimeoutException _) {
             return null;
         } finally {
             socket.setSoTimeout(previous);

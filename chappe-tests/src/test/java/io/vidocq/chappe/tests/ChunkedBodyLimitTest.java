@@ -320,7 +320,7 @@ class ChunkedBodyLimitTest {
                     .getBytes(StandardCharsets.US_ASCII));
             out.flush();
             outcome.get(5, TimeUnit.SECONDS);
-        } catch (java.util.concurrent.TimeoutException e) {
+        } catch (java.util.concurrent.TimeoutException _) {
             // the caller's assertion reports it
         }
     }
@@ -347,7 +347,7 @@ class ChunkedBodyLimitTest {
         try {
             int n;
             while ((n = in.read(chunk)) != -1) buffer.write(chunk, 0, n);
-        } catch (SocketException reset) {
+        } catch (SocketException _) {
             // a reset ends the connection too
         }
         return buffer.toString(StandardCharsets.US_ASCII);
