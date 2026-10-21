@@ -34,3 +34,6 @@ jobs:
           sonar-token: ${{ secrets.SONAR_TOKEN }}
           host-url: ${{ vars.SONAR_HOST_URL }}
           bot-token: ${{ secrets.VIDOCQ_BOT_TOKEN }}
+          # Pilot of Error Prone in the analysis (Vidocq/vidocq#269): the action's default, plus the
+          # errorprone profile, whose warnings the action imports as external issues.
+          maven-args: -B -ntp -Pquality,errorprone -Dmaven.test.failure.ignore=true install

@@ -67,7 +67,7 @@
         <!-- Quality -->
         <spotless.version>2.46.1</spotless.version>
         <palantir.version>2.84.0</palantir.version>
-        <errorprone.version>2.36.0</errorprone.version>
+        <errorprone.version>2.50.0</errorprone.version>
         <sonar.projectKey>vidocq-chappe</sonar.projectKey>
         <sonar.java.source>25</sonar.java.source>
         <!--
@@ -180,6 +180,9 @@
                 <module>chappe-coverage</module>
             </modules>
         </profile>
+        <!-- Error Prone (Vidocq/vidocq#269): run locally with -Perrorprone, and by the SonarQube job, which
+             imports its warnings as external issues. Report mode, like the rest of the analysis: every
+             finding is a warning (-XepAllErrorsAsWarnings), none stops the build. -->
         <profile>
             <id>errorprone</id>
             <build>
@@ -192,7 +195,7 @@
                                 <compilerArgs combine.children="append">
                                     <arg>-XDcompilePolicy=simple</arg>
                                     <arg>--should-stop=ifError=FLOW</arg>
-                                    <arg>-Xplugin:ErrorProne -XepExcludedPaths:.*(generated|generated-sources)/.* -XepDisableWarningsInGeneratedCode</arg>
+                                    <arg>-Xplugin:ErrorProne -XepAllErrorsAsWarnings -XepExcludedPaths:.*(generated|generated-sources)/.* -XepDisableWarningsInGeneratedCode</arg>
                                 </compilerArgs>
                                 <annotationProcessorPaths>
                                     <path>
