@@ -29,6 +29,11 @@
         <maven.javadoc.skip>true</maven.javadoc.skip>
         <maven.source.skip>true</maven.source.skip>
         <gpg.skip>true</gpg.skip>
+        <!--
+            Not analysed by SonarQube (Vidocq/vidocq#284): a JMH harness, never released, which
+            prints its results on the console and follows the JMH conventions by design.
+        -->
+        <sonar.skip>true</sonar.skip>
     </properties>
 
     <dependencies>
