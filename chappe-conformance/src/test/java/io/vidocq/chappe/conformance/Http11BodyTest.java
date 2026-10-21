@@ -22,6 +22,7 @@ package io.vidocq.chappe.conformance;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.nio.charset.StandardCharsets;
+import java.util.stream.Stream;
 
 import io.vidocq.chappe.api.Response;
 import io.vidocq.chappe.api.Router;
@@ -30,6 +31,9 @@ import io.vidocq.chappe.api.Server;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 /**
  * HTTP/1.1 conformance tests for message bodies.
@@ -76,72 +80,57 @@ class Http11BodyTest {
         assertEquals(body, RawHttp.extractBody(response));
     }
 
-    @Test
-    void chunkedBody() {
-        // Transfer-Encoding: chunked with multiple chunks
-        // Format: <size-hex>\r\n<data>\r\n ... 0\r\n\r\n
-        String response = RawHttp.sendAndReceive(port, """
-                POST /echo HTTP/1.1\r
-                Host: localhost\r
-                Transfer-Encoding: chunked\r
-                \r
-                5\r
-                Hello\r
-                7\r
-                , World\r
-                0\r
-                \r
-                """);
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("bodies")
+    void requestBody(String name, String request, String expectedBody) {
+        String response = RawHttp.sendAndReceive(port, request);
 
         assertEquals(200, RawHttp.extractStatusCode(response));
-        assertEquals("Hello, World", RawHttp.extractBody(response));
+        assertEquals(expectedBody, RawHttp.extractBody(response));
     }
 
-    @Test
-    void chunkedWithExtensions() {
-        // RFC 9112 Section 7.1.1: chunk extensions should be ignored
-        // Format: <size>;ext=val\r\n<data>\r\n
-        String response = RawHttp.sendAndReceive(port, """
-                POST /echo HTTP/1.1\r
-                Host: localhost\r
-                Transfer-Encoding: chunked\r
-                \r
-                5;ext=val\r
-                Hello\r
-                0\r
-                \r
-                """);
-
-        assertEquals(200, RawHttp.extractStatusCode(response));
-        assertEquals("Hello", RawHttp.extractBody(response));
-    }
-
-    @Test
-    void emptyChunkedBody() {
-        // Immediately terminated chunked body: 0\r\n\r\n
-        String response = RawHttp.sendAndReceive(port, """
-                POST /echo HTTP/1.1\r
-                Host: localhost\r
-                Transfer-Encoding: chunked\r
-                \r
-                0\r
-                \r
-                """);
-
-        assertEquals(200, RawHttp.extractStatusCode(response));
-        assertEquals("", RawHttp.extractBody(response));
-    }
-
-    @Test
-    void noBody() {
-        // GET request with no Content-Length or Transfer-Encoding → body is empty
-        String response = RawHttp.sendAndReceive(port, """
-                GET /nobody HTTP/1.1\r
-                Host: localhost\r
-                \r
-                """);
-
-        assertEquals(200, RawHttp.extractStatusCode(response));
-        assertEquals("no-body-expected", RawHttp.extractBody(response));
+    static Stream<Arguments> bodies() {
+        return Stream.of(
+                // Transfer-Encoding: chunked with multiple chunks
+                // Format: <size-hex>\r\n<data>\r\n ... 0\r\n\r\n
+                Arguments.of("chunked body", """
+                        POST /echo HTTP/1.1\r
+                        Host: localhost\r
+                        Transfer-Encoding: chunked\r
+                        \r
+                        5\r
+                        Hello\r
+                        7\r
+                        , World\r
+                        0\r
+                        \r
+                        """, "Hello, World"),
+                // RFC 9112 Section 7.1.1: chunk extensions should be ignored
+                // Format: <size>;ext=val\r\n<data>\r\n
+                Arguments.of("chunk extensions", """
+                        POST /echo HTTP/1.1\r
+                        Host: localhost\r
+                        Transfer-Encoding: chunked\r
+                        \r
+                        5;ext=val\r
+                        Hello\r
+                        0\r
+                        \r
+                        """, "Hello"),
+                // Immediately terminated chunked body: 0\r\n\r\n
+                Arguments.of("empty chunked body", """
+                        POST /echo HTTP/1.1\r
+                        Host: localhost\r
+                        Transfer-Encoding: chunked\r
+                        \r
+                        0\r
+                        \r
+                        """, ""),
+                // GET request with no Content-Length or Transfer-Encoding: the handler answers without reading a body
+                Arguments.of("no body", """
+                        GET /nobody HTTP/1.1\r
+                        Host: localhost\r
+                        \r
+                        """, "no-body-expected"));
     }
 }

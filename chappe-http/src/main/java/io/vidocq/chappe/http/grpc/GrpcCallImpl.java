@@ -356,8 +356,6 @@ public final class GrpcCallImpl implements GrpcCall {
                                 // lost connection; nothing to do
                             }
                         } catch (InterruptedException _) {
-                            // watchdog stopped because the handler finished before deadline;
-                            // keep the status, though this thread ends here
                             Thread.currentThread().interrupt();
                         }
                     });
