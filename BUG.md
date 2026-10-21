@@ -5,6 +5,27 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-037 — The buffer pool never served a second connection
+
+- **Date**: 2026-10-21
+- **Status**: FIXED on `fix/buffer-pool-virtual-threads`
+- **Module**: `chappe-http` (`ByteBufferPool`), used by `chappe-core` (`ChappeServer.handleConnection`)
+- **Symptom**: every connection allocated two new direct buffers (2 × 16 KiB) instead of reusing those of
+  closed connections; `clear()` at server stop emptied nothing. Found from SonarQube `java:S5164`
+  ("call remove() on this ThreadLocal") in the first analysis (Vidocq/vidocq#284).
+- **Minimal reproduction**: `chappe-http/.../ByteBufferPoolTest`: 100 connections one after the other, each
+  on its own virtual thread, acquire then release a buffer. Before the fix: 100 distinct buffers; a buffer
+  released on one virtual thread was never handed to the next.
+- **Cause**: the pool lived in a `ThreadLocal`, on the assumption that virtual threads share their carrier's
+  thread-locals. They do not: each virtual thread has its own (JEP 444), so each connection's pool was empty
+  when it opened and was dropped with its thread.
+- **Fix**: one pool shared by every connection, a lock-free last-in first-out deque bounded by its maximum
+  (1024 buffers in `ChappeServer`), accepting direct buffers of its own capacity only. Measured in
+  `BENCHMARKS.md` (2026-10-21): no change of connection throughput on macOS, where opening a loopback
+  connection costs about 650 µs whatever the server; the saving is the direct memory.
+
+---
+
 ## CHAPPE-036 — The TLS handshake read the socket before unwrapping buffered records
 
 - **Date**: 2026-10-18

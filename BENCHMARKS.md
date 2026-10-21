@@ -693,3 +693,44 @@ java --enable-preview -cp "$CLASSES:$(cat /tmp/cp.txt)" \
     org.openjdk.jmh.Main -rf json -rff .bench-results/jmh-$(date +%F).json
 ```
 
+---
+
+## 2026-10-21 — Buffer pool shared across virtual threads (CHAPPE-037)
+
+`ByteBufferPool` kept its buffers in a `ThreadLocal`; each virtual thread has its own, so the two
+direct buffers (2 × 16 KiB) `ChappeServer` takes per connection were never reused by another
+connection. The fix shares one lock-free, bounded pool. `ByteBufferPoolTest` proves the reuse
+(100 connections on virtual threads one after the other: 100 buffers before, 1 after). This run
+checks the effect on throughput, with a new benchmark that opens a connection per request.
+
+### Methodology
+
+- **Host**: Apple M5 Max, 18 cores, 128 GiB, macOS 27.0.1
+- **JVM**: Temurin 25+36, `--enable-preview`
+- **JMH**: 1.37, warmup 3 × 2 s, measurement 5 × 3 s, fork 1, one client thread
+- **Benchmarks**: `RawSocketBench.throughputNewConnection` (new): a TCP connection per request, closed
+  by the client with `SO_LINGER` 0 so the run does not exhaust the ephemeral ports with `TIME_WAIT`;
+  `RawSocketBench.throughputKeepAlive` as the control
+- **Command**: the classpath of the Reproducibility section above, then
+  `java --enable-preview -cp "$CLASSES:$(cat /tmp/cp.txt)" org.openjdk.jmh.Main 'RawSocketBench\.throughput(NewConnection|KeepAlive)' -rf json`
+- **Before**: `main` at `fd6f27c` plus the new benchmark; **after**: the same plus the fix
+- **Operating-system control**: the same client loop against a minimal server (`ServerSocket`, one
+  virtual thread per connection, reads the request, writes a fixed 200 response), 4 rounds of 3 s
+
+### Results
+
+| Benchmark | Before | After | Delta |
+|:----------|-------:|------:|------:|
+| `throughputNewConnection` | 1,545 ± 785 ops/s | 1,556 ± 782 ops/s | within noise |
+| `throughputKeepAlive` (control) | 30,876 ± 479 ops/s | 31,851 ± 3,761 ops/s | within noise |
+| Minimal server, same client loop | 1,426 – 1,990 connections/s | — | — |
+
+Raw iterations, new connection: before 1,319 / 1,656 / 1,333 / 1,756 / 1,660; after 1,328 / 1,685 /
+1,764 / 1,349 / 1,656 ops/s.
+
+**Verdict**: no measurable change of throughput on this host. A loopback connection costs about
+650 µs in macOS whatever the server — the minimal server does no better than Chappe — which hides
+the two direct allocations a connection no longer makes. The fix saves direct memory and
+`Cleaner` work per connection, not latency here; to be measured again on Linux, where opening a
+connection costs far less. No regression on keep-alive.
+

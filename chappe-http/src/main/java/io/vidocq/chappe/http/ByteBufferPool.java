@@ -20,56 +20,69 @@
 package io.vidocq.chappe.http;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayDeque;
+import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * ThreadLocal-based direct ByteBuffer pool — zero contention.
+ * A bounded pool of direct buffers shared by every connection.
  * <p>
- * Each carrier thread (platform thread) has its own pool.
- * Virtual threads inherit the carrier they run on,
- * which is ideal: no CAS, no lock, direct access.
+ * A connection takes its buffers when it opens and gives them back when it closes, on its own
+ * virtual thread. The pool cannot live in a thread-local: each virtual thread has its own
+ * (JEP 444), so a pool per thread never served another connection, and every connection
+ * allocated fresh direct memory. The deque is lock-free and last-in first-out, so the buffer
+ * handed out is the most recently used one; acquire and release happen once per connection,
+ * not per request.
  */
 public final class ByteBufferPool {
 
     private final int bufferSize;
-    private final int maxPerThread;
+    private final int maxPooled;
 
-    private final ThreadLocal<ArrayDeque<ByteBuffer>> local;
+    private final ConcurrentLinkedDeque<ByteBuffer> pooled = new ConcurrentLinkedDeque<>();
+    private final AtomicInteger size = new AtomicInteger();
 
+    /**
+     * @param bufferSize the capacity of every buffer, in bytes
+     * @param maxPoolSize the number of released buffers kept for reuse at most
+     */
     public ByteBufferPool(int bufferSize, int maxPoolSize) {
         this.bufferSize = bufferSize;
-        // Spread max capacity across ~8 carrier threads
-        this.maxPerThread = Math.max(4, maxPoolSize / 8);
-        this.local = ThreadLocal.withInitial(ArrayDeque::new);
+        this.maxPooled = maxPoolSize;
     }
 
-    /** Acquires a buffer (cleared). Zero contention. */
+    /** Acquires a cleared buffer: a pooled one when available, otherwise a new direct buffer. */
     public ByteBuffer acquire() {
-        var pool = local.get();
-        ByteBuffer buf = pool.pollFirst();
-        if (buf != null) {
-            buf.clear();
-            return buf;
+        ByteBuffer buffer = pooled.pollFirst();
+        if (buffer == null) {
+            return ByteBuffer.allocateDirect(bufferSize);
         }
-        return ByteBuffer.allocateDirect(bufferSize);
+        size.decrementAndGet();
+        return buffer.clear();
     }
 
-    /** Returns a buffer to the local pool. Zero contention. */
+    /**
+     * Gives a buffer back for reuse. A buffer that is not one of this pool's kind (another
+     * capacity, or on the heap) is ignored, and so is any buffer once the pool is full: the
+     * garbage collector then frees it.
+     */
     public void release(ByteBuffer buffer) {
-        if (buffer == null || buffer.capacity() != bufferSize) return;
-        var pool = local.get();
-        if (pool.size() < maxPerThread) {
-            pool.offerFirst(buffer);
+        if (buffer == null || buffer.capacity() != bufferSize || !buffer.isDirect()) return;
+        if (size.incrementAndGet() > maxPooled) {
+            size.decrementAndGet();
+            return;
         }
-        // otherwise discard — will be GC'd
+        pooled.offerFirst(buffer);
     }
 
-    /** Clears the current thread's pool. */
+    /** Empties the pool. */
     public void clear() {
-        local.get().clear();
+        while (pooled.pollFirst() != null) {
+            size.decrementAndGet();
+        }
     }
 
+    /** The number of buffers waiting for reuse. */
     public int pooledCount() {
-        return local.get().size();
+        return size.get();
     }
 }

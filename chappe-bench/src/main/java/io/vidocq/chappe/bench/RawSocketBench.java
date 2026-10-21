@@ -38,7 +38,8 @@ import org.openjdk.jmh.runner.options.OptionsBuilder;
  * Benchmark with a raw-socket client — measures the server's pure throughput
  * without HttpClient overhead (async framework, connection pool, TLS negotiation).
  * <p>
- * Reused keep-alive TCP connection, sending/receiving raw bytes.
+ * Reused keep-alive TCP connection, sending/receiving raw bytes; {@link #throughputNewConnection()}
+ * opens a connection per request instead.
  */
 @State(Scope.Thread)
 @Warmup(iterations = 3, time = 2)
@@ -93,7 +94,7 @@ public class RawSocketBench {
     public int throughputKeepAlive() throws IOException {
         out.write(GET_REQUEST);
         out.flush();
-        return drainResponse();
+        return drainResponse(in);
     }
 
     @Benchmark
@@ -102,14 +103,34 @@ public class RawSocketBench {
     public int latencyKeepAlive() throws IOException {
         out.write(GET_REQUEST);
         out.flush();
-        return drainResponse();
+        return drainResponse(in);
     }
 
     /**
-     * Reads the full HTTP response from the keep-alive socket.
+     * One TCP connection per request: measures what the server spends per connection (accept,
+     * virtual thread, buffers, teardown). The client closes with SO_LINGER 0, an abortive close,
+     * so the run does not exhaust the ephemeral ports with TIME_WAIT entries.
+     */
+    @Benchmark
+    @BenchmarkMode(Mode.Throughput)
+    @OutputTimeUnit(TimeUnit.SECONDS)
+    public int throughputNewConnection() throws IOException {
+        try (var s = new Socket("127.0.0.1", port)) {
+            s.setTcpNoDelay(true);
+            s.setSoTimeout(5000);
+            s.setSoLinger(true, 0);
+            OutputStream o = s.getOutputStream();
+            o.write(GET_REQUEST);
+            o.flush();
+            return drainResponse(s.getInputStream());
+        }
+    }
+
+    /**
+     * Reads the full HTTP response from the socket.
      * Parses Content-Length to know how much to read.
      */
-    private int drainResponse() throws IOException {
+    private int drainResponse(InputStream in) throws IOException {
         int totalRead = 0;
         int headerEnd = -1;
         int contentLength = -1;
