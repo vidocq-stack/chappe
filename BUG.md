@@ -5,6 +5,30 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-039 — A header or codec set while `send` wrote the initial headers was silently lost
+
+- **Date**: 2026-10-22
+- **Status**: FIXED on `fix/grpc-initial-headers-race`
+- **Module**: `chappe-http` (`GrpcCallImpl`, `GrpcWebCallImpl`)
+- **Symptom**: a thread calling `addHeader` or `useResponseEncoding` while another thread's `send` wrote the
+  initial headers got no error, and its change was lost: the header never left, and a codec chosen at that
+  moment compressed the message although the initial headers announced none (no `grpc-encoding`), which the
+  client cannot decode. Found by Infer's RacerD in the first run of the analysis plan (Vidocq/vidocq#269):
+  `initialHeadersSent` was read without the lock that `send` and `complete` hold.
+- **Minimal reproduction**: `chappe-http/.../grpc/GrpcCallInitialHeadersTest`: the connection writes through a
+  channel the test holds, so `send` stops inside the write of the initial headers it has already built; then
+  `addHeader("x-late", "1")` or `useResponseEncoding("gzip")` on another thread returned normally, for gRPC
+  and gRPC-Web alike (4 tests).
+- **Cause**: `send` builds the initial headers, writes them, then sets `initialHeadersSent`, all under
+  `writeLock`; `addHeader` and `useResponseEncoding` checked the flag and changed the response state without
+  it, so a change landing between the build and the flag was neither sent nor refused. `addTrailer` had the
+  same shape against `complete`, in a window too narrow for a test to hold open.
+- **Fix**: every access to the response state (both builders, the flag, the codec) under `writeLock`. A change
+  made during the write waits for it, then gets `IllegalStateException`, as any change after the headers
+  left. Infer reports no race left in Chappe (4 before).
+
+---
+
 ## CHAPPE-038 — The build identity shows `${git.commit.id.abbrev}` when git-commit-id does not run
 
 - **Date**: 2026-10-21

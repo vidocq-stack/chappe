@@ -71,7 +71,14 @@ public final class GrpcWebCallImpl implements GrpcCall {
 
     private final Headers.Builder responseHeadersBuilder = Headers.builder();
     private final Headers.Builder responseTrailersBuilder = Headers.builder();
+    /**
+     * Guards the response state: both builders, {@code initialHeadersSent} and {@code responseEncoding}. A
+     * change of the initial headers made while {@code send} writes them waits for the write, then is refused:
+     * it can no longer be dropped between the moment the headers are built and the moment they are marked sent
+     * (CHAPPE-039).
+     */
     private final Object writeLock = new Object();
+
     final AtomicBoolean completed = new AtomicBoolean(false);
     private boolean initialHeadersSent;
     private String responseEncoding;
@@ -188,20 +195,24 @@ public final class GrpcWebCallImpl implements GrpcCall {
 
     @Override
     public void addHeader(String name, String value) {
-        if (initialHeadersSent) {
-            throw new IllegalStateException("initial headers already sent");
+        synchronized (writeLock) {
+            if (initialHeadersSent) {
+                throw new IllegalStateException("initial headers already sent");
+            }
+            HeaderFields.requireValid("header", name, value); // CHAPPE-008
+            responseHeadersBuilder.add(name, value);
         }
-        HeaderFields.requireValid("header", name, value); // CHAPPE-008
-        responseHeadersBuilder.add(name, value);
     }
 
     @Override
     public void addTrailer(String name, String value) {
-        if (completed.get()) {
-            throw new IllegalStateException("call already completed");
+        synchronized (writeLock) {
+            if (completed.get()) {
+                throw new IllegalStateException("call already completed");
+            }
+            HeaderFields.requireValid("trailer", name, value); // CHAPPE-008
+            responseTrailersBuilder.add(name, value);
         }
-        HeaderFields.requireValid("trailer", name, value); // CHAPPE-008
-        responseTrailersBuilder.add(name, value);
     }
 
     @Override
@@ -223,18 +234,20 @@ public final class GrpcWebCallImpl implements GrpcCall {
 
     @Override
     public void useResponseEncoding(String encoding) {
-        if (initialHeadersSent) {
-            throw new IllegalStateException("initial headers already sent");
+        synchronized (writeLock) {
+            if (initialHeadersSent) {
+                throw new IllegalStateException("initial headers already sent");
+            }
+            if (encoding == null || "identity".equalsIgnoreCase(encoding)) {
+                this.responseEncoding = null;
+                return;
+            }
+            if ("gzip".equalsIgnoreCase(encoding)) {
+                this.responseEncoding = "gzip";
+                return;
+            }
+            throw new UnsupportedOperationException("unsupported gRPC encoding: " + encoding);
         }
-        if (encoding == null || "identity".equalsIgnoreCase(encoding)) {
-            this.responseEncoding = null;
-            return;
-        }
-        if ("gzip".equalsIgnoreCase(encoding)) {
-            this.responseEncoding = "gzip";
-            return;
-        }
-        throw new UnsupportedOperationException("unsupported gRPC encoding: " + encoding);
     }
 
     /** Initial headers: :status 200 + gRPC-Web content-type + grpc-accept-encoding (+ grpc-encoding if configured). */
