@@ -99,14 +99,17 @@ class ConnectionUpgradeTlsTest {
                 null,
                 new javax.net.ssl.TrustManager[] {
                     new X509TrustManager() {
+                        @Override
                         public X509Certificate[] getAcceptedIssuers() {
                             return new X509Certificate[0];
                         }
 
+                        @Override
                         public void checkClientTrusted(X509Certificate[] c, String a) {
                             // trusts everything: the test server's certificate is self-signed
                         }
 
+                        @Override
                         public void checkServerTrusted(X509Certificate[] c, String a) {
                             // trusts everything: the test server's certificate is self-signed
                         }
@@ -136,7 +139,7 @@ class ConnectionUpgradeTlsTest {
 
         try (var socket = connect()) {
             socket.getOutputStream()
-                    .write(("GET /u HTTP/1.1\r\nHost: h\r\nUpgrade: echo\r\nConnection: Upgrade\r\n\r\nHello")
+                    .write("GET /u HTTP/1.1\r\nHost: h\r\nUpgrade: echo\r\nConnection: Upgrade\r\n\r\nHello"
                             .getBytes(StandardCharsets.US_ASCII));
             socket.getOutputStream().flush();
             InputStream in = socket.getInputStream();
@@ -170,7 +173,7 @@ class ConnectionUpgradeTlsTest {
 
         try (var socket = connect()) {
             socket.getOutputStream()
-                    .write(("GET /u HTTP/1.1\r\nHost: h\r\nUpgrade: echo\r\nConnection: Upgrade\r\n\r\n")
+                    .write("GET /u HTTP/1.1\r\nHost: h\r\nUpgrade: echo\r\nConnection: Upgrade\r\n\r\n"
                             .getBytes(StandardCharsets.US_ASCII));
             socket.getOutputStream().flush();
             assertTrue(readHead(socket.getInputStream()).startsWith("HTTP/1.1 101 "));

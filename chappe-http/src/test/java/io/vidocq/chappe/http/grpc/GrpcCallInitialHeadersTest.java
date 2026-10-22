@@ -181,7 +181,7 @@ class GrpcCallInitialHeadersTest {
                 held.countDown();
                 try {
                     released.await();
-                } catch (InterruptedException e) {
+                } catch (InterruptedException _) {
                     Thread.currentThread().interrupt();
                     throw new InterruptedIOException("released never came");
                 }
@@ -201,7 +201,9 @@ class GrpcCallInitialHeadersTest {
         }
 
         @Override
-        public void close() {}
+        public void close() {
+            // nothing to release: the recorded bytes stay readable once the connection closes the channel
+        }
 
         /** The first byte of the first DATA frame's payload: the gRPC compressed flag of the first message. */
         int firstDataByte() {

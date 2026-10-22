@@ -20,6 +20,7 @@
 package io.vidocq.chappe.cli;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -75,16 +76,14 @@ class CliArgsTest {
         assertEquals("127.0.0.1", a.bind());
         assertEquals("/404.html", a.fallback());
         assertEquals("max-age=60", a.cacheControl());
-        assertEquals(Boolean.TRUE, a.gzip());
+        assertTrue(a.gzip());
         assertEquals("bar", a.extraHeaders().get("X-Foo"));
         assertEquals("qux", a.extraHeaders().get("X-Baz"));
     }
 
     @Test
     void noGzipDisables() {
-        assertEquals(
-                Boolean.FALSE,
-                CliArgs.parse(new String[] {"serve", "--no-gzip"}).gzip());
+        assertFalse(CliArgs.parse(new String[] {"serve", "--no-gzip"}).gzip());
     }
 
     @Test
@@ -121,11 +120,8 @@ class CliArgsTest {
 
     @Test
     void exposeBuildInfoFlags() {
-        assertEquals(
-                Boolean.TRUE,
-                CliArgs.parse(new String[] {"serve", "--expose-build-info"}).exposeBuildInfo());
-        assertEquals(
-                Boolean.FALSE,
+        assertTrue(CliArgs.parse(new String[] {"serve", "--expose-build-info"}).exposeBuildInfo());
+        assertFalse(
                 CliArgs.parse(new String[] {"serve", "--no-expose-build-info"}).exposeBuildInfo());
         assertNull(CliArgs.parse(new String[] {"serve"}).exposeBuildInfo());
     }

@@ -19,6 +19,7 @@
  */
 package io.vidocq.chappe.api.archfixture;
 
+import io.vidocq.chappe.api.Server;
 import io.vidocq.chappe.core.ChappeServerProvider;
 
 /**
@@ -29,7 +30,7 @@ public final class ApiReachingIntoCore {
 
     private ApiReachingIntoCore() {}
 
-    public static String engine(ChappeServerProvider provider) {
-        return provider.toString();
+    public static Server.Builder engine(ChappeServerProvider provider) {
+        return provider.newBuilder();
     }
 }

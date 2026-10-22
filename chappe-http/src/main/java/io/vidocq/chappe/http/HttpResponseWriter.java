@@ -67,8 +67,9 @@ public final class HttpResponseWriter {
     private static final byte[] DATE_PREFIX = "Date: ".getBytes(StandardCharsets.US_ASCII);
     private static final byte[] CONTENT_TYPE_TEXT =
             "Content-Type: text/plain; charset=utf-8\r\n".getBytes(StandardCharsets.US_ASCII);
-    // Server: the product alone by default, so that a public server does not tell which version to aim at;
-    // the version and build only when the server exposes its build info (ServerConfig.exposeBuildInfo).
+    // The Server header names the product alone by default, so that a public server does not tell which
+    // version to aim at, and adds the version and build only when the server exposes its build info
+    // (ServerConfig.exposeBuildInfo).
     private static final byte[] SERVER_DISCREET_LINE = "Server: Chappe\r\n".getBytes(StandardCharsets.US_ASCII);
     private static final byte[] SERVER_BUILD_LINE =
             ("Server: " + BuildInfo.serverHeader() + "\r\n").getBytes(StandardCharsets.US_ASCII);
@@ -127,11 +128,12 @@ public final class HttpResponseWriter {
 
     // Fast path: pre-encoded headers for 200 OK keep-alive (without Date, without body), without the build
     // or with it
-    private static final byte[] FAST_200_KA_PREFIX_DISCREET = ("HTTP/1.1 200 OK\r\n"
-                    + "Connection: keep-alive\r\n"
-                    + "Content-Type: text/plain; charset=utf-8\r\n"
-                    + "Server: Chappe\r\n")
-            .getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] FAST_200_KA_PREFIX_DISCREET = """
+            HTTP/1.1 200 OK\r
+            Connection: keep-alive\r
+            Content-Type: text/plain; charset=utf-8\r
+            Server: Chappe\r
+            """.getBytes(StandardCharsets.US_ASCII);
     private static final byte[] FAST_200_KA_PREFIX_BUILD = ("HTTP/1.1 200 OK\r\n"
                     + "Connection: keep-alive\r\n"
                     + "Content-Type: text/plain; charset=utf-8\r\n"

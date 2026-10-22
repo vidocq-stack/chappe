@@ -55,8 +55,15 @@ class ServerIdentityHeaderTest {
 
     private static final String GET = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n";
     private static final String BROKEN = "NOT A REQUEST LINE\r\n\r\n";
-    private static final String UPGRADE = "GET /ws HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\n"
-            + "Connection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
+    private static final String UPGRADE = """
+            GET /ws HTTP/1.1\r
+            Host: localhost\r
+            Upgrade: websocket\r
+            Connection: Upgrade\r
+            Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r
+            Sec-WebSocket-Version: 13\r
+            \r
+            """;
 
     private Server server;
 
@@ -133,7 +140,9 @@ class ServerIdentityHeaderTest {
     private static Response webSocket() {
         return new WebSocketUpgrade(new WebSocketHandler() {
             @Override
-            public void onOpen(WebSocket ws, Request handshake) {}
+            public void onOpen(WebSocket ws, Request handshake) {
+                // nothing to do: the test reads the head of the 101 and closes the connection
+            }
         });
     }
 

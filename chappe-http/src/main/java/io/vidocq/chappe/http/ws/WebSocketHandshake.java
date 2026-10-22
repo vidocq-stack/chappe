@@ -43,18 +43,17 @@ public final class WebSocketHandshake {
 
     // The 101 names Chappe as every response does: without its version by default, with its build when the
     // server exposes it (ServerConfig.exposeBuildInfo).
-    private static final byte[] PROLOGUE_DISCREET = ("HTTP/1.1 101 Switching Protocols\r\n"
-                    + "Upgrade: websocket\r\n"
-                    + "Connection: Upgrade\r\n"
-                    + "Server: Chappe\r\n"
-                    + "Sec-WebSocket-Accept: ")
-            .getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] PROLOGUE_DISCREET = """
+            HTTP/1.1 101 Switching Protocols\r
+            Upgrade: websocket\r
+            Connection: Upgrade\r
+            Server: Chappe\r
+            """.getBytes(StandardCharsets.US_ASCII);
     private static final byte[] PROLOGUE_BUILD = ("HTTP/1.1 101 Switching Protocols\r\n"
                     + "Upgrade: websocket\r\n"
                     + "Connection: Upgrade\r\n"
                     + "Server: " + BuildInfo.serverHeader() + "\r\n"
-                    + "X-Chappe-Build: " + BuildInfo.serverHeader() + "\r\n"
-                    + "Sec-WebSocket-Accept: ")
+                    + "X-Chappe-Build: " + BuildInfo.serverHeader() + "\r\n")
             .getBytes(StandardCharsets.US_ASCII);
 
     /** Calcule {@code Sec-WebSocket-Accept = base64(sha1(key + GUID))}. */
@@ -84,7 +83,7 @@ public final class WebSocketHandshake {
         byte[] prologue = exposeBuildInfo ? PROLOGUE_BUILD : PROLOGUE_DISCREET;
         var accept = computeAccept(secWebSocketKey);
         var sb = new StringBuilder(accept.length() + 64);
-        sb.append(accept).append("\r\n");
+        sb.append("Sec-WebSocket-Accept: ").append(accept).append("\r\n");
         if (subprotocol != null && !subprotocol.isEmpty()) {
             sb.append("Sec-WebSocket-Protocol: ").append(subprotocol).append("\r\n");
         }

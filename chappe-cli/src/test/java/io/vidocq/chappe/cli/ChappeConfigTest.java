@@ -20,6 +20,7 @@
 package io.vidocq.chappe.cli;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -66,11 +67,11 @@ class ChappeConfigTest {
         assertEquals("/404.html", c.staticCfg().fallback());
         assertEquals(List.of("index.html", "index.htm"), c.staticCfg().indexFiles());
         assertEquals("max-age=3600, public", c.staticCfg().cacheControl());
-        assertEquals(Boolean.TRUE, c.staticCfg().gzip());
+        assertTrue(c.staticCfg().gzip());
         assertEquals("nosniff", c.headers().always().get("X-Content-Type-Options"));
         assertEquals("noindex, nofollow", c.headers().staging().get("X-Robots-Tag"));
         assertEquals("INFO", c.logging().level());
-        assertEquals(Boolean.FALSE, c.logging().accessLog());
+        assertFalse(c.logging().accessLog());
     }
 
     @Test
@@ -101,7 +102,7 @@ class ChappeConfigTest {
                 server:
                   expose-build-info: true
                 """));
-        assertEquals(Boolean.TRUE, c.server().exposeBuildInfo());
+        assertTrue(c.server().exposeBuildInfo());
         assertNull(ChappeConfig.from(YamlReader.parse("""
                         server:
                           port: 9000
