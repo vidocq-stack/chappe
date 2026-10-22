@@ -26,11 +26,16 @@
 # Stage 1 : build Maven + JDK 25
 # Stage 2 : run JDK 25 minimal avec classes + dépendances copiées
 
-ARG MAVEN_TAG=4.0.0-rc-5-eclipse-temurin-25
 ARG JDK_TAG=25-jdk-noble
 
-FROM maven:${MAVEN_TAG} AS build
+FROM eclipse-temurin:${JDK_TAG} AS build
 WORKDIR /chappe
+
+# The repository's Maven wrapper (the version pinned in .mvn/wrapper, as on CI) and
+# the snapshot repository of vidocq-parent (CHAPPE-042).
+COPY mvnw ./
+COPY .mvn .mvn
+COPY chappe-bench/docker/maven-settings.xml .bench-settings.xml
 
 # Copy uniquement les POMs d'abord pour mieux cacher la résolution de deps.
 COPY pom.xml ./
@@ -45,7 +50,7 @@ COPY chappe-cli/pom.xml                         chappe-cli/pom.xml
 COPY chappe-static-index-maven-plugin/pom.xml   chappe-static-index-maven-plugin/pom.xml
 
 RUN --mount=type=cache,target=/root/.m2 \
-    mvn -pl chappe-bench -am -DskipTests dependency:go-offline -B || true
+    ./mvnw -s .bench-settings.xml -pl chappe-bench -am -DskipTests dependency:go-offline -B || true
 
 # Sources
 COPY chappe-api/src                        chappe-api/src
@@ -56,8 +61,8 @@ COPY chappe-static-index-maven-plugin/src  chappe-static-index-maven-plugin/src
 
 # Build + copie des dépendances à côté du jar
 RUN --mount=type=cache,target=/root/.m2 \
-    mvn -pl chappe-bench -am -DskipTests package \
-    && mvn -pl chappe-bench -DskipTests -DincludeScope=runtime \
+    ./mvnw -s .bench-settings.xml -pl chappe-bench -am -DskipTests package \
+    && ./mvnw -s .bench-settings.xml -pl chappe-bench -DskipTests -DincludeScope=runtime \
          dependency:copy-dependencies \
          -DoutputDirectory=/chappe/chappe-bench/target/dependency
 

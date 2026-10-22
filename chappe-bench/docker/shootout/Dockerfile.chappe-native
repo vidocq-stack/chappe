@@ -5,11 +5,17 @@
 # chappe-bench qui invoque native-image sur ChappeMain.
 #
 ARG GRAALVM_TAG=25-ol9
-ARG MAVEN_TAG=4.0.0-rc-5-eclipse-temurin-25
+ARG JDK_TAG=25-jdk-noble
 
 # Stage 1 : build le jar + collect deps via maven standard (plus rapide à cacher)
-FROM maven:${MAVEN_TAG} AS jar-build
+FROM eclipse-temurin:${JDK_TAG} AS jar-build
 WORKDIR /chappe
+
+# The repository's Maven wrapper (the version pinned in .mvn/wrapper, as on CI) and
+# the snapshot repository of vidocq-parent (CHAPPE-042).
+COPY mvnw ./
+COPY .mvn .mvn
+COPY chappe-bench/docker/maven-settings.xml .bench-settings.xml
 
 COPY pom.xml ./
 COPY chappe-api/pom.xml                         chappe-api/pom.xml
@@ -23,7 +29,7 @@ COPY chappe-cli/pom.xml                         chappe-cli/pom.xml
 COPY chappe-static-index-maven-plugin/pom.xml   chappe-static-index-maven-plugin/pom.xml
 
 RUN --mount=type=cache,target=/root/.m2 \
-    mvn -pl chappe-bench -am -DskipTests dependency:go-offline -B || true
+    ./mvnw -s .bench-settings.xml -pl chappe-bench -am -DskipTests dependency:go-offline -B || true
 
 COPY chappe-api/src                        chappe-api/src
 COPY chappe-http/src                       chappe-http/src
@@ -32,7 +38,7 @@ COPY chappe-bench/src                      chappe-bench/src
 COPY chappe-static-index-maven-plugin/src  chappe-static-index-maven-plugin/src
 
 RUN --mount=type=cache,target=/root/.m2 \
-    mvn -pl chappe-bench -am -DskipTests package
+    ./mvnw -s .bench-settings.xml -pl chappe-bench -am -DskipTests package
 
 
 # Stage 2 : native-image sur Chappe uniquement (sans Jetty/Helidon/Netty/Vert.x dans le classpath)

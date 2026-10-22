@@ -5,6 +5,29 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-042 — the bench images no longer build: vidocq-parent SNAPSHOT is not resolvable
+
+- **Date**: 2026-10-23
+- **Status**: FIXED on `feat/bench-pilot` (`chappe-shootout-jvm:local` built on macuntu)
+- **Module**: `chappe-bench` (`docker/Dockerfile`, `docker/shootout/Dockerfile.jvm`,
+  `docker/shootout/Dockerfile.chappe-native`)
+- **Symptom**: `run-remote.sh shootout` (and `jmh`, `compare`) fails while building the images:
+  `Non-resolvable parent POM: io.vidocq:vidocq-parent:pom:0.4.0-SNAPSHOT (absent) (remote repositories: central)`.
+- **Minimal repro**:
+  ```
+  COMPOSE_PROFILES=servers docker --context macuntutailscale compose \
+    -f chappe-bench/docker/shootout/docker-compose.yml build chappe-jvm
+  ```
+- **Cause**: Chappe's parent became `io.vidocq:vidocq-parent`, a SNAPSHOT published on Central's snapshot
+  repository. CI declares that repository in the settings written by `Vidocq/ci` `setup-maven`; the image
+  builds ran a bare `mvn` from `maven:4.0.0-rc-5`, which only knows Maven Central. They also still used the
+  Maven 4 release candidate the workspace left for 3.9.x.
+- **Fix**: `chappe-bench/docker/maven-settings.xml` declares the snapshot repository (the same as
+  `setup-maven`), and the three Dockerfiles build on `eclipse-temurin` with the repository's `./mvnw -s` that
+  file, so the image builds use the Maven version pinned in `.mvn/wrapper`, as CI does.
+
+---
+
 ## CHAPPE-041 — the shootout's default CPU sets put the client on the servers' physical cores
 
 - **Date**: 2026-10-23
