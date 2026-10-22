@@ -37,11 +37,11 @@ All expose `GET / → "ok"` (2 bytes, `text/plain`) on internal port 8080.
    │        └──────────┴─────┬─────┴─────────────┘                  │
    │                         │                                      │
    │                  ┌──────┴───────┐                               │
-   │                  │     wrk2     │  cpuset 4-7                  │
+   │                  │     wrk2     │  client cores                │
    │                  │  (client)    │                              │
    │                  └──────────────┘                               │
    │                                                                │
-   │  servers cpuset: 0-3                                           │
+   │  server cores (disjoint from the client's)                     │
    └────────────────────────────────────────────────────────────────┘
 ```
 
@@ -52,8 +52,9 @@ All expose `GET / → "ok"` (2 bytes, `text/plain`) on internal port 8080.
 ./chappe-bench/docker/run-remote.sh shootout            # everything (with native)
 ./chappe-bench/docker/run-remote.sh shootout-jvm-only   # without chappe-native
 
-# Override CPU sets if fewer than 8 cores:
-SERVER_CPUSET=0-1 CLIENT_CPUSET=2-3 \
+# CPU sets: by default derived from the host topology (CHAPPE-041), whole
+# physical cores with their hyper-threads, a third for the client. Override both:
+SERVER_CPUSET=0,6,1,7,2,8,3,9 CLIENT_CPUSET=4,10,5,11 \
     ./chappe-bench/docker/run-remote.sh shootout
 
 # Override wrk2 rates:
@@ -65,6 +66,9 @@ SHOOTOUT_RATES="10000 50000" SHOOTOUT_DURATION=10s \
 
 - Summary Markdown: `chappe-bench/target/shootout/shootout-results.md`
 - Raw wrk2 runs: `chappe-bench/target/shootout/<service>-rate<N>.txt`
+- Environment fingerprint: `chappe-bench/target/shootout/fingerprint.json` (machine, CPU
+  governor and turbo, CPU sets, JVM, versions of every target, commit). `Vidocq/ci`
+  `bench-report/import-wrk2-shootout.py` turns this directory into a `results.json`.
 
 The summary contains: image size (MB), idle RSS, max sustained throughput (at
 p99 < 10 ms), and p50 / p99 / p999 latency.

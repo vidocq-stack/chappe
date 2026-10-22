@@ -5,6 +5,31 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-041 — the shootout's default CPU sets put the client on the servers' physical cores
+
+- **Date**: 2026-10-23
+- **Status**: INVESTIGATING — fix on `feat/bench-pilot`
+- **Module**: `chappe-bench` (`docker/shootout/docker-compose.yml`, `docker/shootout/client/run-shootout.sh`)
+- **Symptom**: in bridge mode the shootout pins the servers to `SERVER_CPUSET=0-3` and the `wrk2` client to
+  `CLIENT_CPUSET=4-7`. On macuntu (Intel Core i7-8700B, 6 cores / 12 threads) logical CPUs 6 and 7 are the
+  hyper-thread siblings of CPUs 0 and 1, so the client and the server under test share two physical cores. The
+  load generator steals cycles from the server it measures, and the two sets are not the "disjoint" split the
+  README describes.
+- **Minimal repro**:
+  ```
+  docker --context macuntutailscale run --rm alpine sh -c \
+    'for c in /sys/devices/system/cpu/cpu[0-9]*; do echo "$c $(cat $c/topology/thread_siblings_list)"; done'
+  # cpu0 0,6  cpu1 1,7  cpu2 2,8  cpu3 3,9  cpu4 4,10  cpu5 5,11  (cpu6..11 mirror them)
+  ```
+- **Cause**: the defaults assume that CPUs 0-7 are eight distinct physical cores. Linux numbers the first thread
+  of every core before any sibling, so on a 6-core SMT host CPUs 6 and 7 are second threads of cores 0 and 1.
+- **Impact**: bridge-mode figures (e.g. the 2026-05-17 section of `BENCHMARKS.md`) were measured with client/server
+  contention. The canonical 2026-05-18 run is in unleashed mode, which pins nothing; this bug does not change it.
+- **Fix**: derive the default sets from the host topology: whole physical cores with their siblings, about a third
+  of them for the client, the rest for the servers, never shared. `SERVER_CPUSET` / `CLIENT_CPUSET` still override.
+
+---
+
 ## CHAPPE-040 — gRPC-Web content types and trailer names broke under a Turkish default locale
 
 - **Date**: 2026-10-22

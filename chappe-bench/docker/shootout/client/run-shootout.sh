@@ -56,6 +56,9 @@ RESULTS_FILE="$RESULTS_DIR/shootout-results.md"
 SUMMARY_TSV="$RESULTS_DIR/_summary.tsv"
 
 mkdir -p "$RESULTS_DIR"
+# Raw runs of an earlier invocation (other rates, other services) would be read as
+# part of this one.
+rm -f "$RESULTS_DIR"/*-rate*.txt "$RESULTS_DIR"/fingerprint.json
 : > "$SUMMARY_TSV"
 
 # ─── Compose file choisi selon le mode ────────────────────────────────────────
@@ -66,7 +69,7 @@ if [ "$UNLEASHED" = "1" ]; then
 else
     COMPOSE_FILE="$SHOOTOUT_DIR/docker-compose.yml"
     CONTAINER_PREFIX="chappe-shootout-"
-    MODE_LABEL="BRIDGE (cpuset 0-3 servers / 4-7 client)"
+    MODE_LABEL="BRIDGE (servers and client pinned to disjoint physical cores)"
 fi
 
 # ─── DOCKER wrappers ──────────────────────────────────────────────────────────
@@ -75,12 +78,42 @@ if [ -n "$CONTEXT" ]; then
     DC_FLAGS=(--context "$CONTEXT")
 fi
 
+dk()       { docker "${DC_FLAGS[@]}" "$@"; }
+compose()  { docker "${DC_FLAGS[@]}" compose -f "$COMPOSE_FILE" "$@"; }
+
+# ─── Default CPU sets from the host topology (CHAPPE-041) ─────────────────────
+# One line per physical core, listing its hardware threads ("0,6" or "0-1"). The
+# client gets about a third of the cores, the servers the rest; a core and its
+# siblings always go to the same side, so the load generator never shares a
+# physical core with the server it measures.
+derive_cpusets() {
+    local cores count client_count
+    cores=$(dk run --rm alpine sh -c \
+        'cat /sys/devices/system/cpu/cpu[0-9]*/topology/thread_siblings_list' \
+        | sort -t, -k1,1n -u)
+    count=$(echo "$cores" | grep -c .)
+    if [ "$count" -lt 2 ]; then
+        echo "  [error] $count physical core(s): set SERVER_CPUSET and CLIENT_CPUSET" >&2
+        exit 1
+    fi
+    client_count=$(( (count + 2) / 3 ))
+    SERVER_CPUSET=$(echo "$cores" | head -n $((count - client_count)) | paste -sd, -)
+    CLIENT_CPUSET=$(echo "$cores" | tail -n "$client_count" | paste -sd, -)
+}
+
+if [ "$UNLEASHED" != "1" ]; then
+    if [ -z "${SERVER_CPUSET:-}" ] || [ -z "${CLIENT_CPUSET:-}" ]; then
+        derive_cpusets
+    fi
+    export SERVER_CPUSET CLIENT_CPUSET
+fi
+
 echo "▶ Mode            : $MODE_LABEL"
 echo "▶ Docker context  : ${CONTEXT:-local}"
 echo "▶ Compose file    : $(basename "$COMPOSE_FILE")"
-
-dk()       { docker "${DC_FLAGS[@]}" "$@"; }
-compose()  { docker "${DC_FLAGS[@]}" compose -f "$COMPOSE_FILE" "$@"; }
+if [ "$UNLEASHED" != "1" ]; then
+    echo "▶ CPU sets        : servers $SERVER_CPUSET / client $CLIENT_CPUSET"
+fi
 
 # Cleanup automatique en cas d'erreur ou de fin normale (sauf KEEP_UP=1)
 COMPOSE_PROFILES="servers,native,client"
@@ -159,6 +192,89 @@ echo
 echo "▶ Démarrage des serveurs : $ALL_SERVICES"
 # shellcheck disable=SC2086
 COMPOSE_PROFILES="$COMPOSE_PROFILES" compose up -d $ALL_SERVICES wrk2
+
+# ─── Environment fingerprint ──────────────────────────────────────────────────
+# Written next to the raw wrk2 runs, so that a result never travels without the
+# machine, the settings and the versions that produced it.
+pom_version() {
+    awk -v a="<artifactId>$1</artifactId>" \
+        'index($0, a) { found = 1; next }
+         found && /<version>/ { gsub(/.*<version>|<\/version>.*/, ""); print; exit }' \
+        "$BENCH_DIR/pom.xml"
+}
+
+dockerfile_arg() {
+    sed -n "s/^ARG $2=//p" "$SHOOTOUT_DIR/$1" | head -1
+}
+
+write_fingerprint() {
+    local host jvm commit dirty cpusets
+    host=$(dk run --rm alpine sh -c '
+        f() { cat "$1" 2>/dev/null || echo unknown; }
+        echo "cpu_model=$(grep -m1 "model name" /proc/cpuinfo | cut -d: -f2- | sed "s/^ *//")"
+        echo "logical_cpus=$(grep -c ^processor /proc/cpuinfo)"
+        echo "kernel=$(uname -r)"
+        echo "governor=$(f /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor)"
+        echo "no_turbo=$(f /sys/devices/system/cpu/intel_pstate/no_turbo)"
+        echo "memory_kb=$(awk "/MemTotal/ {print \$2}" /proc/meminfo)"')
+    get() { echo "$host" | sed -n "s/^$1=//p"; }
+    jvm=$(dk run --rm --entrypoint java chappe-shootout-jvm:local -version 2>&1 | sed -n '2p')
+    commit=$(git -C "$REPO_ROOT" rev-parse HEAD)
+    dirty=false
+    [ -n "$(git -C "$REPO_ROOT" status --porcelain)" ] && dirty=true
+    if [ "$UNLEASHED" = "1" ]; then
+        cpusets='null'
+    else
+        cpusets="{ \"server\": \"$SERVER_CPUSET\", \"client\": \"$CLIENT_CPUSET\" }"
+    fi
+    cat > "$RESULTS_DIR/fingerprint.json" <<EOF
+{
+  "schema": 1,
+  "harness": "chappe-shootout",
+  "date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "repository": "chappe",
+  "commit": "$commit",
+  "dirty": $dirty,
+  "mode": "$([ "$UNLEASHED" = "1" ] && echo unleashed || echo bridge)",
+  "docker_context": "${CONTEXT:-local}",
+  "params": {
+    "rates": [$(echo $RATES | sed 's/ /, /g')],
+    "duration": "$DURATION",
+    "warmup": "$WARMUP",
+    "warmup_rate": $WARMUP_RATE,
+    "connections": $CONNECTIONS,
+    "threads": $THREADS,
+    "slo_p99_ms": 10
+  },
+  "cpusets": $cpusets,
+  "host": {
+    "cpu_model": "$(get cpu_model)",
+    "logical_cpus": $(get logical_cpus),
+    "kernel": "$(get kernel)",
+    "governor": "$(get governor)",
+    "no_turbo": "$(get no_turbo)",
+    "memory_kb": $(get memory_kb),
+    "docker": "$(dk version --format '{{.Server.Version}}')"
+  },
+  "jvm": "$jvm",
+  "targets": {
+    "chappe-jvm": "$commit",
+    "chappe-native": "GraalVM CE $(dockerfile_arg Dockerfile.chappe-native GRAALVM_TAG)",
+    "helidon": "Helidon SE $(pom_version helidon-webserver)",
+    "jetty": "Jetty $(pom_version jetty-server)",
+    "netty": "Netty $(pom_version netty-codec-http)",
+    "vertx": "Vert.x $(pom_version vertx-core)",
+    "jdk": "com.sun.net.httpserver",
+    "nginx": "nginx $(sed -n 's/^FROM nginx://p' "$SHOOTOUT_DIR/Dockerfile.nginx")",
+    "go": "Go net/http $(dockerfile_arg Dockerfile.go GO_TAG)"
+  },
+  "client": "$(dk image inspect cylab/wrk2:latest --format "{{index .RepoDigests 0}}" 2>/dev/null || echo cylab/wrk2:latest)"
+}
+EOF
+    echo "▶ Fingerprint     : $RESULTS_DIR/fingerprint.json"
+}
+
+write_fingerprint
 
 # ─── Phase 2 : attendre que chaque serveur réponde 200 ───────────────────────
 wait_ready() {
