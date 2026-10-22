@@ -31,7 +31,8 @@ cause hypothesis, and status.
 ## CHAPPE-041 — the shootout's default CPU sets put the client on the servers' physical cores
 
 - **Date**: 2026-10-23
-- **Status**: INVESTIGATING — fix on `feat/bench-pilot`
+- **Status**: FIXED on `feat/bench-pilot` (`a082b45`); verified on macuntu on 2026-10-22: the harness derived servers
+  `0,6,1,7,2,8,3,9` / client `4,10,5,11` and recorded them in `fingerprint.json`
 - **Module**: `chappe-bench` (`docker/shootout/docker-compose.yml`, `docker/shootout/client/run-shootout.sh`)
 - **Symptom**: in bridge mode the shootout pins the servers to `SERVER_CPUSET=0-3` and the `wrk2` client to
   `CLIENT_CPUSET=4-7`. On macuntu (Intel Core i7-8700B, 6 cores / 12 threads) logical CPUs 6 and 7 are the
