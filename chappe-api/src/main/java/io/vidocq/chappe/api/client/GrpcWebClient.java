@@ -200,12 +200,13 @@ public final class GrpcWebClient {
         var map = new LinkedHashMap<String, String>();
         String text = new String(payload, StandardCharsets.US_ASCII);
         for (String line : text.split("\r\n", -1)) {
-            if (line.isEmpty()) continue;
+            // A blank line, or one without a colon, holds no trailer.
             int colon = line.indexOf(':');
-            if (colon < 0) continue;
-            String name = line.substring(0, colon).trim().toLowerCase(Locale.ROOT);
-            String value = line.substring(colon + 1).trim();
-            map.put(name, value);
+            if (colon >= 0) {
+                String name = line.substring(0, colon).trim().toLowerCase(Locale.ROOT);
+                String value = line.substring(colon + 1).trim();
+                map.put(name, value);
+            }
         }
         return map;
     }

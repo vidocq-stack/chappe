@@ -92,20 +92,22 @@ public final class GrpcCallImpl implements GrpcCall {
         // complete(UNIMPLEMENTED) to run() so error output goes through
         // the normal pipeline (trailers-only response).
         var clientEncoding = request.headers().firstOrNull("grpc-encoding");
-        String reqEnc = null;
-        boolean unsupported = false;
-        if (clientEncoding != null && !clientEncoding.isEmpty() && !"identity".equalsIgnoreCase(clientEncoding)) {
-            if ("gzip".equalsIgnoreCase(clientEncoding)) {
-                reqEnc = "gzip";
-            } else {
-                unsupported = true;
-            }
-        }
-        this.requestEncodingUnsupported = unsupported;
-
-        GrpcFrameReader.Decompressor decompressor = "gzip".equals(reqEnc) ? GrpcCallImpl::gunzip : null;
-        this.frameReader = new GrpcFrameReader(GrpcFrameReader.DEFAULT_MAX_MESSAGE_SIZE, decompressor);
+        this.requestEncodingUnsupported = unsupportedEncoding(clientEncoding);
+        this.frameReader = new GrpcFrameReader(GrpcFrameReader.DEFAULT_MAX_MESSAGE_SIZE, decompressor(clientEncoding));
         this.bodyStream = stream.createBody().asInputStream();
+    }
+
+    /** Whether the client's {@code grpc-encoding} names a codec this server cannot read (neither identity nor gzip). */
+    static boolean unsupportedEncoding(String clientEncoding) {
+        return clientEncoding != null
+                && !clientEncoding.isEmpty()
+                && !"identity".equalsIgnoreCase(clientEncoding)
+                && !"gzip".equalsIgnoreCase(clientEncoding);
+    }
+
+    /** The decompressor of the client's {@code grpc-encoding}: gunzip for gzip, none otherwise. */
+    static GrpcFrameReader.Decompressor decompressor(String clientEncoding) {
+        return "gzip".equalsIgnoreCase(clientEncoding) ? GrpcCallImpl::gunzip : null;
     }
 
     @Override

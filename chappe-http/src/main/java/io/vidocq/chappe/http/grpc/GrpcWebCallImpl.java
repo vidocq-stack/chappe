@@ -105,18 +105,9 @@ public final class GrpcWebCallImpl implements GrpcCall {
 
         // Inbound grpc-encoding negotiation (same logic as GrpcCallImpl).
         var clientEncoding = request.headers().firstOrNull("grpc-encoding");
-        String reqEnc = null;
-        boolean unsupported = false;
-        if (clientEncoding != null && !clientEncoding.isEmpty() && !"identity".equalsIgnoreCase(clientEncoding)) {
-            if ("gzip".equalsIgnoreCase(clientEncoding)) {
-                reqEnc = "gzip";
-            } else {
-                unsupported = true;
-            }
-        }
-        this.requestEncodingUnsupported = unsupported;
-        GrpcFrameReader.Decompressor decompressor = "gzip".equals(reqEnc) ? GrpcCallImpl::gunzip : null;
-        this.frameReader = new GrpcFrameReader(GrpcFrameReader.DEFAULT_MAX_MESSAGE_SIZE, decompressor);
+        this.requestEncodingUnsupported = GrpcCallImpl.unsupportedEncoding(clientEncoding);
+        this.frameReader = new GrpcFrameReader(
+                GrpcFrameReader.DEFAULT_MAX_MESSAGE_SIZE, GrpcCallImpl.decompressor(clientEncoding));
 
         // TEXT mode body: read all then Base64-decode. V1 assumes a single
         // unary call (or short client-streaming). Chunk-by-chunk streaming is
