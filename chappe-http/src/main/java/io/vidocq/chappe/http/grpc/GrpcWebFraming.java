@@ -22,6 +22,7 @@ package io.vidocq.chappe.http.grpc;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.Locale;
 
 import io.vidocq.chappe.api.Headers;
 
@@ -63,7 +64,7 @@ public final class GrpcWebFraming {
     public static byte[] encodeTrailerFrame(Headers trailers) {
         var sb = new StringBuilder();
         for (var entry : trailers) {
-            sb.append(entry.name().toLowerCase())
+            sb.append(entry.name().toLowerCase(Locale.ROOT))
                     .append(':')
                     .append(entry.value())
                     .append("\r\n");
@@ -106,7 +107,7 @@ public final class GrpcWebFraming {
             if (line.isEmpty()) continue;
             int colon = line.indexOf(':');
             if (colon < 0) continue;
-            String name = line.substring(0, colon).trim().toLowerCase();
+            String name = line.substring(0, colon).trim().toLowerCase(Locale.ROOT);
             String value = line.substring(colon + 1).trim();
             map.put(name, value);
         }

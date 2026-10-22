@@ -5,6 +5,30 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-040 — gRPC-Web content types and trailer names broke under a Turkish default locale
+
+- **Date**: 2026-10-22
+- **Status**: FIXED on `fix/error-prone-shipped-code` (`GrpcWebLocaleTest`, `GrpcWebFramingTest`,
+  `IndexMojoTest.anUppercaseExtensionIsRecognizedUnderATurkishDefaultLocale`)
+- **Module**: `chappe-api` (`DefaultRouterBuilder.grpcWeb`, `GrpcWebBufferedCall`, `client.GrpcWebClient`),
+  `chappe-http` (`grpc.GrpcWebFraming`), `chappe-static-index-maven-plugin` (`IndexMojo`)
+- **Symptom**: on a JVM whose default locale is Turkish (or Azerbaijani), `"ID".toLowerCase()` gives
+  `"ıd"` with a dotless `ı`. A gRPC-Web request with `Content-Type: APPLICATION/GRPC-WEB` got `415`; a
+  trailer added as `X-Trace-ID` left as `x-trace-?d` (the dotless `ı` is not ASCII) over HTTP/1.1 and as
+  `x-trace-ıd` over HTTP/2; `GrpcWebClient` filed an `X-Trace-ID` trailer under `x-trace-ıd`, so
+  `trailers().get("x-trace-id")` was `null`. The static-index plugin read `LOGO.GIF` as `gıf`: indexed as
+  `application/octet-stream` and gzipped although it is an image. Found by Error Prone's
+  `StringCaseLocaleUsage` in the SonarQube import (Vidocq/vidocq#285).
+- **Minimal reproduction**: `Locale.setDefault(Locale.forLanguageTag("tr"))`, then
+  `GrpcWebFraming.parseTrailerPayload("X-Trace-ID:1\r\n".getBytes(US_ASCII))` returns `{x-trace-ıd=1}`.
+- **Cause**: `String.toLowerCase()` without an argument follows the default locale; protocol tokens
+  (media types, header names, file extensions) must be lowercased with `Locale.ROOT`, as the rest of Chappe
+  already does (`AcceptEncoding`, `Filter`, `HttpMethod`).
+- **Fix**: `toLowerCase(Locale.ROOT)` at the seven call sites. No call without a locale is left in the
+  shipped modules (`chappe-bench` keeps three: it is not shipped).
+
+---
+
 ## CHAPPE-039 — A header or codec set while `send` wrote the initial headers was silently lost
 
 - **Date**: 2026-10-22

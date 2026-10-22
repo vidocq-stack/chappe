@@ -24,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Locale;
 import java.util.Properties;
 
 import org.junit.jupiter.api.Test;
@@ -123,6 +124,34 @@ final class IndexMojoTest {
         }
         assertNotNull(props.getProperty("static/page.html"));
         assertNotNull(props.getProperty("static/page.html.gz"), "sidecar indexed");
+    }
+
+    @Test
+    void anUppercaseExtensionIsRecognizedUnderATurkishDefaultLocale(@TempDir Path outputDir) throws Exception {
+        Path staticDir = Files.createDirectories(outputDir.resolve("static"));
+        Files.write(staticDir.resolve("LOGO.GIF"), new byte[2048]); // "GIF".toLowerCase() is "gıf" in Turkish
+
+        Locale previousDefault = Locale.getDefault();
+        Locale.setDefault(Locale.forLanguageTag("tr"));
+        try {
+            IndexMojo mojo = new IndexMojo();
+            set(mojo, "outputDirectory", outputDir.toString());
+            set(mojo, "rootPrefix", "static");
+            set(mojo, "skip", false);
+            set(mojo, "compress", "gzip");
+            set(mojo, "compressThreshold", 1024);
+
+            mojo.execute();
+        } finally {
+            Locale.setDefault(previousDefault);
+        }
+
+        assertFalse(Files.exists(staticDir.resolve("LOGO.GIF.gz")), "an image is not compressed");
+        Properties props = new Properties();
+        try (var in = Files.newInputStream(outputDir.resolve("META-INF/chappe-static-index.properties"))) {
+            props.load(in);
+        }
+        assertTrue(props.getProperty("static/LOGO.GIF").contains("|image/gif|"), "detected as an image");
     }
 
     private static void set(IndexMojo mojo, String field, Object value) throws Exception {

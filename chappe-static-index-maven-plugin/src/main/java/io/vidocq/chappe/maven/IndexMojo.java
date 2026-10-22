@@ -29,6 +29,7 @@ import java.nio.file.Paths;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
+import java.util.Locale;
 import java.util.Properties;
 import java.util.stream.Stream;
 import java.util.zip.GZIPOutputStream;
@@ -138,7 +139,7 @@ public final class IndexMojo extends AbstractMojo {
         } catch (IOException ignored) {
             return false;
         }
-        String name = file.getFileName().toString().toLowerCase();
+        String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
         // Skip already-compressed sidecars and non-compressible types.
         if (name.endsWith(".gz")
                 || name.endsWith(".br")
@@ -204,7 +205,7 @@ public final class IndexMojo extends AbstractMojo {
     private static String detectMime(String path) {
         int dot = path.lastIndexOf('.');
         if (dot < 0 || dot == path.length() - 1) return "application/octet-stream";
-        String ext = path.substring(dot + 1).toLowerCase();
+        String ext = path.substring(dot + 1).toLowerCase(Locale.ROOT);
         return switch (ext) {
             case "html", "htm" -> "text/html";
             case "css" -> "text/css";

@@ -28,6 +28,7 @@ import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
@@ -202,7 +203,7 @@ final class DefaultRouterBuilder implements Router.Builder {
             if (ct == null) {
                 return Response.of(StatusCode.UNSUPPORTED_MEDIA_TYPE);
             }
-            String lower = ct.toLowerCase();
+            String lower = ct.toLowerCase(Locale.ROOT);
             GrpcWebDispatch.Mode mode;
             if (lower.startsWith("application/grpc-web-text")) {
                 mode = GrpcWebDispatch.Mode.TEXT;

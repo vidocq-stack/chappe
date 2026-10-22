@@ -29,6 +29,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
@@ -205,7 +206,7 @@ public final class GrpcWebClient {
             if (line.isEmpty()) continue;
             int colon = line.indexOf(':');
             if (colon < 0) continue;
-            String name = line.substring(0, colon).trim().toLowerCase();
+            String name = line.substring(0, colon).trim().toLowerCase(Locale.ROOT);
             String value = line.substring(colon + 1).trim();
             map.put(name, value);
         }

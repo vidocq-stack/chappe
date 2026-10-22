@@ -25,6 +25,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.time.Duration;
 import java.util.Base64;
+import java.util.Locale;
 import java.util.Optional;
 
 import io.vidocq.chappe.api.internal.HeaderFields;
@@ -223,7 +224,7 @@ final class GrpcWebBufferedCall implements GrpcCall {
     private static byte[] encodeTrailerFrame(Headers trailers) {
         var sb = new StringBuilder();
         for (var entry : trailers) {
-            sb.append(entry.name().toLowerCase())
+            sb.append(entry.name().toLowerCase(Locale.ROOT))
                     .append(':')
                     .append(entry.value())
                     .append("\r\n");
