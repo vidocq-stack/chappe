@@ -375,6 +375,7 @@ public final class WebSocketConnection implements WebSocket {
             try {
                 sc.close();
             } catch (IOException _) {
+                // already closed with the closeable above, or the peer is gone: nothing left to release
             }
         }
     }

@@ -115,7 +115,7 @@ public final class GrpcWebCallImpl implements GrpcCall {
             }
         }
         this.requestEncodingUnsupported = unsupported;
-        GrpcFrameReader.Decompressor decompressor = ("gzip".equals(reqEnc)) ? GrpcCallImpl::gunzip : null;
+        GrpcFrameReader.Decompressor decompressor = "gzip".equals(reqEnc) ? GrpcCallImpl::gunzip : null;
         this.frameReader = new GrpcFrameReader(GrpcFrameReader.DEFAULT_MAX_MESSAGE_SIZE, decompressor);
 
         // TEXT mode body: read all then Base64-decode. V1 assumes a single

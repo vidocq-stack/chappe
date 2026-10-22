@@ -23,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -67,5 +68,14 @@ class GrpcWebFramingTest {
                 GrpcWebFraming.parseTrailerPayload("X-Trace-ID:1\r\n".getBytes(StandardCharsets.US_ASCII));
 
         assertEquals(Map.of("x-trace-id", "1"), trailers);
+    }
+
+    @Test
+    void emptyLinesInATrailerPayloadAreIgnored() {
+        Map<String, String> trailers = GrpcWebFraming.parseTrailerPayload(
+                "grpc-status:0\r\n\r\ngrpc-message:ok\r\n\r\n".getBytes(StandardCharsets.US_ASCII));
+
+        assertEquals(List.of("grpc-status", "grpc-message"), List.copyOf(trailers.keySet()));
+        assertEquals(List.of("0", "ok"), List.copyOf(trailers.values()));
     }
 }

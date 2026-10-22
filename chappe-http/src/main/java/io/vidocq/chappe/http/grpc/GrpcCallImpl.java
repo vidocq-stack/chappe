@@ -55,8 +55,6 @@ public final class GrpcCallImpl implements GrpcCall {
     private final InputStream bodyStream;
     private final String contentType;
     private final long deadlineNanoTime;
-    /** Codec requested by the client for inbound messages, non-null if valid; null if "identity" or absent. */
-    private final String requestEncoding;
     /** {@code true} if the client sent an unknown codec — run() must complete(UNIMPLEMENTED). */
     private final boolean requestEncodingUnsupported;
 
@@ -103,10 +101,9 @@ public final class GrpcCallImpl implements GrpcCall {
                 unsupported = true;
             }
         }
-        this.requestEncoding = reqEnc;
         this.requestEncodingUnsupported = unsupported;
 
-        GrpcFrameReader.Decompressor decompressor = ("gzip".equals(reqEnc)) ? GrpcCallImpl::gunzip : null;
+        GrpcFrameReader.Decompressor decompressor = "gzip".equals(reqEnc) ? GrpcCallImpl::gunzip : null;
         this.frameReader = new GrpcFrameReader(GrpcFrameReader.DEFAULT_MAX_MESSAGE_SIZE, decompressor);
         this.bodyStream = stream.createBody().asInputStream();
     }

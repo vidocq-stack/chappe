@@ -63,9 +63,6 @@ import java.util.Objects;
  */
 public final class GrpcWebClient {
 
-    /** Prefix of the gRPC-Web trailer frame ({@code 0x80}, MSB set). */
-    private static final byte TRAILER_FLAG = (byte) 0x80;
-
     /** Transport encoding chosen for request/response bodies. */
     public enum Mode {
         /** {@code application/grpc-web}: raw binary payload. */
@@ -202,7 +199,7 @@ public final class GrpcWebClient {
     private static Map<String, String> parseTrailerPayload(byte[] payload) {
         var map = new LinkedHashMap<String, String>();
         String text = new String(payload, StandardCharsets.US_ASCII);
-        for (String line : text.split("\r\n")) {
+        for (String line : text.split("\r\n", -1)) {
             if (line.isEmpty()) continue;
             int colon = line.indexOf(':');
             if (colon < 0) continue;

@@ -241,7 +241,7 @@ public final class StaticFileHandler implements Handler {
 
     private Response serveResource(Request request, ResolvedResource resource, StatusCode status) throws IOException {
         // If-Modified-Since (only for OK responses — fallbacks always serve fresh)
-        if (status == StatusCode.OK && resource.lastModified() != null) {
+        if (StatusCode.OK.equals(status) && resource.lastModified() != null) {
             String ims = request.header("If-Modified-Since").orElse(null);
             if (ims != null) {
                 try {
@@ -270,7 +270,7 @@ public final class StaticFileHandler implements Handler {
 
     private Response serveCached(Request request, CachedResource cached, StatusCode status) {
         // ETag / If-None-Match (only for OK responses)
-        if (status == StatusCode.OK) {
+        if (StatusCode.OK.equals(status)) {
             String inm = request.header("If-None-Match").orElse(null);
             if (inm != null && inm.equals(cached.etag)) {
                 return Response.of(StatusCode.NOT_MODIFIED);

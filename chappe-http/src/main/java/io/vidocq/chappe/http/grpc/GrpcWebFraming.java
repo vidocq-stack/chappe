@@ -103,7 +103,7 @@ public final class GrpcWebFraming {
     public static java.util.Map<String, String> parseTrailerPayload(byte[] payload) {
         var map = new java.util.LinkedHashMap<String, String>();
         String text = new String(payload, StandardCharsets.US_ASCII);
-        for (String line : text.split("\r\n")) {
+        for (String line : text.split("\r\n", -1)) {
             if (line.isEmpty()) continue;
             int colon = line.indexOf(':');
             if (colon < 0) continue;
