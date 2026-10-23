@@ -24,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.Socket;
 import java.net.SocketException;
 import java.net.SocketTimeoutException;
@@ -33,6 +34,7 @@ import java.security.KeyStore;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -111,7 +113,7 @@ class TlsHandshakeTimeoutTest {
     @Test
     void aClientThatNeverSendsAClientHelloIsClosed() throws IOException {
         int port = start(IDLE);
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5000);
             long start = System.nanoTime();
             int eof = socket.getInputStream().read();
@@ -127,7 +129,7 @@ class TlsHandshakeTimeoutTest {
     void aPartialClientHelloIsClosed() throws Exception {
         int port = start(IDLE);
         byte[] hello = clientHello(port);
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5000);
             OutputStream out = socket.getOutputStream();
             out.write(hello, 0, 15);
@@ -152,7 +154,7 @@ class TlsHandshakeTimeoutTest {
         byte[] hello = clientHello(port);
         var sent = new AtomicInteger();
         var done = new AtomicBoolean();
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5000);
             OutputStream out = socket.getOutputStream();
             long start = System.nanoTime();
@@ -221,7 +223,7 @@ class TlsHandshakeTimeoutTest {
     @Test
     void plaintextOnTheTlsPortEndsWithinTheLingerBudget() throws IOException {
         int port = start(IDLE);
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(8000);
             OutputStream out = socket.getOutputStream();
             out.write("GET / HTTP/1.1\r\n\r\n".getBytes(StandardCharsets.US_ASCII));
@@ -273,7 +275,7 @@ class TlsHandshakeTimeoutTest {
         engine.setUseClientMode(true);
         engine.setEnabledProtocols(new String[] {"TLSv1.2"});
         var records = new java.util.ArrayList<Integer>();
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5000);
             InputStream in = socket.getInputStream();
             OutputStream out = socket.getOutputStream();
@@ -395,7 +397,7 @@ class TlsHandshakeTimeoutTest {
             int headerEnd = sb.indexOf("\r\n\r\n");
             if (headerEnd >= 0) {
                 String headers = sb.substring(0, headerEnd + 4);
-                var clIdx = headers.toLowerCase().indexOf("content-length: ");
+                var clIdx = headers.toLowerCase(Locale.ROOT).indexOf("content-length: ");
                 int contentLength = 0;
                 if (clIdx >= 0) {
                     var clEnd = headers.indexOf("\r\n", clIdx);

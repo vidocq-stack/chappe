@@ -25,6 +25,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.Socket;
 import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
@@ -102,14 +103,17 @@ class TlsLingeringCloseTest {
                 null,
                 new javax.net.ssl.TrustManager[] {
                     new X509TrustManager() {
+                        @Override
                         public X509Certificate[] getAcceptedIssuers() {
                             return new X509Certificate[0];
                         }
 
+                        @Override
                         public void checkClientTrusted(X509Certificate[] c, String a) {
                             // trusts everything: the test server's certificate is self-signed
                         }
 
+                        @Override
                         public void checkServerTrusted(X509Certificate[] c, String a) {
                             // trusts everything: the test server's certificate is self-signed
                         }
@@ -296,7 +300,7 @@ class TlsLingeringCloseTest {
      * so the TCP end is what the test checks.
      */
     private String sendThenRead(String request) throws Exception {
-        try (var raw = new Socket("127.0.0.1", port)) {
+        try (var raw = new Socket(InetAddress.getLoopbackAddress(), port)) {
             raw.setSoTimeout(10_000);
             var tls = (SSLSocket) trustAllContext.getSocketFactory().createSocket(raw, "127.0.0.1", port, false);
             tls.startHandshake();

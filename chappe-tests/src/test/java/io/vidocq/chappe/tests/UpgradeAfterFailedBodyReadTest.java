@@ -24,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.InetAddress;
 import java.net.Socket;
 import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
@@ -118,7 +119,7 @@ class UpgradeAfterFailedBodyReadTest {
                 })
                 .build();
         server.start();
-        try (var socket = new Socket("127.0.0.1", server.port())) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), server.port())) {
             socket.setSoTimeout(5000);
             socket.getOutputStream().write(REQUEST.getBytes(StandardCharsets.US_ASCII));
             socket.getOutputStream().flush();

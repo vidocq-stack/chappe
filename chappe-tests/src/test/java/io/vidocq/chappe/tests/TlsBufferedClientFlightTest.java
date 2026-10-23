@@ -26,6 +26,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.nio.ByteBuffer;
@@ -91,7 +92,7 @@ class TlsBufferedClientFlightTest {
                 .build();
         server.start();
 
-        try (Socket socket = new Socket("127.0.0.1", server.port())) {
+        try (Socket socket = new Socket(InetAddress.getLoopbackAddress(), server.port())) {
             socket.setSoTimeout(5_000);
             SSLEngine engine = clientContext.createSSLEngine("127.0.0.1", server.port());
             engine.setUseClientMode(true);

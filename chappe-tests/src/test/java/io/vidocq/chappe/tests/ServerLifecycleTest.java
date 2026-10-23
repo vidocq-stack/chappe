@@ -24,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
+import java.net.InetAddress;
 import java.net.Socket;
 import java.net.SocketException;
 import java.net.URI;
@@ -113,7 +114,7 @@ class ServerLifecycleTest {
 
     /** Sends one request with {@code Connection: close} and reads to the end; a reset ends it too. */
     private static String exchange(int port) throws IOException {
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5000);
             socket.getOutputStream()
                     .write("GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"

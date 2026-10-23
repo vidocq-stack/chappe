@@ -24,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 import io.vidocq.chappe.api.Body;
@@ -143,7 +144,7 @@ class StaticFileHandlerClasspathTest {
         Body b = r.body();
         assertNotNull(b);
         try (var in = b.asInputStream()) {
-            return new String(in.readAllBytes());
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
         }
     }
 }

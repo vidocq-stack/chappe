@@ -23,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -116,14 +117,17 @@ class TlsTest {
                 null,
                 new javax.net.ssl.TrustManager[] {
                     new X509TrustManager() {
+                        @Override
                         public X509Certificate[] getAcceptedIssuers() {
                             return new X509Certificate[0];
                         }
 
+                        @Override
                         public void checkClientTrusted(X509Certificate[] c, String a) {
                             // trusts everything: the test server's certificate is self-signed
                         }
 
+                        @Override
                         public void checkServerTrusted(X509Certificate[] c, String a) {
                             // trusts everything: the test server's certificate is self-signed
                         }
@@ -257,7 +261,8 @@ class TlsTest {
         ByteBuffer netIn = ByteBuffer.allocate(pkt);
         ByteBuffer appIn = ByteBuffer.allocate(app);
 
-        try (SocketChannel ch = SocketChannel.open(new InetSocketAddress("127.0.0.1", server.port()))) {
+        try (SocketChannel ch =
+                SocketChannel.open(new InetSocketAddress(InetAddress.getLoopbackAddress(), server.port()))) {
             ch.configureBlocking(true);
 
             engine.beginHandshake();
@@ -308,7 +313,7 @@ class TlsTest {
             }
 
             // Wrap the HTTP/1.1 request, then send [client Finished || request] in ONE write.
-            byte[] request = ("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+            byte[] request = "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
                     .getBytes(StandardCharsets.US_ASCII);
             ByteBuffer reqNet = ByteBuffer.allocate(pkt);
             engine.wrap(ByteBuffer.wrap(request), reqNet);

@@ -25,6 +25,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
+import java.net.InetAddress;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.net.URI;
@@ -99,7 +100,7 @@ class StreamingBodyTest {
         server.start();
 
         // HTTP/1.1 keep-alive by default -> chunked transfer encoding
-        try (var socket = new Socket("127.0.0.1", server.port())) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), server.port())) {
             socket.setSoTimeout(5000);
             var out = socket.getOutputStream();
             var in = socket.getInputStream();
@@ -191,10 +192,10 @@ class StreamingBodyTest {
 
             @Override
             public int read(byte[] b, int off, int len) throws IOException {
-                switch (step++) {
+                return switch (step++) {
                     case 0 -> {
                         System.arraycopy("first".getBytes(StandardCharsets.US_ASCII), 0, b, off, 5);
-                        return 5;
+                        yield 5;
                     }
                     case 1 -> {
                         try {
@@ -204,12 +205,10 @@ class StreamingBodyTest {
                             throw new IOException(e);
                         }
                         System.arraycopy("final".getBytes(StandardCharsets.US_ASCII), 0, b, off, 5);
-                        return 5;
+                        yield 5;
                     }
-                    default -> {
-                        return -1;
-                    }
-                }
+                    default -> -1;
+                };
             }
         };
         server = Server.builder()
@@ -222,7 +221,7 @@ class StreamingBodyTest {
                 .build();
         server.start();
 
-        try (var socket = new Socket("127.0.0.1", server.port())) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), server.port())) {
             socket.setSoTimeout(2000);
             var out = socket.getOutputStream();
             var in = socket.getInputStream();

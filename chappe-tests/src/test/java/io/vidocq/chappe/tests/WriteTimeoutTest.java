@@ -25,6 +25,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
@@ -92,7 +93,7 @@ class WriteTimeoutTest {
             // buffer) quickly, so channel.write() starts blocking well before
             // 32 MiB have gone out.
             socket.setReceiveBufferSize(2048);
-            socket.connect(new InetSocketAddress("127.0.0.1", server.port()));
+            socket.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), server.port()));
             socket.setSoTimeout(2000);
 
             var out = socket.getOutputStream();
@@ -169,7 +170,7 @@ class WriteTimeoutTest {
                 .build();
         server.start();
 
-        try (var socket = new Socket("127.0.0.1", server.port())) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), server.port())) {
             socket.setSoTimeout(5000); // client-side patience for the artificial gap; unrelated to writeTimeout
             var out = socket.getOutputStream();
             var in = socket.getInputStream();

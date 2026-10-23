@@ -24,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import java.io.ByteArrayOutputStream;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
@@ -68,8 +69,8 @@ class StaticFileHandlerSidecarTest {
     @Test
     void brSidecarPreferredOverGzip(@TempDir Path root) throws Exception {
         Files.writeString(root.resolve("app.js"), "console.log('hi')");
-        Files.write(root.resolve("app.js.gz"), gzipBytes("FAKE GZ".getBytes()));
-        Files.write(root.resolve("app.js.br"), "FAKE BR".getBytes());
+        Files.write(root.resolve("app.js.gz"), gzipBytes("FAKE GZ".getBytes(StandardCharsets.UTF_8)));
+        Files.write(root.resolve("app.js.br"), "FAKE BR".getBytes(StandardCharsets.UTF_8));
 
         Handler h = StaticFileHandler.builder()
                 .addPath(root)
@@ -84,7 +85,7 @@ class StaticFileHandlerSidecarTest {
     @Test
     void fallbackToOriginalWhenClientDoesNotAcceptGzip(@TempDir Path root) throws Exception {
         Files.writeString(root.resolve("style.css"), "body{}");
-        Files.write(root.resolve("style.css.gz"), gzipBytes("body{}".getBytes()));
+        Files.write(root.resolve("style.css.gz"), gzipBytes("body{}".getBytes(StandardCharsets.UTF_8)));
 
         Handler h = StaticFileHandler.builder()
                 .addPath(root)
@@ -113,7 +114,7 @@ class StaticFileHandlerSidecarTest {
     @Test
     void preferPrecompressedDisabledIgnoresSidecars(@TempDir Path root) throws Exception {
         Files.writeString(root.resolve("style.css"), "body{}");
-        Files.write(root.resolve("style.css.gz"), gzipBytes("body{}".getBytes()));
+        Files.write(root.resolve("style.css.gz"), gzipBytes("body{}".getBytes(StandardCharsets.UTF_8)));
 
         Handler h = StaticFileHandler.builder().addPath(root).build();
 
