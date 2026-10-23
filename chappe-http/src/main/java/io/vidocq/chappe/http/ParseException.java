@@ -29,7 +29,7 @@ import io.vidocq.chappe.api.StatusCode;
  */
 public final class ParseException extends Exception {
 
-    private final StatusCode statusCode;
+    private final transient StatusCode statusCode;
 
     public ParseException(StatusCode statusCode, String message) {
         super(message);

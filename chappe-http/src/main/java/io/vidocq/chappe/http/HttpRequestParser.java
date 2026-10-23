@@ -98,11 +98,8 @@ public final class HttpRequestParser {
             throws ParseException, IOException {
 
         while (true) {
-            if (!buffer.hasRemaining()) {
-                int read = ReadBuffers.compactAndRead(buffer, channel);
-                if (read == -1) {
-                    return ParseResult.CONNECTION_CLOSED;
-                }
+            if (!buffer.hasRemaining() && ReadBuffers.compactAndRead(buffer, channel) == -1) {
+                return ParseResult.CONNECTION_CLOSED;
             }
 
             while (buffer.hasRemaining()) {
@@ -115,118 +112,135 @@ public final class HttpRequestParser {
                             "Headers exceed " + config.maxHeaderSize() + " bytes");
                 }
 
-                switch (state) {
-                    case REQUEST_LINE_METHOD -> {
-                        if (b == SP) {
-                            target.method = resolveMethod(token);
-                            token.setLength(0);
-                            state = State.REQUEST_LINE_URI;
-                        } else if (b == CR || b == LF) {
-                            // Empty lines before request-line: ignore (RFC 9112 §2.2)
-                            if (token.isEmpty()) {
-                                headerBytesRead = 0; // do not count empty lines
-                            } else {
-                                throw badRequest("Unexpected line break in request method");
-                            }
-                        } else {
-                            token.append((char) b);
-                        }
-                    }
-
-                    case REQUEST_LINE_URI -> {
-                        if (b == SP) {
-                            if (token.length() > MAX_URI_LENGTH) {
-                                throw new ParseException(
-                                        StatusCode.URI_TOO_LONG, "URI exceeds " + MAX_URI_LENGTH + " bytes");
-                            }
-                            target.rawUri = internUri(token);
-                            token.setLength(0);
-                            state = State.REQUEST_LINE_VERSION;
-                        } else if (b == CR || b == LF) {
-                            throw badRequest("Unexpected line break in URI");
-                        } else {
-                            token.append((char) b);
-                        }
-                    }
-
-                    case REQUEST_LINE_VERSION -> {
-                        if (b == CR) {
-                            // Version ended, waiting for LF
-                        } else if (b == LF) {
-                            target.version = resolveVersion(token);
-                            token.setLength(0);
-                            state = State.HEADER_LINE_START;
-                        } else {
-                            token.append((char) b);
-                        }
-                    }
-
-                    case HEADER_LINE_START -> {
-                        if (b == CR) {
-                            // Start of final empty line
-                        } else if (b == LF) {
-                            // End of headers
-                            state = State.COMPLETE;
-                            return ParseResult.COMPLETE;
-                        } else if (b == SP || b == HTAB) {
-                            // Obsolete line folding (RFC 9112 §5.2)
-                            throw badRequest("Obsolete header line folding not supported");
-                        } else {
-                            token.setLength(0);
-                            token.append((char) b);
-                            state = State.HEADER_NAME;
-                        }
-                    }
-
-                    case HEADER_NAME -> {
-                        if (b == COLON) {
-                            currentHeaderName = internHeaderName(token);
-                            token.setLength(0);
-                            state = State.HEADER_VALUE_OWS;
-                        } else if (b == SP || b == HTAB) {
-                            throw badRequest("Space before colon in header name");
-                        } else if (b == CR || b == LF) {
-                            throw badRequest("Unexpected line break in header name");
-                        } else {
-                            token.append((char) b);
-                        }
-                    }
-
-                    case HEADER_VALUE_OWS -> {
-                        if (b == SP || b == HTAB) {
-                            // Skip OWS
-                        } else if (b == CR) {
-                            // Empty value
-                        } else if (b == LF) {
-                            // Header with empty value
-                            addHeader(target, currentHeaderName, "");
-                            state = State.HEADER_LINE_START;
-                        } else {
-                            token.setLength(0);
-                            token.append((char) b);
-                            state = State.HEADER_VALUE;
-                        }
-                    }
-
-                    case HEADER_VALUE -> {
-                        if (b == CR) {
-                            // End of value, waiting for LF
-                        } else if (b == LF) {
-                            // Trim trailing OWS
-                            var value = trimTrailingOws(token);
-                            addHeader(target, currentHeaderName, value);
-                            state = State.HEADER_LINE_START;
-                        } else {
-                            token.append((char) b);
-                        }
-                    }
-
-                    case COMPLETE -> {
-                        // Should not happen here
-                        return ParseResult.COMPLETE;
-                    }
+                consume(b, target);
+                if (state == State.COMPLETE) {
+                    return ParseResult.COMPLETE;
                 }
             }
+        }
+    }
+
+    /** Feeds one byte to the state machine; the request is parsed once the state is {@link State#COMPLETE}. */
+    private void consume(int b, HttpRequestImpl target) throws ParseException {
+        switch (state) {
+            case REQUEST_LINE_METHOD -> onMethodByte(b, target);
+            case REQUEST_LINE_URI -> onUriByte(b, target);
+            case REQUEST_LINE_VERSION -> onVersionByte(b, target);
+            case HEADER_LINE_START -> onHeaderLineStartByte(b);
+            case HEADER_NAME -> onHeaderNameByte(b);
+            case HEADER_VALUE_OWS -> onHeaderValueOwsByte(b, target);
+            case HEADER_VALUE -> onHeaderValueByte(b, target);
+            case COMPLETE -> {
+                // Should not happen here: the caller returns as soon as the state is COMPLETE
+            }
+        }
+    }
+
+    private void onMethodByte(int b, HttpRequestImpl target) throws ParseException {
+        switch (b) {
+            case SP -> {
+                target.method = resolveMethod(token);
+                token.setLength(0);
+                state = State.REQUEST_LINE_URI;
+            }
+            case CR, LF -> {
+                // Empty lines before request-line: ignore (RFC 9112 §2.2)
+                if (!token.isEmpty()) {
+                    throw badRequest("Unexpected line break in request method");
+                }
+                headerBytesRead = 0; // do not count empty lines
+            }
+            default -> token.append((char) b);
+        }
+    }
+
+    private void onUriByte(int b, HttpRequestImpl target) throws ParseException {
+        switch (b) {
+            case SP -> {
+                if (token.length() > MAX_URI_LENGTH) {
+                    throw new ParseException(StatusCode.URI_TOO_LONG, "URI exceeds " + MAX_URI_LENGTH + " bytes");
+                }
+                target.rawUri = internUri(token);
+                token.setLength(0);
+                state = State.REQUEST_LINE_VERSION;
+            }
+            case CR, LF -> throw badRequest("Unexpected line break in URI");
+            default -> token.append((char) b);
+        }
+    }
+
+    private void onVersionByte(int b, HttpRequestImpl target) throws ParseException {
+        switch (b) {
+            case CR -> {
+                // Version ended, waiting for LF
+            }
+            case LF -> {
+                target.version = resolveVersion(token);
+                token.setLength(0);
+                state = State.HEADER_LINE_START;
+            }
+            default -> token.append((char) b);
+        }
+    }
+
+    private void onHeaderLineStartByte(int b) throws ParseException {
+        switch (b) {
+            case CR -> {
+                // Start of final empty line
+            }
+            case LF -> state = State.COMPLETE; // End of headers
+            case SP, HTAB -> throw badRequest("Obsolete header line folding not supported"); // RFC 9112 §5.2
+            default -> {
+                token.setLength(0);
+                token.append((char) b);
+                state = State.HEADER_NAME;
+            }
+        }
+    }
+
+    private void onHeaderNameByte(int b) throws ParseException {
+        switch (b) {
+            case COLON -> {
+                currentHeaderName = internHeaderName(token);
+                token.setLength(0);
+                state = State.HEADER_VALUE_OWS;
+            }
+            case SP, HTAB -> throw badRequest("Space before colon in header name");
+            case CR, LF -> throw badRequest("Unexpected line break in header name");
+            default -> token.append((char) b);
+        }
+    }
+
+    private void onHeaderValueOwsByte(int b, HttpRequestImpl target) throws ParseException {
+        switch (b) {
+            case SP, HTAB, CR -> {
+                // Skip OWS; a CR announces an empty value
+            }
+            case LF -> {
+                // Header with empty value
+                addHeader(target, currentHeaderName, "");
+                state = State.HEADER_LINE_START;
+            }
+            default -> {
+                token.setLength(0);
+                token.append((char) b);
+                state = State.HEADER_VALUE;
+            }
+        }
+    }
+
+    private void onHeaderValueByte(int b, HttpRequestImpl target) throws ParseException {
+        switch (b) {
+            case CR -> {
+                // End of value, waiting for LF
+            }
+            case LF -> {
+                // Trim trailing OWS
+                var value = trimTrailingOws(token);
+                addHeader(target, currentHeaderName, value);
+                state = State.HEADER_LINE_START;
+            }
+            default -> token.append((char) b);
         }
     }
 
@@ -266,7 +280,7 @@ public final class HttpRequestParser {
     private static HttpMethod parseMethodSlow(StringBuilder sb) throws ParseException {
         try {
             return HttpMethod.of(sb.toString());
-        } catch (IllegalArgumentException e) {
+        } catch (IllegalArgumentException _) {
             throw new ParseException(StatusCode.NOT_IMPLEMENTED, "Unknown method: " + sb);
         }
     }

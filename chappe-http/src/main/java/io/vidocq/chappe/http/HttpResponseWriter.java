@@ -196,49 +196,9 @@ public final class HttpResponseWriter {
         headFlushed = false;
         putStatusLine(code, reason, buffer, channel);
 
-        // Headers — direct write without allocating byte[]
-        for (var entry : response.headers()) {
-            String name = entry.name();
-            String value = entry.value();
-            if (!HeaderFields.isValid(name, value)) {
-                refuseHeader(name);
-            }
-            putAsciiString(name, buffer, channel);
-            putByte(COLON, buffer, channel);
-            putByte(SPACE, buffer, channel);
-            putAsciiString(value, buffer, channel);
-            putBytes(CRLF, buffer, channel);
-        }
-
-        // Date header
-        if (!response.headers().contains("Date")) {
-            putBytes(DATE_PREFIX, buffer, channel);
-            putBytes(getDateValue(), buffer, channel);
-            putBytes(CRLF, buffer, channel);
-        }
-
-        // Server header — unless the app set its own identity
-        if (!response.headers().contains("Server")) {
-            putBytes(serverLine, buffer, channel);
-        }
-        // X-Chappe-Build, when the build is exposed: non-standard header that survives behind reverse
-        // proxies that rewrite the Server header (NPM, openresty, oauth2-proxy).
-        if (buildLine != null && !response.headers().contains("X-Chappe-Build")) {
-            putBytes(buildLine, buffer, channel);
-        }
-
-        // Content-Length ou Transfer-Encoding: chunked
-        boolean chunked = false;
-        if (contentLength >= 0 && !response.headers().contains("Content-Length")) {
-            putBytes(CONTENT_LENGTH_PREFIX, buffer, channel);
-            putAsciiLong(contentLength, buffer, channel);
-            putBytes(CRLF, buffer, channel);
-        } else if (contentLength < 0 && !suppressBody && !response.headers().contains("Transfer-Encoding")) {
-            if (keepAlive) {
-                putBytes(TRANSFER_ENCODING_CHUNKED, buffer, channel);
-                chunked = true;
-            }
-        }
+        Headers headers = response.headers();
+        putHeaders(headers, buffer, channel);
+        boolean chunked = putFraming(headers, contentLength, suppressBody, keepAlive, buffer, channel);
 
         // Connection header
         putBytes(keepAlive ? CONNECTION_KEEP_ALIVE : CONNECTION_CLOSE, buffer, channel);
@@ -261,6 +221,68 @@ public final class HttpResponseWriter {
         if (buffer.position() > 0) {
             flush(buffer, channel);
         }
+    }
+
+    /**
+     * Writes the application's headers, then {@code Date}, {@code Server} and {@code X-Chappe-Build}
+     * unless the application set them.
+     */
+    private void putHeaders(Headers headers, ByteBuffer buffer, WritableByteChannel channel) throws IOException {
+        // Headers — direct write without allocating byte[]
+        for (var entry : headers) {
+            String name = entry.name();
+            String value = entry.value();
+            if (!HeaderFields.isValid(name, value)) {
+                refuseHeader(name);
+            }
+            putAsciiString(name, buffer, channel);
+            putByte(COLON, buffer, channel);
+            putByte(SPACE, buffer, channel);
+            putAsciiString(value, buffer, channel);
+            putBytes(CRLF, buffer, channel);
+        }
+
+        // Date header
+        if (!headers.contains("Date")) {
+            putBytes(DATE_PREFIX, buffer, channel);
+            putBytes(getDateValue(), buffer, channel);
+            putBytes(CRLF, buffer, channel);
+        }
+
+        // Server header — unless the app set its own identity
+        if (!headers.contains("Server")) {
+            putBytes(serverLine, buffer, channel);
+        }
+        // X-Chappe-Build, when the build is exposed: non-standard header that survives behind reverse
+        // proxies that rewrite the Server header (NPM, openresty, oauth2-proxy).
+        if (buildLine != null && !headers.contains("X-Chappe-Build")) {
+            putBytes(buildLine, buffer, channel);
+        }
+    }
+
+    /**
+     * Writes {@code Content-Length} or {@code Transfer-Encoding: chunked} unless the application set
+     * it; a body of unknown length is chunked on a keep-alive connection only.
+     *
+     * @return whether the body must be written chunked
+     */
+    private boolean putFraming(
+            Headers headers,
+            long contentLength,
+            boolean suppressBody,
+            boolean keepAlive,
+            ByteBuffer buffer,
+            WritableByteChannel channel)
+            throws IOException {
+        if (contentLength >= 0 && !headers.contains("Content-Length")) {
+            putBytes(CONTENT_LENGTH_PREFIX, buffer, channel);
+            putAsciiLong(contentLength, buffer, channel);
+            putBytes(CRLF, buffer, channel);
+        } else if (contentLength < 0 && !suppressBody && keepAlive && !headers.contains("Transfer-Encoding")) {
+            putBytes(TRANSFER_ENCODING_CHUNKED, buffer, channel);
+            return true;
+        }
+        return false;
     }
 
     /**
@@ -496,7 +518,6 @@ public final class HttpResponseWriter {
         return in.available() <= 0;
     }
 
-    @SuppressWarnings("ThreadPriorityCheck") // Thread.yield() = workaround JDK-8264762 (sendfile retry)
     private void writeBody(Body body, ByteBuffer buffer, WritableByteChannel channel) throws IOException {
         if (body.contentLength() == 0) return;
 
@@ -507,23 +528,7 @@ public final class HttpResponseWriter {
                 flush(buffer, channel);
             }
             if (channel instanceof java.nio.channels.SocketChannel) {
-                try (var fc = java.nio.channels.FileChannel.open(fb.path(), java.nio.file.StandardOpenOption.READ)) {
-                    long remaining = fb.contentLength();
-                    long position = fb.offset();
-                    while (remaining > 0) {
-                        long transferred = fc.transferTo(position, remaining, channel);
-                        if (transferred < 0) break;
-                        if (transferred == 0) {
-                            // Kernel SO_SNDBUF saturated: sendfile(2) can return 0
-                            // sur un SocketChannel blocking (cf. JDK-8264762). Yield
-                            // and retry — do NOT break, or the response is truncated.
-                            Thread.yield();
-                            continue;
-                        }
-                        position += transferred;
-                        remaining -= transferred;
-                    }
-                }
+                transferFile(fb, channel);
                 return;
             }
             // For non-SocketChannel (TLS), fall through to InputStream path
@@ -541,6 +546,28 @@ public final class HttpResponseWriter {
                 putBytes(bodyChunk, 0, read, buffer, channel);
                 if (flushPerRead && read > 0 && mayBlock(in)) {
                     flush(buffer, channel);
+                }
+            }
+        }
+    }
+
+    /** Sends a file body with {@code sendfile(2)}: zero copy, raw {@code SocketChannel} only. */
+    @SuppressWarnings("ThreadPriorityCheck") // Thread.yield() = workaround JDK-8264762 (sendfile retry)
+    private static void transferFile(FileBody fb, WritableByteChannel channel) throws IOException {
+        try (var fc = java.nio.channels.FileChannel.open(fb.path(), java.nio.file.StandardOpenOption.READ)) {
+            long remaining = fb.contentLength();
+            long position = fb.offset();
+            long transferred = 0;
+            while (remaining > 0 && transferred >= 0) {
+                transferred = fc.transferTo(position, remaining, channel);
+                if (transferred == 0) {
+                    // Kernel SO_SNDBUF saturated: sendfile(2) can return 0
+                    // on a blocking SocketChannel (cf. JDK-8264762). Yield
+                    // and retry — do NOT stop, or the response is truncated.
+                    Thread.yield();
+                } else if (transferred > 0) {
+                    position += transferred;
+                    remaining -= transferred;
                 }
             }
         }

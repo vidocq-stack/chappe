@@ -118,188 +118,9 @@ public final class HttpConnection {
      */
     public void run() {
         try {
-            while (open) {
-                parser.reset();
-                request.reset();
-
-                // 0. Idle wait: block at most config.idleTimeout() for the first
-                // byte of the next request. SO_TIMEOUT is a silent no-op on
-                // blocking SocketChannel reads, so without this an idle
-                // keep-alive (or never-sending) client held the connection
-                // forever. Clients reading the response to EOF also rely on
-                // this close (Servlet TCK 6.1.0 TrailerTest).
-                if (!awaitNextRequest()) {
-                    break;
-                }
-
-                // 1. Parse request (request-line + headers)
-                ParseResult result;
-                try {
-                    result = parser.parse(readBuffer, readChannel, request, config);
-                } catch (ParseException e) {
-                    sendError(e.statusCode(), e.getMessage());
-                    break;
-                }
-
-                if (result == ParseResult.CONNECTION_CLOSED) {
-                    break;
-                }
-
-                // 2. Validation Host header (RFC 9112 §3.2)
-                if (request.version() == HttpVersion.HTTP_1_1) {
-                    var hostValues = request.headers().all("Host");
-                    if (hostValues.isEmpty()) {
-                        sendError(StatusCode.BAD_REQUEST, "Missing Host header");
-                        break;
-                    }
-                    if (hostValues.size() > 1) {
-                        sendError(StatusCode.BAD_REQUEST, "Multiple Host headers");
-                        break;
-                    }
-                }
-
-                // 3. Setup body. It reads nothing yet, so a refused body (a bad or oversized
-                // Content-Length) is answered with its final status instead of 100 Continue.
-                RequestBodyInputStream bodyStream;
-                try {
-                    bodyStream = setupBody();
-                } catch (BadBodyException e) {
-                    sendError(e.status(), e.getMessage());
-                    break;
-                }
-
-                // 4. Expect: 100-continue (RFC 9110 §10.1.1)
-                if ("100-continue".equalsIgnoreCase(request.headers().firstOrNull("Expect"))) {
-                    // Send 100 Continue before reading the body
-                    var continueBytes = "HTTP/1.1 100 Continue\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
-                    var buf = ByteBuffer.wrap(continueBytes);
-                    while (buf.hasRemaining()) {
-                        writeChannel.write(buf);
-                    }
-                }
-                if (bodyStream != null) {
-                    request.body = Body.of(bodyStream, contentLength());
-                }
-                bodyPending = bodyStream != null;
-
-                // 5. Dispatch to handler with ScopedValue binding
-                boolean keepAlive = isKeepAlive();
-                Response response;
-                try {
-                    response =
-                            ScopedValue.where(RequestContext.CURRENT, context).call(() -> handler.handle(request));
-                } catch (Exception e) {
-                    // Nothing is written yet: a cap failure that escapes the handler, as is or wrapped,
-                    // is answered 413 as over HTTP/2, and the connection closes after it (step 7).
-                    response = bodyTooLarge(e, bodyStream)
-                            ? Response.of(StatusCode.PAYLOAD_TOO_LARGE)
-                            : Response.builder()
-                                    .status(StatusCode.INTERNAL_SERVER_ERROR)
-                                    .body("Internal Server Error")
-                                    .build();
-                } finally {
-                    // The probe shares the parse buffer: it must be fully stopped
-                    // before the loop resumes channel reads (next request parse,
-                    // WebSocket takeover) or response writing.
-                    disarmDisconnectProbe();
-                }
-
-                // From here on, the handler's response body is released on every exit: written,
-                // failed while writing the head or the body, never read (HEAD, 204, 304), or
-                // replaced. A live body's producer must never wait for a reader that is gone.
-                Response handled = response;
-                try {
-
-                    // 4a-bis. gRPC requires HTTP/2 — defensive rejection on HTTP/1.1 layer.
-                    // In practice router already returns 505 (see DefaultRouterBuilder.grpc()),
-                    // this check only acts as guardrail if an extension builds GrpcDispatch elsewhere.
-                    if (response instanceof io.vidocq.chappe.api.GrpcDispatch) {
-                        response = Response.of(StatusCode.HTTP_VERSION_NOT_SUPPORTED);
-                    }
-
-                    // An upgrade drains the request body before taking the connection over. After a
-                    // failed body read (or a closed read channel) the byte stream position is unknown,
-                    // and a body longer than maxDrainSize is not worth reading: close the connection,
-                    // no upgrade head (CHAPPE-013, CHAPPE-021), gracefully while the channel is still
-                    // open (CHAPPE-014).
-                    if ((response instanceof WebSocketUpgrade || response instanceof ConnectionUpgrade)
-                            && bodyStream != null
-                            && (bodyReadFailed(bodyStream) || !readChannel.isOpen() || !drained(bodyStream))) {
-                        lingerOnClose = readChannel.isOpen();
-                        break;
-                    }
-
-                    // 6a. WebSocket upgrade: switch to frame mode and end HTTP loop.
-                    if (response instanceof WebSocketUpgrade upgrade) {
-                        var key = request.headers().firstOrNull("Sec-WebSocket-Key");
-                        WebSocketHandshake.writeResponse(
-                                writeChannel, key, upgrade.subprotocol(), config.exposeBuildInfo());
-                        // Prefer the matched handshake request (carries route pathParams) over the raw one.
-                        var handshakeReq = upgrade.handshakeRequest() != null ? upgrade.handshakeRequest() : request;
-                        var wsConn = new WebSocketConnection(
-                                readChannel,
-                                writeChannel,
-                                closeable,
-                                readBuffer,
-                                upgrade.handler(),
-                                handshakeReq,
-                                upgrade.subprotocol());
-                        wsConn.run();
-                        return; // closeable already closed by WebSocketConnection
-                    }
-
-                    // 6b. Generic connection upgrade: write the application's head, then hand the
-                    // raw streams over and park until the application closes the connection.
-                    if (response instanceof ConnectionUpgrade upgrade) {
-                        runUpgrade(upgrade);
-                        return; // the finally block closes the connection (idempotent)
-                    }
-
-                    // 6c. Write response. A head that cannot be written as is (a custom Response
-                    // bypassing the builder's checks) is refused before any byte: answer 500 and
-                    // close instead of a truncated or injected head (CHAPPE-008).
-                    try {
-                        writer.write(
-                                response,
-                                writeBuffer,
-                                writeChannel,
-                                keepAlive,
-                                request.method(),
-                                config.writeTimeout());
-                    } catch (InvalidResponseHeadException e) {
-                        LOG.log(System.Logger.Level.WARNING, "Refusing an invalid response head: " + e.getMessage());
-                        sendError(StatusCode.INTERNAL_SERVER_ERROR, "Internal Server Error");
-                        break;
-                    }
-
-                } finally {
-                    releaseBody(handled);
-                }
-
-                // 7. A body read that failed (truncated, reset, an interrupt that closed the
-                // channel) leaves the byte stream at an unknown position: never drain it nor parse
-                // a next request from it, close the connection (CHAPPE-013). Close it gracefully
-                // while the channel is still open (CHAPPE-014): the client may still be uploading,
-                // and a close with its bytes unread would reset the connection and could destroy
-                // the response it has not read yet. The lingering close only discards input.
-                if (bodyStream != null && (bodyReadFailed(bodyStream) || !readChannel.isOpen())) {
-                    lingerOnClose = readChannel.isOpen();
-                    break;
-                }
-
-                // 8. Drain the unread body (for keep-alive), within maxDrainSize. A drain that fails
-                // (bad framing, a body cut short) is a failed body read too, and a body longer than
-                // the budget is not worth reading (CHAPPE-021): same graceful close, no next request.
-                if (bodyStream != null && !drained(bodyStream)) {
-                    lingerOnClose = readChannel.isOpen();
-                    break;
-                }
-
-                // 9. Check keep-alive
-                if (!keepAlive) {
-                    lingerOnClose = true;
-                    break;
-                }
+            boolean next = true;
+            while (next && open) {
+                next = exchange();
             }
         } catch (IOException _) {
             // Lost connection — silent
@@ -311,6 +132,234 @@ public final class HttpConnection {
                 close();
             }
         }
+    }
+
+    /**
+     * One request/response exchange on the connection.
+     *
+     * @return {@code true} when the connection may serve a next request; {@code false} when it must
+     *         close ({@link #lingerOnClose} tells how) or was taken over by an upgrade
+     */
+    private boolean exchange() throws IOException {
+        parser.reset();
+        request.reset();
+
+        // 0-2. Request head: idle wait, request-line and headers, Host header.
+        if (!readRequestHead()) {
+            return false;
+        }
+
+        // 3. Setup body. It reads nothing yet, so a refused body (a bad or oversized
+        // Content-Length) is answered with its final status instead of 100 Continue.
+        RequestBodyInputStream bodyStream;
+        try {
+            bodyStream = setupBody();
+        } catch (BadBodyException e) {
+            sendError(e.status(), e.getMessage());
+            return false;
+        }
+
+        // 4. Expect: 100-continue (RFC 9110 §10.1.1)
+        if ("100-continue".equalsIgnoreCase(request.headers().firstOrNull("Expect"))) {
+            sendContinue();
+        }
+        if (bodyStream != null) {
+            request.body = Body.of(bodyStream, contentLength());
+        }
+        bodyPending = bodyStream != null;
+
+        // 5. Dispatch to handler with ScopedValue binding
+        boolean keepAlive = isKeepAlive();
+        Response handled = dispatch(bodyStream);
+
+        // From here on, the handler's response body is released on every exit: written,
+        // failed while writing the head or the body, never read (HEAD, 204, 304), or
+        // replaced. A live body's producer must never wait for a reader that is gone.
+        try {
+            if (!respond(handled, bodyStream, keepAlive)) {
+                return false;
+            }
+        } finally {
+            releaseBody(handled);
+        }
+
+        return afterResponse(bodyStream, keepAlive);
+    }
+
+    /**
+     * Steps 0 to 2: waits for the next request, parses its request-line and headers, and checks
+     * its Host header.
+     *
+     * @return {@code false} when the connection must close: EOF, idle timeout, or a malformed
+     *         request already answered
+     */
+    private boolean readRequestHead() throws IOException {
+        // 0. Idle wait: block at most config.idleTimeout() for the first
+        // byte of the next request. SO_TIMEOUT is a silent no-op on
+        // blocking SocketChannel reads, so without this an idle
+        // keep-alive (or never-sending) client held the connection
+        // forever. Clients reading the response to EOF also rely on
+        // this close (Servlet TCK 6.1.0 TrailerTest).
+        if (!awaitNextRequest()) {
+            return false;
+        }
+
+        // 1. Parse request (request-line + headers)
+        ParseResult result;
+        try {
+            result = parser.parse(readBuffer, readChannel, request, config);
+        } catch (ParseException e) {
+            sendError(e.statusCode(), e.getMessage());
+            return false;
+        }
+        if (result == ParseResult.CONNECTION_CLOSED) {
+            return false;
+        }
+
+        // 2. Validation Host header (RFC 9112 §3.2)
+        if (request.version() == HttpVersion.HTTP_1_1) {
+            var hostValues = request.headers().all("Host");
+            if (hostValues.isEmpty()) {
+                sendError(StatusCode.BAD_REQUEST, "Missing Host header");
+                return false;
+            }
+            if (hostValues.size() > 1) {
+                sendError(StatusCode.BAD_REQUEST, "Multiple Host headers");
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Sends {@code 100 Continue} before the handler reads the body. */
+    private void sendContinue() throws IOException {
+        var continueBytes = "HTTP/1.1 100 Continue\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
+        var buf = ByteBuffer.wrap(continueBytes);
+        while (buf.hasRemaining()) {
+            writeChannel.write(buf);
+        }
+    }
+
+    /** Step 5: calls the handler with {@link RequestContext#CURRENT} bound; never throws. */
+    private Response dispatch(RequestBodyInputStream bodyStream) {
+        try {
+            return ScopedValue.where(RequestContext.CURRENT, context).call(() -> handler.handle(request));
+        } catch (Exception e) {
+            // Nothing is written yet: a cap failure that escapes the handler, as is or wrapped,
+            // is answered 413 as over HTTP/2, and the connection closes after it (step 7).
+            return bodyTooLarge(e, bodyStream)
+                    ? Response.of(StatusCode.PAYLOAD_TOO_LARGE)
+                    : Response.builder()
+                            .status(StatusCode.INTERNAL_SERVER_ERROR)
+                            .body("Internal Server Error")
+                            .build();
+        } finally {
+            // The probe shares the parse buffer: it must be fully stopped
+            // before the loop resumes channel reads (next request parse,
+            // WebSocket takeover) or response writing.
+            disarmDisconnectProbe();
+        }
+    }
+
+    /**
+     * Step 6: answers the request with the handler's response, or hands the connection over to an
+     * upgrade.
+     *
+     * @return {@code false} when the connection must close or was taken over
+     */
+    private boolean respond(Response handled, RequestBodyInputStream bodyStream, boolean keepAlive) throws IOException {
+        // 4a-bis. gRPC requires HTTP/2 — defensive rejection on HTTP/1.1 layer.
+        // In practice router already returns 505 (see DefaultRouterBuilder.grpc()),
+        // this check only acts as guardrail if an extension builds GrpcDispatch elsewhere.
+        Response response =
+                handled instanceof GrpcDispatch ? Response.of(StatusCode.HTTP_VERSION_NOT_SUPPORTED) : handled;
+
+        // An upgrade drains the request body before taking the connection over. After a
+        // failed body read (or a closed read channel) the byte stream position is unknown,
+        // and a body longer than maxDrainSize is not worth reading: close the connection,
+        // no upgrade head (CHAPPE-013, CHAPPE-021), gracefully while the channel is still
+        // open (CHAPPE-014).
+        if ((response instanceof WebSocketUpgrade || response instanceof ConnectionUpgrade)
+                && bodyStream != null
+                && (bodyReadFailed(bodyStream) || !readChannel.isOpen() || !drained(bodyStream))) {
+            lingerOnClose = readChannel.isOpen();
+            return false;
+        }
+
+        // 6a. WebSocket upgrade: switch to frame mode and end HTTP loop.
+        if (response instanceof WebSocketUpgrade upgrade) {
+            runWebSocket(upgrade);
+            return false; // closeable already closed by WebSocketConnection
+        }
+
+        // 6b. Generic connection upgrade: write the application's head, then hand the
+        // raw streams over and park until the application closes the connection.
+        if (response instanceof ConnectionUpgrade upgrade) {
+            runUpgrade(upgrade);
+            return false; // run() closes the connection (idempotent)
+        }
+
+        // 6c. Write response. A head that cannot be written as is (a custom Response
+        // bypassing the builder's checks) is refused before any byte: answer 500 and
+        // close instead of a truncated or injected head (CHAPPE-008).
+        try {
+            writer.write(response, writeBuffer, writeChannel, keepAlive, request.method(), config.writeTimeout());
+        } catch (InvalidResponseHeadException e) {
+            LOG.log(System.Logger.Level.WARNING, "Refusing an invalid response head: " + e.getMessage());
+            sendError(StatusCode.INTERNAL_SERVER_ERROR, "Internal Server Error");
+            return false;
+        }
+        return true;
+    }
+
+    /** Step 6a: writes the handshake response and runs the WebSocket session on this thread. */
+    private void runWebSocket(WebSocketUpgrade upgrade) throws IOException {
+        var key = request.headers().firstOrNull("Sec-WebSocket-Key");
+        WebSocketHandshake.writeResponse(writeChannel, key, upgrade.subprotocol(), config.exposeBuildInfo());
+        // Prefer the matched handshake request (carries route pathParams) over the raw one.
+        var handshakeReq = upgrade.handshakeRequest() != null ? upgrade.handshakeRequest() : request;
+        var wsConn = new WebSocketConnection(
+                readChannel,
+                writeChannel,
+                closeable,
+                readBuffer,
+                upgrade.handler(),
+                handshakeReq,
+                upgrade.subprotocol());
+        wsConn.run();
+    }
+
+    /**
+     * Steps 7 to 9, once the response is written: whether the connection may read a next request.
+     *
+     * @return {@code false} when the connection must close, with {@link #lingerOnClose} set
+     */
+    private boolean afterResponse(RequestBodyInputStream bodyStream, boolean keepAlive) {
+        // 7. A body read that failed (truncated, reset, an interrupt that closed the
+        // channel) leaves the byte stream at an unknown position: never drain it nor parse
+        // a next request from it, close the connection (CHAPPE-013). Close it gracefully
+        // while the channel is still open (CHAPPE-014): the client may still be uploading,
+        // and a close with its bytes unread would reset the connection and could destroy
+        // the response it has not read yet. The lingering close only discards input.
+        if (bodyStream != null && (bodyReadFailed(bodyStream) || !readChannel.isOpen())) {
+            lingerOnClose = readChannel.isOpen();
+            return false;
+        }
+
+        // 8. Drain the unread body (for keep-alive), within maxDrainSize. A drain that fails
+        // (bad framing, a body cut short) is a failed body read too, and a body longer than
+        // the budget is not worth reading (CHAPPE-021): same graceful close, no next request.
+        if (bodyStream != null && !drained(bodyStream)) {
+            lingerOnClose = readChannel.isOpen();
+            return false;
+        }
+
+        // 9. Check keep-alive
+        if (!keepAlive) {
+            lingerOnClose = true;
+            return false;
+        }
+        return true;
     }
 
     /**
@@ -475,16 +524,23 @@ public final class HttpConnection {
      */
     private void runUpgrade(ConnectionUpgrade upgrade) throws IOException {
         writer.writeUpgradeHead(upgrade.status(), upgrade.headers(), writeBuffer, writeChannel, config.writeTimeout());
-        var conn = new UpgradedConnectionImpl(readChannel, writeChannel, readBuffer, closeable, request);
+        try (var conn = new UpgradedConnectionImpl(readChannel, writeChannel, readBuffer, closeable, request)) {
+            serveUpgraded(upgrade.handler(), conn);
+        }
+    }
+
+    /**
+     * Runs the upgrade handler and parks until the connection is closed; a handler failure or an
+     * interruption returns at once, and the caller closes the connection.
+     */
+    private static void serveUpgraded(UpgradeHandler handler, UpgradedConnectionImpl conn) {
         try {
-            upgrade.handler().onUpgrade(conn);
+            handler.onUpgrade(conn);
             conn.awaitClose();
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
         } catch (Exception e) {
             LOG.log(System.Logger.Level.WARNING, "Upgrade handler error, closing the connection", e);
-        } finally {
-            conn.close();
         }
     }
 
@@ -575,7 +631,7 @@ public final class HttpConnection {
     }
 
     private static final class BadBodyException extends Exception {
-        private final StatusCode status;
+        private final transient StatusCode status;
 
         BadBodyException(String message) {
             this(StatusCode.BAD_REQUEST, message);

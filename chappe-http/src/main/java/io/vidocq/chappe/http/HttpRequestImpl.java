@@ -227,8 +227,14 @@ public final class HttpRequestImpl implements Request, Headers {
         if (host == null || host.isEmpty()) {
             return URI.create(rawUri);
         }
-        String path = rawUri.isEmpty() ? "/" : (rawUri.charAt(0) == '/' ? rawUri : "/" + rawUri);
-        return URI.create(scheme + "://" + host + path);
+        return URI.create(scheme + "://" + host + originFormPath(rawUri));
+    }
+
+    /** The absolute path of an origin-form request-target, {@code /} when it is empty. */
+    private static String originFormPath(String rawUri) {
+        if (rawUri.isEmpty()) return "/";
+        if (rawUri.charAt(0) == '/') return rawUri;
+        return '/' + rawUri;
     }
 
     @Override
