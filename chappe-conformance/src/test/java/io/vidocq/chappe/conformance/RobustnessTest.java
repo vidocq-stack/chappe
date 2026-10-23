@@ -24,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
@@ -77,7 +78,7 @@ class RobustnessTest {
      */
     @Test
     void malformedRequestLine() throws IOException {
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5000);
             var out = socket.getOutputStream();
             var in = socket.getInputStream();
@@ -103,7 +104,7 @@ class RobustnessTest {
      */
     @Test
     void truncatedHeaders() throws IOException {
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5000);
             var out = socket.getOutputStream();
 
@@ -131,7 +132,7 @@ class RobustnessTest {
      */
     @Test
     void connectionAbandoned() throws IOException {
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5000);
             var out = socket.getOutputStream();
 
@@ -153,7 +154,7 @@ class RobustnessTest {
      */
     @Test
     void slowClient() throws IOException {
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(10_000);
             var out = socket.getOutputStream();
             var in = socket.getInputStream();
@@ -184,7 +185,7 @@ class RobustnessTest {
      */
     @Test
     void oversizedHeader() throws IOException {
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5000);
             var out = socket.getOutputStream();
             var in = socket.getInputStream();
@@ -217,7 +218,7 @@ class RobustnessTest {
     // --- Helpers ---
 
     private void assertNormalRequestWorks() throws IOException {
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5000);
             var out = socket.getOutputStream();
             var in = socket.getInputStream();

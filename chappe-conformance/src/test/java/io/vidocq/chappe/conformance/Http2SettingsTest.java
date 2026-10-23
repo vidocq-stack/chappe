@@ -23,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.InetAddress;
 import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -66,7 +67,7 @@ class Http2SettingsTest {
      */
     @Test
     void settingsExchange() throws IOException {
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5000);
             var out = socket.getOutputStream();
             var in = socket.getInputStream();
@@ -111,7 +112,7 @@ class Http2SettingsTest {
      */
     @Test
     void pingEcho() throws IOException {
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5000);
             var out = socket.getOutputStream();
             var in = socket.getInputStream();
@@ -153,7 +154,7 @@ class Http2SettingsTest {
                     // PING ACK
                     receivedPingAck = true;
                     assertEquals(8, frame.payloadLength(), "PING ACK payload must be 8 bytes");
-                    assertArrayEquals(pingData, frame.payload(), "PING ACK must echo the same opaque data");
+                    assertEquals(ByteBuffer.wrap(pingData), frame.payload(), "PING ACK must echo the same opaque data");
                     assertEquals(0, frame.streamId(), "PING must be on stream 0");
                 }
             }
@@ -208,7 +209,8 @@ class Http2SettingsTest {
 
     // --- Frame reading ---
 
-    private record Frame(int payloadLength, int type, int flags, int streamId, byte[] payload) {}
+    /** A decoded frame; {@code payload} is a read-only view, compared by content. */
+    private record Frame(int payloadLength, int type, int flags, int streamId, ByteBuffer payload) {}
 
     private Frame readFrame(InputStream in) throws IOException {
         var header = in.readNBytes(9);
@@ -226,6 +228,7 @@ class Http2SettingsTest {
             if (payload.length < payloadLength) return null;
         }
 
-        return new Frame(payloadLength, type, flags, streamId, payload);
+        return new Frame(
+                payloadLength, type, flags, streamId, ByteBuffer.wrap(payload).asReadOnlyBuffer());
     }
 }

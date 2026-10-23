@@ -23,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.InetAddress;
 import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -83,7 +84,7 @@ class Http2PrefaceTest {
      */
     @Test
     void validPreface() throws IOException {
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5000);
             var out = socket.getOutputStream();
             var in = socket.getInputStream();
@@ -127,7 +128,7 @@ class Http2PrefaceTest {
      */
     @Test
     void invalidPreface() throws IOException {
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5000);
             var out = socket.getOutputStream();
             var in = socket.getInputStream();
@@ -149,7 +150,8 @@ class Http2PrefaceTest {
 
     // --- Frame reading utilities ---
 
-    private record Frame(int payloadLength, int type, int flags, int streamId, byte[] payload) {}
+    /** Frame header; the payload is read and discarded, these tests only check its length. */
+    private record Frame(int payloadLength, int type, int flags, int streamId) {}
 
     private Frame readFrame(InputStream in) throws IOException {
         // Read 9-byte frame header
@@ -162,13 +164,11 @@ class Http2PrefaceTest {
         int flags = buf.get() & 0xFF;
         int streamId = buf.getInt() & 0x7FFFFFFF; // clear reserved bit
 
-        byte[] payload = new byte[0];
-        if (payloadLength > 0) {
-            payload = in.readNBytes(payloadLength);
-            if (payload.length < payloadLength) return null;
+        if (payloadLength > 0 && in.readNBytes(payloadLength).length < payloadLength) {
+            return null;
         }
 
-        return new Frame(payloadLength, type, flags, streamId, payload);
+        return new Frame(payloadLength, type, flags, streamId);
     }
 
     private String readAll(InputStream in) throws IOException {

@@ -25,7 +25,9 @@ import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.Socket;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.util.Base64;
@@ -85,7 +87,7 @@ class WebSocketRfc6455Test {
                 + "Sec-WebSocket-Key: " + key + "\r\n"
                 + "Sec-WebSocket-Version: 13\r\n\r\n";
 
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(2000);
             RawHttp.write(socket.getOutputStream(), request);
             var headers = readHandshakeResponse(socket.getInputStream());
@@ -148,9 +150,8 @@ class WebSocketRfc6455Test {
             // Server must send Close with PROTOCOL_ERROR (1002) and close.
             var frame = readFrame(socket.getInputStream());
             assertEquals(0x8, frame.opcode, "Expected Close frame");
-            assertTrue(frame.payload.length >= 2);
-            int code = ((frame.payload[0] & 0xFF) << 8) | (frame.payload[1] & 0xFF);
-            assertEquals(1002, code, "Expected PROTOCOL_ERROR code");
+            assertTrue(frame.payload.remaining() >= 2);
+            assertEquals(1002, frame.closeCode(), "Expected PROTOCOL_ERROR code");
         }
     }
 
@@ -160,7 +161,7 @@ class WebSocketRfc6455Test {
             sendMaskedText(socket.getOutputStream(), "ping");
             var frame = readFrame(socket.getInputStream());
             assertEquals(0x1, frame.opcode);
-            assertEquals("ping", new String(frame.payload, StandardCharsets.UTF_8));
+            assertEquals("ping", frame.text());
             sendClose(socket.getOutputStream(), 1000);
         }
     }
@@ -172,8 +173,7 @@ class WebSocketRfc6455Test {
             sendMaskedBytes(socket.getOutputStream(), 0x1, new byte[] {(byte) 0xC0, (byte) 0xAF});
             var frame = readFrame(socket.getInputStream());
             assertEquals(0x8, frame.opcode);
-            int code = ((frame.payload[0] & 0xFF) << 8) | (frame.payload[1] & 0xFF);
-            assertEquals(1007, code, "Expected INVALID_PAYLOAD_DATA");
+            assertEquals(1007, frame.closeCode(), "Expected INVALID_PAYLOAD_DATA");
         }
     }
 
@@ -185,15 +185,14 @@ class WebSocketRfc6455Test {
             sendMaskedBytes(socket.getOutputStream(), 0x8, closePayload);
             var frame = readFrame(socket.getInputStream());
             assertEquals(0x8, frame.opcode);
-            int code = ((frame.payload[0] & 0xFF) << 8) | (frame.payload[1] & 0xFF);
-            assertEquals(1000, code);
+            assertEquals(1000, frame.closeCode());
         }
     }
 
     // -- Helpers --
 
     private Socket openHandshake() throws IOException {
-        var socket = new Socket("127.0.0.1", port);
+        var socket = new Socket(InetAddress.getLoopbackAddress(), port);
         socket.setSoTimeout(3000);
         var key = randomKey();
         var request = "GET /ws HTTP/1.1\r\n"
@@ -269,7 +268,19 @@ class WebSocketRfc6455Test {
         sendMaskedBytes(out, 0x8, payload);
     }
 
-    private record DecodedFrame(int opcode, byte[] payload) {}
+    /** A decoded server frame; {@code payload} is a read-only view of the unmasked payload. */
+    private record DecodedFrame(int opcode, ByteBuffer payload) {
+
+        /** The status code of a Close frame: the first two payload bytes, big-endian. */
+        int closeCode() {
+            return Short.toUnsignedInt(payload.getShort(0));
+        }
+
+        /** The payload decoded as UTF-8. */
+        String text() {
+            return StandardCharsets.UTF_8.decode(payload.duplicate()).toString();
+        }
+    }
 
     private static DecodedFrame readFrame(InputStream raw) throws IOException {
         var in = new DataInputStream(raw);
@@ -284,6 +295,6 @@ class WebSocketRfc6455Test {
         // No MASK on the server side.
         var payload = new byte[(int) len];
         in.readFully(payload);
-        return new DecodedFrame(opcode, payload);
+        return new DecodedFrame(opcode, ByteBuffer.wrap(payload).asReadOnlyBuffer());
     }
 }

@@ -23,8 +23,10 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 
 /**
  * Utility for sending raw HTTP requests via Socket
@@ -52,7 +54,7 @@ final class RawHttp {
      * @return the raw HTTP response
      */
     static String sendAndReceive(int port, String rawRequest, int timeoutMs) {
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(timeoutMs);
             write(socket.getOutputStream(), rawRequest);
             socket.shutdownOutput();
@@ -67,7 +69,7 @@ final class RawHttp {
      */
     static Socket openConnection(int port, int timeoutMs) {
         try {
-            var socket = new Socket("127.0.0.1", port);
+            var socket = new Socket(InetAddress.getLoopbackAddress(), port);
             socket.setSoTimeout(timeoutMs);
             return socket;
         } catch (IOException e) {
@@ -127,18 +129,19 @@ final class RawHttp {
      * @return the header value, or null if absent
      */
     static String extractHeader(String response, String name) {
-        String lowerName = name.toLowerCase();
+        String lowerName = name.toLowerCase(Locale.ROOT);
         // Parse headers section (between status line and body)
         int headerEnd = response.indexOf("\r\n\r\n");
         if (headerEnd < 0) {
             headerEnd = response.length();
         }
         String headerSection = response.substring(0, headerEnd);
-        String[] lines = headerSection.split("\r\n");
+        // Trailing empty lines are kept: they hold no ':' and are skipped like any line without one.
+        String[] lines = headerSection.split("\r\n", -1);
         for (int i = 1; i < lines.length; i++) { // skip status line
             int colon = lines[i].indexOf(':');
             if (colon > 0) {
-                String headerName = lines[i].substring(0, colon).trim().toLowerCase();
+                String headerName = lines[i].substring(0, colon).trim().toLowerCase(Locale.ROOT);
                 if (headerName.equals(lowerName)) {
                     return lines[i].substring(colon + 1).trim();
                 }
