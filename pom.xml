@@ -230,6 +230,10 @@
                                     <arg>-XDcompilePolicy=simple</arg>
                                     <arg>--should-stop=ifError=FLOW</arg>
                                     <arg>-Xplugin:ErrorProne -XepAllErrorsAsWarnings -XepExcludedPaths:.*(generated|generated-sources)/.* -XepDisableWarningsInGeneratedCode</arg>
+                                    <!-- javac stops printing warnings after 100 per module by default: SonarQube
+                                         would only import the first 100 findings of a module. -->
+                                    <arg>-Xmaxwarns</arg>
+                                    <arg>100000</arg>
                                 </compilerArgs>
                                 <annotationProcessorPaths>
                                     <path>
