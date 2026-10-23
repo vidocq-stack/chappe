@@ -29,23 +29,31 @@ import java.util.Map;
  */
 public final class HpackStaticTable {
 
+    /** The number of entries in the static table. */
+    private static final int SIZE = 61;
+
+    private static final String METHOD = ":method";
+    private static final String PATH = ":path";
+    private static final String SCHEME = ":scheme";
+    private static final String STATUS = ":status";
+
     // Entry format: { name, value }. Index 0 is unused; entries start at [1].
     private static final String[][] ENTRIES = {
         null, // [0] unused — table is 1-based
         {":authority", ""}, // [1]
-        {":method", "GET"}, // [2]
-        {":method", "POST"}, // [3]
-        {":path", "/"}, // [4]
-        {":path", "/index.html"}, // [5]
-        {":scheme", "http"}, // [6]
-        {":scheme", "https"}, // [7]
-        {":status", "200"}, // [8]
-        {":status", "204"}, // [9]
-        {":status", "206"}, // [10]
-        {":status", "304"}, // [11]
-        {":status", "400"}, // [12]
-        {":status", "404"}, // [13]
-        {":status", "500"}, // [14]
+        {METHOD, "GET"}, // [2]
+        {METHOD, "POST"}, // [3]
+        {PATH, "/"}, // [4]
+        {PATH, "/index.html"}, // [5]
+        {SCHEME, "http"}, // [6]
+        {SCHEME, "https"}, // [7]
+        {STATUS, "200"}, // [8]
+        {STATUS, "204"}, // [9]
+        {STATUS, "206"}, // [10]
+        {STATUS, "304"}, // [11]
+        {STATUS, "400"}, // [12]
+        {STATUS, "404"}, // [13]
+        {STATUS, "500"}, // [14]
         {"accept-charset", ""}, // [15]
         {"accept-encoding", "gzip, deflate"}, // [16]
         {"accept-language", ""}, // [17]
@@ -99,7 +107,7 @@ public final class HpackStaticTable {
 
     /** Returns 61, the number of entries in the static table. */
     public static int size() {
-        return 61;
+        return SIZE;
     }
 
     /**
@@ -128,9 +136,9 @@ public final class HpackStaticTable {
     private static final Map<Key, Integer> EXACT_INDEX;
 
     static {
-        Map<String, Integer> byName = new HashMap<>(128);
-        Map<Key, Integer> byExact = new HashMap<>(128);
-        for (int i = 1; i <= 61; i++) {
+        Map<String, Integer> byName = HashMap.newHashMap(SIZE);
+        Map<Key, Integer> byExact = HashMap.newHashMap(SIZE);
+        for (int i = 1; i <= SIZE; i++) {
             String n = ENTRIES[i][0];
             String v = ENTRIES[i][1];
             byName.putIfAbsent(n, i);
@@ -151,29 +159,33 @@ public final class HpackStaticTable {
         // Inline fast path for pseudo-headers (>90% of HTTP/2 traffic).
         // Avoids Key-record allocation + HashMap traversal on the hot path. String.equals tests
         // identity first, so the interned names the encoder passes match at the cost of a `==`.
-        if (":method".equals(name)) {
-            if ("GET".equals(value)) return 2;
-            if ("POST".equals(value)) return 3;
-        } else if (":path".equals(name)) {
-            if ("/".equals(value)) return 4;
-            if ("/index.html".equals(value)) return 5;
-        } else if (":scheme".equals(name)) {
-            if ("http".equals(value)) return 6;
-            if ("https".equals(value)) return 7;
-        } else if (":status".equals(name)) {
-            return switch (value) {
-                case "200" -> 8;
-                case "204" -> 9;
-                case "206" -> 10;
-                case "304" -> 11;
-                case "400" -> 12;
-                case "404" -> 13;
-                case "500" -> 14;
-                default -> 0;
-            };
-        }
+        // The static table holds no other entry for these four names, so their answer is final.
+        if (METHOD.equals(name)) return eitherIndex(value, "GET", 2, "POST", 3);
+        if (PATH.equals(name)) return eitherIndex(value, "/", 4, "/index.html", 5);
+        if (SCHEME.equals(name)) return eitherIndex(value, "http", 6, "https", 7);
+        if (STATUS.equals(name)) return statusIndex(value);
         Integer idx = EXACT_INDEX.get(new Key(name, value));
         return idx == null ? 0 : idx;
+    }
+
+    /** {@code firstIndex} or {@code secondIndex} for the value that matches, 0 for neither. */
+    private static int eitherIndex(String value, String first, int firstIndex, String second, int secondIndex) {
+        if (first.equals(value)) return firstIndex;
+        return second.equals(value) ? secondIndex : 0;
+    }
+
+    /** The index of a {@code :status} entry, 0 for a status the static table does not hold. */
+    private static int statusIndex(String value) {
+        return switch (value) {
+            case "200" -> 8;
+            case "204" -> 9;
+            case "206" -> 10;
+            case "304" -> 11;
+            case "400" -> 12;
+            case "404" -> 13;
+            case "500" -> 14;
+            default -> 0;
+        };
     }
 
     /**
@@ -183,16 +195,16 @@ public final class HpackStaticTable {
      */
     public static int findByName(String name) {
         // Inline fast path for pseudo-headers (>90% of HTTP/2 traffic).
-        if (":method".equals(name)) return 2;
-        if (":path".equals(name)) return 4;
-        if (":scheme".equals(name)) return 6;
-        if (":status".equals(name)) return 8;
+        if (METHOD.equals(name)) return 2;
+        if (PATH.equals(name)) return 4;
+        if (SCHEME.equals(name)) return 6;
+        if (STATUS.equals(name)) return 8;
         Integer idx = NAME_FIRST_INDEX.get(name);
         return idx == null ? 0 : idx;
     }
 
     private static void checkIndex(int index) {
-        if (index < 1 || index > 61) {
+        if (index < 1 || index > SIZE) {
             throw new IndexOutOfBoundsException("HPACK static table index out of range: " + index + " (valid: 1–61)");
         }
     }

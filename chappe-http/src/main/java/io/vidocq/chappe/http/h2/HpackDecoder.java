@@ -95,73 +95,75 @@ public final class HpackDecoder {
      *     of the block (RFC 7541 §4.2, §5.1, §5.2, §6.3); or the error the sink raises
      */
     public boolean decode(ByteBuffer headerBlock, HeaderSink sink) throws Http2ConnectionException {
+        // The running size only grows: the list is within the soft limit while the size is.
         long totalSize = 0;
-        boolean within = true;
         boolean fieldSeen = false;
 
         while (headerBlock.hasRemaining()) {
             int b = headerBlock.get(headerBlock.position()) & 0xFF;
-
-            String name, value;
-
-            if ((b & 0x80) != 0) {
-                // Indexed Header Field (RFC 7541 §6.1) — 1xxxxxxx
-                int index = decodeInteger(headerBlock, 7);
-                name = lookupName(index);
-                value = lookupValue(index);
-
-            } else if ((b & 0xC0) == 0x40) {
-                // Literal with Incremental Indexing (RFC 7541 §6.2.1) — 01xxxxxx
-                int index = decodeInteger(headerBlock, 6);
-                name = index > 0 ? lookupName(index) : decodeString(headerBlock);
-                value = decodeString(headerBlock);
-                dynamicTable.add(name, value);
-
-            } else if ((b & 0xF0) == 0x00) {
-                // Literal without Indexing (RFC 7541 §6.2.2) — 0000xxxx
-                int index = decodeInteger(headerBlock, 4);
-                name = index > 0 ? lookupName(index) : decodeString(headerBlock);
-                value = decodeString(headerBlock);
-
-            } else if ((b & 0xF0) == 0x10) {
-                // Literal Never Indexed (RFC 7541 §6.2.3) — 0001xxxx
-                int index = decodeInteger(headerBlock, 4);
-                name = index > 0 ? lookupName(index) : decodeString(headerBlock);
-                value = decodeString(headerBlock);
-
-            } else {
+            if ((b & 0xE0) == 0x20) {
                 // Dynamic Table Size Update (RFC 7541 §6.3) — 001xxxxx
-                int newSize = decodeInteger(headerBlock, 5);
-                if (fieldSeen) {
-                    // RFC 7541 §4.2: a size update must come at the beginning of the block.
-                    throw new Http2ConnectionException(
-                            Http2ErrorCode.COMPRESSION_ERROR, "HPACK dynamic table size update after a field");
-                }
-                if (newSize > maxTableSize) {
-                    // RFC 7541 §6.3: the new size must not exceed the SETTINGS_HEADER_TABLE_SIZE we advertise.
-                    throw new Http2ConnectionException(
-                            Http2ErrorCode.COMPRESSION_ERROR,
-                            "HPACK dynamic table size update to " + newSize + " exceeds " + maxTableSize);
-                }
-                dynamicTable.setMaxSize(newSize);
-                continue;
-            }
-            fieldSeen = true;
-
-            // Octets, since both decodeString and HpackHuffman decode ISO-8859-1 (RFC 9113 §6.5.2).
-            totalSize += (long) name.length() + value.length() + 32;
-            if (totalSize > hardLimit) {
-                throw new Http2ConnectionException(
-                        Http2ErrorCode.ENHANCE_YOUR_CALM, "Header list exceeds max size " + hardLimit);
-            }
-
-            if (totalSize <= softLimit) {
-                sink.accept(name, value);
+                applySizeUpdate(decodeInteger(headerBlock, 5), fieldSeen);
             } else {
-                within = false;
+                fieldSeen = true;
+                totalSize = decodeField(headerBlock, b, totalSize, sink);
             }
         }
-        return within;
+        return totalSize <= softLimit;
+    }
+
+    /**
+     * Applies a dynamic table size update, which must come before the first field of the block
+     * (RFC 7541 §4.2) and stay within the SETTINGS_HEADER_TABLE_SIZE we advertise (RFC 7541 §6.3).
+     */
+    private void applySizeUpdate(int newSize, boolean fieldSeen) throws Http2ConnectionException {
+        if (fieldSeen) {
+            throw new Http2ConnectionException(
+                    Http2ErrorCode.COMPRESSION_ERROR, "HPACK dynamic table size update after a field");
+        }
+        if (newSize > maxTableSize) {
+            throw new Http2ConnectionException(
+                    Http2ErrorCode.COMPRESSION_ERROR,
+                    "HPACK dynamic table size update to " + newSize + " exceeds " + maxTableSize);
+        }
+        dynamicTable.setMaxSize(newSize);
+    }
+
+    /**
+     * Decodes one field representation starting with octet {@code b}, and hands it to the sink while
+     * the running size stays within the soft limit.
+     *
+     * @return the running size of the list with this field
+     */
+    private long decodeField(ByteBuffer headerBlock, int b, long totalSize, HeaderSink sink)
+            throws Http2ConnectionException {
+        String name;
+        String value;
+        if ((b & 0x80) != 0) {
+            // Indexed Header Field (RFC 7541 §6.1) — 1xxxxxxx
+            int index = decodeInteger(headerBlock, 7);
+            name = lookupName(index);
+            value = lookupValue(index);
+        } else {
+            // Literal with Incremental Indexing (RFC 7541 §6.2.1) — 01xxxxxx; Literal without
+            // Indexing (§6.2.2) — 0000xxxx; Literal Never Indexed (§6.2.3) — 0001xxxx
+            boolean indexing = (b & 0x40) != 0;
+            int index = decodeInteger(headerBlock, indexing ? 6 : 4);
+            name = index > 0 ? lookupName(index) : decodeString(headerBlock);
+            value = decodeString(headerBlock);
+            if (indexing) dynamicTable.add(name, value);
+        }
+
+        // Octets, since both decodeString and HpackHuffman decode ISO-8859-1 (RFC 9113 §6.5.2).
+        long size = totalSize + name.length() + value.length() + 32;
+        if (size > hardLimit) {
+            throw new Http2ConnectionException(
+                    Http2ErrorCode.ENHANCE_YOUR_CALM, "Header list exceeds max size " + hardLimit);
+        }
+        if (size <= softLimit) {
+            sink.accept(name, value);
+        }
+        return size;
     }
 
     // --- Helpers ---

@@ -78,24 +78,34 @@ final class Http2BodyInputStream extends InputStream {
     private boolean ensureBuffer() throws IOException {
         while (current == null || !current.hasRemaining()) {
             failIfTooLarge();
-            if (stream.isDataQueueEmpty()) {
-                if (stream.isEndStreamReceived()) return false;
-                if (stream.isCancelled()) throw streamReset();
-            }
-            try {
-                current = stream.pollData();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new IOException("Interrupted while reading HTTP/2 body", e);
-            }
+            if (stream.isDataQueueEmpty() && endedCleanly()) return false;
+            current = pollData();
             failIfTooLarge(); // the frame that passed the limit is never handed out
             if (current == null) throw readTimedOut();
-            if (!current.hasRemaining()) {
-                if (stream.isEndStreamReceived()) return false;
-                if (stream.isCancelled()) throw streamReset();
-            }
+            if (!current.hasRemaining() && endedCleanly()) return false;
         }
         return true;
+    }
+
+    /**
+     * Whether the body reached its END_STREAM; a stream reset before it fails the read.
+     *
+     * @return {@code false} when more DATA may still come
+     */
+    private boolean endedCleanly() throws IOException {
+        if (stream.isEndStreamReceived()) return true;
+        if (stream.isCancelled()) throw streamReset();
+        return false;
+    }
+
+    /** The next DATA buffer, or {@code null} once the read timeout elapsed. */
+    private ByteBuffer pollData() throws IOException {
+        try {
+            return stream.pollData();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while reading HTTP/2 body", e);
+        }
     }
 
     /** Fails the read once the body went past its limit, unless the stream is exempt (CHAPPE-025). */

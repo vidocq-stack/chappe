@@ -209,12 +209,20 @@ public final class Http2FrameWriter {
         writeLock.lock();
         try {
             byte[] encodedHeaders = encoder.encode();
+            // Any failure once the block is encoded closes the transport, an Error included: an
+            // exception keeps a failed close as suppressed, the finally block covers an Error.
+            boolean settled = false;
             try {
                 writeHeaderFrames(streamId, encodedHeaders, endStream);
-            } catch (Throwable e) {
-                // any failure once the block is encoded, an Error included
+                settled = true;
+            } catch (Exception e) {
+                settled = true;
                 closeTransport(e);
                 throw e;
+            } finally {
+                if (!settled) {
+                    closeTransport(null);
+                }
             }
         } finally {
             writeLock.unlock();
@@ -255,38 +263,34 @@ public final class Http2FrameWriter {
     /** Writes an encoded block as HEADERS and CONTINUATION frames, then flushes. Called under the lock. */
     private void writeHeaderFrames(int streamId, byte[] encodedHeaders, boolean endStream) throws IOException {
         int totalLen = encodedHeaders.length;
-        int offset = 0;
+        // The HEADERS frame, empty for an empty block, then CONTINUATION frames for the rest.
+        int firstLen = Math.min(maxFrameSize, totalLen);
+        int headersFlags = firstLen == totalLen ? Http2Frame.FLAG_END_HEADERS : 0;
+        if (endStream) headersFlags |= Http2Frame.FLAG_END_STREAM;
+        writeFrameHeader(firstLen, Http2Frame.TYPE_HEADERS, headersFlags, streamId);
+        writeBytes(encodedHeaders, 0, firstLen);
 
-        while (offset < totalLen || totalLen == 0) {
+        int offset = firstLen;
+        while (offset < totalLen) {
             int chunkLen = Math.min(maxFrameSize, totalLen - offset);
-            boolean isFirst = (offset == 0);
-            boolean isLast = (offset + chunkLen >= totalLen);
-
-            if (isFirst) {
-                int flags = 0;
-                if (isLast) flags |= Http2Frame.FLAG_END_HEADERS;
-                if (endStream) flags |= Http2Frame.FLAG_END_STREAM;
-                writeFrameHeader(chunkLen, Http2Frame.TYPE_HEADERS, flags, streamId);
-            } else {
-                int flags = isLast ? Http2Frame.FLAG_END_HEADERS : 0;
-                writeFrameHeader(chunkLen, Http2Frame.TYPE_CONTINUATION, flags, streamId);
-            }
-
+            int flags = offset + chunkLen == totalLen ? Http2Frame.FLAG_END_HEADERS : 0;
+            writeFrameHeader(chunkLen, Http2Frame.TYPE_CONTINUATION, flags, streamId);
             writeBytes(encodedHeaders, offset, chunkLen);
             offset += chunkLen;
-
-            if (totalLen == 0) break;
         }
 
         flush();
     }
 
-    /** Closes the transport after a failed header block write, keeping {@code failure} as the cause. */
-    private void closeTransport(Throwable failure) {
+    /**
+     * Closes the transport after a failed header block write, keeping a failed close as suppressed
+     * by {@code failure}, or dropping it when {@code failure} is {@code null} (an Error in flight).
+     */
+    private void closeTransport(Exception failure) {
         try {
             closeable.close();
         } catch (IOException e) {
-            failure.addSuppressed(e);
+            if (failure != null) failure.addSuppressed(e);
         }
     }
 

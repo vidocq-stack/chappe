@@ -157,7 +157,8 @@ public final class HpackEncoder {
      * either malformed, and RFC 9110 §5.5 never counts them in the value (CHAPPE-018).
      */
     static String trimWhitespace(String value) {
-        int start = 0, end = value.length();
+        int start = 0;
+        int end = value.length();
         while (start < end && isWhitespace(value.charAt(start))) start++;
         while (end > start && isWhitespace(value.charAt(end - 1))) end--;
         return start == 0 && end == value.length() ? value : value.substring(start, end);
@@ -181,18 +182,27 @@ public final class HpackEncoder {
         try {
             writePendingSizeUpdate(out);
             for (var entry : trailers) {
-                if (!HeaderFields.isValid(entry.name(), entry.value())) {
-                    continue; // dropped, as over HTTP/1.1 (CHAPPE-008)
-                }
-                String name = entry.name().toLowerCase(Locale.ROOT);
-                String value = trimWhitespace(entry.value());
-                if (connectionSpecific(name, value)) continue; // CHAPPE-018
-                encodeHeader(out, name, value);
+                encodeTrailer(out, entry.name(), entry.value());
             }
         } finally {
             lock.unlock();
         }
         return out.toByteArray();
+    }
+
+    /**
+     * Encodes one trailer, or drops it: an invalid one, as over HTTP/1.1 (CHAPPE-008), and a
+     * connection-specific one (CHAPPE-018). Called under the lock.
+     */
+    private void encodeTrailer(ByteArrayOutputStream out, String rawName, String rawValue) {
+        if (!HeaderFields.isValid(rawName, rawValue)) {
+            return;
+        }
+        String name = rawName.toLowerCase(Locale.ROOT);
+        String value = trimWhitespace(rawValue);
+        if (!connectionSpecific(name, value)) {
+            encodeHeader(out, name, value);
+        }
     }
 
     /**

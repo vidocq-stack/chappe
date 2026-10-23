@@ -75,7 +75,9 @@ public record Http2Settings(
                 case INITIAL_WINDOW_SIZE -> winSize = value;
                 case MAX_FRAME_SIZE -> maxFrame = value;
                 case MAX_HEADER_LIST_SIZE -> maxHeader = value;
-                default -> {} // ignore unknown settings (RFC 9113 §6.5.2)
+                default -> {
+                    // an unknown setting is ignored (RFC 9113 §6.5.2)
+                }
             }
         }
         return new Http2Settings(htSize, push, maxStreams, winSize, maxFrame, maxHeader);
