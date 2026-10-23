@@ -95,13 +95,6 @@ public record CliArgs(
         return command.equals("--help") || command.equals("-h") || command.equals("help");
     }
 
-    private static String requireValue(String[] argv, int idx, String flag) {
-        if (idx >= argv.length) {
-            throw new IllegalArgumentException("missing value for " + flag);
-        }
-        return argv[idx];
-    }
-
     /** Help text (multi-line). */
     public static String helpText() {
         return HELP_TEXT;
@@ -187,6 +180,13 @@ public record CliArgs(
                     exposeBuildInfo,
                     Map.copyOf(extraHeaders),
                     help);
+        }
+
+        private static String requireValue(String[] argv, int idx, String flag) {
+            if (idx >= argv.length) {
+                throw new IllegalArgumentException("missing value for " + flag);
+            }
+            return argv[idx];
         }
     }
 }

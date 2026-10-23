@@ -294,9 +294,9 @@ final class ChunkedInputStream extends RequestBodyInputStream {
     private void consumeCrlf() throws IOException {
         // Consume CRLF after chunk data. Any byte but CR ends it: the LF, or an unexpected byte,
         // tolerated (some servers only send LF).
-        int b = '\r';
-        while (b == '\r' && ensureData()) {
-            b = nextFramingByte();
+        boolean carriageReturn = true;
+        while (carriageReturn && ensureData()) {
+            carriageReturn = nextFramingByte() == '\r';
         }
     }
 

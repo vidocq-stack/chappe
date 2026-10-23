@@ -400,39 +400,44 @@ final class DefaultRouterBuilder implements Router.Builder {
             }
             return fallback.handle(request);
         }
-    }
 
-    /** Trailing-slash normalization of a request path: /users/ becomes /users (except /). */
-    private static String withoutTrailingSlash(String path) {
-        return path.length() > 1 && path.endsWith("/") ? path.substring(0, path.length() - 1) : path;
-    }
-
-    private static Route staticRoute(
-            EnumMap<HttpMethod, Route> methodsForPath, HttpMethod method, boolean tryHeadAsGet) {
-        Route route = methodsForPath.get(method);
-        if (route == null && tryHeadAsGet) {
-            route = methodsForPath.get(HttpMethod.GET);
+        /** Trailing-slash normalization of a request path: /users/ becomes /users (except /). */
+        private static String withoutTrailingSlash(String path) {
+            return path.length() > 1 && path.endsWith("/") ? path.substring(0, path.length() - 1) : path;
         }
-        return route;
-    }
 
-    private static Set<HttpMethod> withAllowed(Set<HttpMethod> allowedMethods, HttpMethod method) {
-        Set<HttpMethod> allowed = allowedMethods != null ? allowedMethods : EnumSet.noneOf(HttpMethod.class);
-        allowed.add(method);
-        return allowed;
-    }
+        private static Route staticRoute(
+                EnumMap<HttpMethod, Route> methodsForPath, HttpMethod method, boolean tryHeadAsGet) {
+            Route route = methodsForPath.get(method);
+            if (route == null && tryHeadAsGet) {
+                route = methodsForPath.get(HttpMethod.GET);
+            }
+            return route;
+        }
 
-    private static boolean methodMatches(Route route, HttpMethod method, boolean tryHeadAsGet) {
-        return route.method() == method || (tryHeadAsGet && route.method() == HttpMethod.GET);
-    }
+        private static Set<HttpMethod> withAllowed(Set<HttpMethod> allowedMethods, HttpMethod method) {
+            Set<HttpMethod> allowed = allowedMethods != null ? allowedMethods : EnumSet.noneOf(HttpMethod.class);
+            allowed.add(method);
+            return allowed;
+        }
 
-    private static Response methodNotAllowed(Set<HttpMethod> allowedMethods, boolean tryHeadAsGet) {
-        if (tryHeadAsGet) allowedMethods.add(HttpMethod.HEAD);
-        var allow = String.join(", ", allowedMethods.stream().map(Enum::name).toList());
-        return Response.builder()
-                .status(StatusCode.METHOD_NOT_ALLOWED)
-                .header("Allow", allow)
-                .build();
+        private static boolean methodMatches(Route route, HttpMethod method, boolean tryHeadAsGet) {
+            return route.method() == method || (tryHeadAsGet && route.method() == HttpMethod.GET);
+        }
+
+        private static Response methodNotAllowed(Set<HttpMethod> allowedMethods, boolean tryHeadAsGet) {
+            if (tryHeadAsGet) allowedMethods.add(HttpMethod.HEAD);
+            var allow =
+                    String.join(", ", allowedMethods.stream().map(Enum::name).toList());
+            return Response.builder()
+                    .status(StatusCode.METHOD_NOT_ALLOWED)
+                    .header("Allow", allow)
+                    .build();
+        }
+
+        private static boolean isMatch(Map<String, String> params) {
+            return !(params instanceof NoMatch);
+        }
     }
 
     private static Response invoke(Route route, Request request, Map<String, String> params, List<Filter> globalFilters)
@@ -461,7 +466,7 @@ final class DefaultRouterBuilder implements Router.Builder {
 
     /**
      * Matches a pattern against a path. Returns the captured params (empty when the pattern has
-     * none), or {@link #NO_MATCH} if the path does not match: test the result with {@link #isMatch}.
+     * none), or {@link #NO_MATCH} if the path does not match: test the result with {@code CompiledRouter.isMatch}.
      */
     private static Map<String, String> matchPath(String pattern, String path) {
         // Also normalize trailing slash on pattern
@@ -471,10 +476,6 @@ final class DefaultRouterBuilder implements Router.Builder {
             return matchWildcard(normPattern.substring(0, normPattern.length() - 2), path);
         }
         return matchSegments(normPattern.split("/", -1), path.split("/", -1));
-    }
-
-    private static boolean isMatch(Map<String, String> params) {
-        return !(params instanceof NoMatch);
     }
 
     private static Map<String, String> matchWildcard(String base, String path) {
