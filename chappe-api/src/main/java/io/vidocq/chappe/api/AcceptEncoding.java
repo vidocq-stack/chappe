@@ -29,7 +29,7 @@ import java.util.Locale;
  * <p>Supported subset: named codings (gzip, br, deflate, identity, …), q-values
  * ({@code ;q=0}…{@code ;q=1}), wildcard {@code *}.</p>
  */
-@SuppressWarnings("StringSplitter") // Les empty strings sont filtrées explicitement plus bas
+@SuppressWarnings("StringSplitter") // empty elements are skipped explicitly below
 public final class AcceptEncoding {
 
     private AcceptEncoding() {}
@@ -47,37 +47,43 @@ public final class AcceptEncoding {
         if (header == null || header.isBlank()) return List.of();
         List<Entry> out = new ArrayList<>();
         for (String token : header.split(",")) {
-            String t = token.trim();
-            if (t.isEmpty()) continue;
-            int semi = t.indexOf(';');
-            String name;
-            double q = 1.0;
-            if (semi < 0) {
-                name = t;
-            } else {
-                name = t.substring(0, semi).trim();
-                String params = t.substring(semi + 1);
-                for (String p : params.split(";")) {
-                    String pt = p.trim();
-                    if (pt.isEmpty()) continue;
-                    int eq = pt.indexOf('=');
-                    if (eq < 0) continue;
-                    String k = pt.substring(0, eq).trim().toLowerCase(Locale.ROOT);
-                    String v = pt.substring(eq + 1).trim();
-                    if (k.equals("q")) {
-                        try {
-                            q = Double.parseDouble(v);
-                        } catch (NumberFormatException _) {
-                            q = 0.0;
-                        }
-                    }
-                }
-            }
-            if (!name.isEmpty()) {
-                out.add(new Entry(name.toLowerCase(Locale.ROOT), q));
+            Entry entry = parseEntry(token.trim());
+            if (entry != null) {
+                out.add(entry);
             }
         }
         return out;
+    }
+
+    /** One trimmed element of the list; {@code null} when it names no coding (an empty element). */
+    private static Entry parseEntry(String element) {
+        int semi = element.indexOf(';');
+        String name = semi < 0 ? element : element.substring(0, semi).trim();
+        if (name.isEmpty()) return null;
+        double q = semi < 0 ? 1.0 : qvalue(element.substring(semi + 1));
+        return new Entry(name.toLowerCase(Locale.ROOT), q);
+    }
+
+    /** The q-value of the parameters after a coding name: the last {@code q} wins, 1 when absent. */
+    private static double qvalue(String params) {
+        double q = 1.0;
+        for (String p : params.split(";")) {
+            String pt = p.trim();
+            int eq = pt.indexOf('=');
+            if (eq >= 0 && pt.substring(0, eq).trim().toLowerCase(Locale.ROOT).equals("q")) {
+                q = parseQvalue(pt.substring(eq + 1).trim());
+            }
+        }
+        return q;
+    }
+
+    /** A q-value that does not parse counts as 0: the coding is then refused. */
+    private static double parseQvalue(String value) {
+        try {
+            return Double.parseDouble(value);
+        } catch (NumberFormatException _) {
+            return 0.0;
+        }
     }
 
     /**

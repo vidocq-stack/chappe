@@ -70,11 +70,21 @@ public final class StaticFileHandler implements Handler {
 
     private static final int MAX_CACHE_ENTRY_SIZE = 64 * 1024; // max 64 KB per entry
 
+    private static final String CONTENT_TYPE = "Content-Type";
+    private static final String CACHE_CONTROL = "Cache-Control";
+    private static final String LAST_MODIFIED = "Last-Modified";
+
+    /** A pre-compressed sidecar: the coding a client must accept, and the suffix of its file. */
+    private record Sidecar(String encoding, String suffix) {}
+
+    /** Tried in this order: Brotli, then gzip. An array, so that a request iterates without allocating. */
+    private static final Sidecar[] SIDECARS = {new Sidecar("br", ".br"), new Sidecar("gzip", ".gz")};
+
     private final List<ResourceSource> sources;
     private final String indexFile;
     private final String cacheControl;
 
-    @SuppressWarnings("UnusedVariable") // API exposée via Builder.cacheInMemory(), implémentation à compléter
+    @SuppressWarnings("UnusedVariable") // exposed through Builder.cacheInMemory(); the cache itself is the field below
     private final boolean cacheInMemory;
 
     private final String notFoundFile;
@@ -83,24 +93,16 @@ public final class StaticFileHandler implements Handler {
     private final boolean cleanUrls;
     private final ConcurrentHashMap<String, CachedResource> cache;
 
-    private StaticFileHandler(
-            List<ResourceSource> sources,
-            String indexFile,
-            String cacheControl,
-            boolean cacheInMemory,
-            String notFoundFile,
-            String spaFallback,
-            boolean preferPrecompressed,
-            boolean cleanUrls) {
-        this.sources = List.copyOf(sources);
-        this.indexFile = indexFile;
-        this.cacheControl = cacheControl;
-        this.cacheInMemory = cacheInMemory;
-        this.notFoundFile = notFoundFile;
-        this.spaFallback = spaFallback;
-        this.preferPrecompressed = preferPrecompressed;
-        this.cleanUrls = cleanUrls;
-        this.cache = cacheInMemory ? new ConcurrentHashMap<>() : null;
+    private StaticFileHandler(Builder builder) {
+        this.sources = List.copyOf(builder.sources);
+        this.indexFile = builder.indexFile;
+        this.cacheControl = builder.cacheControl;
+        this.cacheInMemory = builder.cacheInMemory;
+        this.notFoundFile = builder.notFoundFile;
+        this.spaFallback = builder.spaFallback;
+        this.preferPrecompressed = builder.preferPrecompressed;
+        this.cleanUrls = builder.cleanUrls;
+        this.cache = builder.cacheInMemory ? new ConcurrentHashMap<>() : null;
     }
 
     // -- Simple factories --
@@ -135,85 +137,89 @@ public final class StaticFileHandler implements Handler {
 
         String relative = requestPath.startsWith("/") ? requestPath.substring(1) : requestPath;
 
-        // Precompression: try .br then .gz if client is compatible
-        if (preferPrecompressed && !relative.isEmpty() && !relative.endsWith("/")) {
-            String acceptEnc = request.header("Accept-Encoding").orElse(null);
-            String[][] sidecars = {{"br", ".br"}, {"gzip", ".gz"}};
-            for (var s : sidecars) {
-                if (!AcceptEncoding.accepts(acceptEnc, s[0])) continue;
-                String sidecarPath = relative + s[1];
-                for (var source : sources) {
-                    var resource = source.resolve(sidecarPath, indexFile);
-                    if (resource != null) {
-                        return serveEncoded(resource, relative, s[0]);
-                    }
+        Response response = servePrecompressed(request, relative);
+        if (response == null) response = serveFromSources(request, relative);
+        if (response == null) response = serveCleanUrl(request, relative);
+        if (response == null) response = serveConfiguredFallback(request);
+        return response != null ? response : Response.of(StatusCode.NOT_FOUND);
+    }
+
+    /** Precompression: tries .br then .gz if the client accepts them; {@code null} when none applies. */
+    private Response servePrecompressed(Request request, String relative) {
+        if (!preferPrecompressed || relative.isEmpty() || relative.endsWith("/")) return null;
+        String acceptEnc = request.header("Accept-Encoding").orElse(null);
+        for (var sidecar : SIDECARS) {
+            if (AcceptEncoding.accepts(acceptEnc, sidecar.encoding())) {
+                var resource = resolveFirst(relative + sidecar.suffix());
+                if (resource != null) {
+                    return serveEncoded(resource, relative, sidecar.encoding());
                 }
             }
         }
+        return null;
+    }
 
-        // Cache hit?
+    /** The in-memory cache, then the sources in order (fallback chain); {@code null} when nothing matches. */
+    private Response serveFromSources(Request request, String relative) throws IOException {
         if (cache != null) {
             var cached = cache.get(relative);
             if (cached != null) {
                 return serveCached(request, cached, StatusCode.OK);
             }
         }
+        var resource = resolveFirst(relative);
+        if (resource == null) return null;
+        if (cache != null && resource.size() >= 0 && resource.size() <= MAX_CACHE_ENTRY_SIZE) {
+            return serveCached(request, cacheResource(relative, resource), StatusCode.OK);
+        }
+        return serveResource(request, resource, StatusCode.OK);
+    }
 
-        // Search through sources (fallback chain)
+    /**
+     * Clean URLs ("pretty URLs", GitHub Pages / Netlify style): an extensionless request
+     * (e.g. /admin or /admin/) resolves to its .html sibling (admin.html) once no file or
+     * directory index matched. Lets a multi-page build expose /admin without the .html suffix
+     * and without a per-app redirect. Skipped when the last path segment already carries an
+     * extension, so /style.css is never looked up as /style.css.html.
+     */
+    private Response serveCleanUrl(Request request, String relative) {
+        if (!cleanUrls) return null;
+        String candidate = relative.endsWith("/") ? relative.substring(0, relative.length() - 1) : relative;
+        if (candidate.isEmpty() || !lastSegmentHasNoExtension(candidate)) return null;
+        var resource = resolveFirst(candidate + ".html");
+        return resource != null ? serveResource(request, resource, StatusCode.OK) : null;
+    }
+
+    /** The SPA fallback (200) or the 404 page, whichever is configured; {@code null} otherwise. */
+    private Response serveConfiguredFallback(Request request) {
+        if (spaFallback != null) return serveFallback(request, spaFallback, StatusCode.OK);
+        if (notFoundFile != null) return serveFallback(request, notFoundFile, StatusCode.NOT_FOUND);
+        return null;
+    }
+
+    /** The first source holding the path, or {@code null}. */
+    private ResolvedResource resolveFirst(String path) {
         for (var source : sources) {
-            var resource = source.resolve(relative, indexFile);
+            var resource = source.resolve(path, indexFile);
             if (resource != null) {
-                // Cache if applicable
-                if (cache != null && resource.size() >= 0 && resource.size() <= MAX_CACHE_ENTRY_SIZE) {
-                    var cached = cacheResource(relative, resource);
-                    return serveCached(request, cached, StatusCode.OK);
-                }
-                return serveResource(request, resource, StatusCode.OK);
+                return resource;
             }
         }
-
-        // Clean URLs ("pretty URLs", GitHub Pages / Netlify style): an extensionless request
-        // (e.g. /admin or /admin/) resolves to its .html sibling (admin.html) once no file or
-        // directory index matched. Lets a multi-page build expose /admin without the .html suffix
-        // and without a per-app redirect. Skipped when the last path segment already carries an
-        // extension, so /style.css is never looked up as /style.css.html.
-        if (cleanUrls) {
-            String candidate = relative.endsWith("/") ? relative.substring(0, relative.length() - 1) : relative;
-            if (!candidate.isEmpty() && lastSegmentHasNoExtension(candidate)) {
-                String htmlPath = candidate + ".html";
-                for (var source : sources) {
-                    var resource = source.resolve(htmlPath, indexFile);
-                    if (resource != null) {
-                        return serveResource(request, resource, StatusCode.OK);
-                    }
-                }
-            }
-        }
-
-        // Fallback (SPA ou 404 page)
-        if (spaFallback != null) {
-            Response fb = serveFallback(request, spaFallback, StatusCode.OK);
-            if (fb != null) return fb;
-        } else if (notFoundFile != null) {
-            Response fb = serveFallback(request, notFoundFile, StatusCode.NOT_FOUND);
-            if (fb != null) return fb;
-        }
-
-        return Response.of(StatusCode.NOT_FOUND);
+        return null;
     }
 
     /** Serves a pre-compressed sidecar: Content-Type based on original extension, adds Content-Encoding + Vary. */
     private Response serveEncoded(ResolvedResource resource, String originalRelative, String encoding) {
         var builder = Response.builder()
                 .status(StatusCode.OK)
-                .header("Content-Type", MimeTypes.detect(originalRelative))
+                .header(CONTENT_TYPE, MimeTypes.detect(originalRelative))
                 .header("Content-Encoding", encoding)
                 .header("Vary", "Accept-Encoding");
         if (resource.lastModified() != null) {
-            builder.header("Last-Modified", IMF_FIXDATE.format(resource.lastModified()));
+            builder.header(LAST_MODIFIED, IMF_FIXDATE.format(resource.lastModified()));
         }
         if (cacheControl != null) {
-            builder.header("Cache-Control", cacheControl);
+            builder.header(CACHE_CONTROL, cacheControl);
         }
         builder.body(resource.toBody());
         return builder.build();
@@ -226,20 +232,15 @@ public final class StaticFileHandler implements Handler {
         return segment.indexOf('.') < 0;
     }
 
-    private Response serveFallback(Request request, String fallbackPath, StatusCode status) throws IOException {
+    private Response serveFallback(Request request, String fallbackPath, StatusCode status) {
         String fb = fallbackPath.startsWith("/") ? fallbackPath.substring(1) : fallbackPath;
-        for (var source : sources) {
-            var resource = source.resolve(fb, indexFile);
-            if (resource != null) {
-                return serveResource(request, resource, status);
-            }
-        }
-        return null;
+        var resource = resolveFirst(fb);
+        return resource != null ? serveResource(request, resource, status) : null;
     }
 
     // -- Serve helpers --
 
-    private Response serveResource(Request request, ResolvedResource resource, StatusCode status) throws IOException {
+    private Response serveResource(Request request, ResolvedResource resource, StatusCode status) {
         // If-Modified-Since (only for OK responses — fallbacks always serve fresh)
         if (StatusCode.OK.equals(status) && resource.lastModified() != null) {
             String ims = request.header("If-Modified-Since").orElse(null);
@@ -255,13 +256,13 @@ public final class StaticFileHandler implements Handler {
             }
         }
 
-        var builder = Response.builder().status(status).header("Content-Type", MimeTypes.detect(resource.name()));
+        var builder = Response.builder().status(status).header(CONTENT_TYPE, MimeTypes.detect(resource.name()));
 
         if (resource.lastModified() != null) {
-            builder.header("Last-Modified", IMF_FIXDATE.format(resource.lastModified()));
+            builder.header(LAST_MODIFIED, IMF_FIXDATE.format(resource.lastModified()));
         }
         if (cacheControl != null) {
-            builder.header("Cache-Control", cacheControl);
+            builder.header(CACHE_CONTROL, cacheControl);
         }
 
         builder.body(resource.toBody());
@@ -279,11 +280,11 @@ public final class StaticFileHandler implements Handler {
 
         var builder = Response.builder()
                 .status(status)
-                .header("Content-Type", cached.contentType)
+                .header(CONTENT_TYPE, cached.contentType)
                 .header("ETag", cached.etag);
 
         if (cacheControl != null) {
-            builder.header("Cache-Control", cacheControl);
+            builder.header(CACHE_CONTROL, cacheControl);
         }
 
         builder.body(Body.of(cached.data));
@@ -316,7 +317,7 @@ public final class StaticFileHandler implements Handler {
 
     // -- Internal types --
 
-    @SuppressWarnings("ArrayRecordComponent") // record interne, jamais comparé via equals/hashCode
+    @SuppressWarnings("ArrayRecordComponent") // internal record, never compared with equals/hashCode
     private record CachedResource(byte[] data, String contentType, String etag) {}
 
     /** Resolved resource from a source. */
@@ -379,56 +380,68 @@ public final class StaticFileHandler implements Handler {
 
     /** Classpath source (jar, module, classpath directory). */
     private record ClasspathSource(ClassLoader loader, String basePath) implements ResourceSource {
+
+        /** The separator of class loader resource names: always a slash, whatever the platform. */
+        private static final String SEPARATOR = "/";
+
         @Override
         public ResolvedResource resolve(String relative, String indexFile) {
-            String resourcePath = basePath.isEmpty() ? relative : basePath + "/" + relative;
+            String resourcePath = resourcePath(relative, indexFile);
+            ResolvedResource indexed = resolveIndexed(resourcePath, indexFile);
+            return indexed != null ? indexed : resolveByUrl(resourcePath, indexFile);
+        }
 
-            // If request targets a directory (empty relative path or trailing /),
-            // resolve directly to indexFile: otherwise getResource() returns
-            // the jar-directory URL on slow path and URLConnection cannot
-            // serve it correctly (size = -1, openStream returns a text listing).
-            if (relative.isEmpty() || relative.endsWith("/")) {
-                resourcePath = resourcePath.isEmpty() || resourcePath.endsWith("/")
-                        ? resourcePath + indexFile
-                        : resourcePath + "/" + indexFile;
+        /**
+         * The resource name of a request path. If the request targets a directory (empty relative
+         * path or trailing /), it resolves directly to indexFile: otherwise getResource() returns
+         * the jar-directory URL on slow path and URLConnection cannot serve it correctly
+         * (size = -1, openStream returns a text listing).
+         */
+        private String resourcePath(String relative, String indexFile) {
+            String resourcePath = basePath.isEmpty() ? relative : basePath + SEPARATOR + relative;
+            if (relative.isEmpty() || relative.endsWith(SEPARATOR)) {
+                return resourcePath.isEmpty() ? indexFile : indexOf(resourcePath, indexFile);
             }
+            return resourcePath;
+        }
 
-            // Fast path: entry precomputed at build time by chappe-static-index-maven-plugin.
-            // Skip URLConnection.openConnection() entirely — everything is already known.
-            IndexedEntry idx = StaticIndex.lookup(loader, resourcePath);
+        /**
+         * Fast path: entry precomputed at build time by chappe-static-index-maven-plugin.
+         * Skips URLConnection.openConnection() entirely, everything is already known.
+         */
+        private ResolvedResource resolveIndexed(String resourcePath, String indexFile) {
+            String path = resourcePath;
+            IndexedEntry idx = StaticIndex.lookup(loader, path);
             if (idx == null) {
-                String indexPath =
-                        resourcePath.endsWith("/") ? resourcePath + indexFile : resourcePath + "/" + indexFile;
-                idx = StaticIndex.lookup(loader, indexPath);
-                if (idx != null) resourcePath = indexPath;
+                path = indexOf(resourcePath, indexFile);
+                idx = StaticIndex.lookup(loader, path);
+                if (idx == null) return null;
             }
-            if (idx != null) {
-                String name = lastSegment(resourcePath);
-                String path = resourcePath;
-                Instant lastMod =
-                        idx.mtime() > 0 ? Instant.ofEpochMilli(idx.mtime()).truncatedTo(ChronoUnit.SECONDS) : null;
-                return new ResolvedResource(
-                        name,
-                        idx.size(),
-                        lastMod,
-                        () -> {
-                            InputStream in = loader.getResourceAsStream(path);
-                            if (in == null)
-                                throw new UncheckedIOException(new IOException("Indexed resource vanished: " + path));
-                            return in;
-                        },
-                        null);
-            }
+            String found = path;
+            Instant lastMod =
+                    idx.mtime() > 0 ? Instant.ofEpochMilli(idx.mtime()).truncatedTo(ChronoUnit.SECONDS) : null;
+            return new ResolvedResource(
+                    lastSegment(found),
+                    idx.size(),
+                    lastMod,
+                    () -> {
+                        InputStream in = loader.getResourceAsStream(found);
+                        if (in == null)
+                            throw new UncheckedIOException(new IOException("Indexed resource vanished: " + found));
+                        return in;
+                    },
+                    null);
+        }
 
-            // Slow path: classic lookup via URL.openConnection (outside index).
-            URL url = loader.getResource(resourcePath);
+        /** Slow path: classic lookup via URL.openConnection (outside index). */
+        private ResolvedResource resolveByUrl(String resourcePath, String indexFile) {
+            String path = resourcePath;
+            URL url = loader.getResource(path);
             if (url == null) {
-                String indexPath =
-                        resourcePath.endsWith("/") ? resourcePath + indexFile : resourcePath + "/" + indexFile;
-                url = loader.getResource(indexPath);
-                if (url != null) resourcePath = indexPath;
+                path = indexOf(resourcePath, indexFile);
+                url = loader.getResource(path);
+                if (url == null) return null;
             }
-            if (url == null) return null;
 
             try {
                 URLConnection conn = url.openConnection();
@@ -438,11 +451,9 @@ public final class StaticFileHandler implements Handler {
                 Instant lastModified =
                         lastMod > 0 ? Instant.ofEpochMilli(lastMod).truncatedTo(ChronoUnit.SECONDS) : null;
 
-                String name = lastSegment(resourcePath);
-
                 URL finalUrl = url;
                 return new ResolvedResource(
-                        name,
+                        lastSegment(path),
                         size,
                         lastModified,
                         () -> {
@@ -456,6 +467,11 @@ public final class StaticFileHandler implements Handler {
             } catch (IOException _) {
                 return null;
             }
+        }
+
+        /** The index file of a directory resource name. */
+        private static String indexOf(String directory, String indexFile) {
+            return directory.endsWith(SEPARATOR) ? directory + indexFile : directory + SEPARATOR + indexFile;
         }
 
         private static String lastSegment(String path) {
@@ -488,27 +504,37 @@ public final class StaticFileHandler implements Handler {
                 Enumeration<URL> urls = loader.getResources(RESOURCE);
                 if (!urls.hasMoreElements()) return Collections.emptyMap();
                 for (URL url : Collections.list(urls)) {
-                    Properties p = new Properties();
-                    try (InputStream in = url.openStream()) {
-                        p.load(in);
-                    }
-                    for (String key : p.stringPropertyNames()) {
-                        String[] parts = p.getProperty(key).split("\\|", 4);
-                        if (parts.length != 4) continue;
-                        try {
-                            merged.putIfAbsent(
-                                    key,
-                                    new IndexedEntry(
-                                            Long.parseLong(parts[0]), Long.parseLong(parts[1]), parts[2], parts[3]));
-                        } catch (NumberFormatException _) {
-                            // corrupted entry, ignore
-                        }
-                    }
+                    loadInto(url, merged);
                 }
             } catch (IOException _) {
                 return Collections.emptyMap();
             }
             return merged.isEmpty() ? Collections.emptyMap() : Map.copyOf(merged);
+        }
+
+        /** Adds the entries of one index file; an entry already present (an earlier file) wins. */
+        private static void loadInto(URL url, Map<String, IndexedEntry> merged) throws IOException {
+            Properties p = new Properties();
+            try (InputStream in = url.openStream()) {
+                p.load(in);
+            }
+            for (String key : p.stringPropertyNames()) {
+                IndexedEntry entry = parseEntry(p.getProperty(key));
+                if (entry != null) {
+                    merged.putIfAbsent(key, entry);
+                }
+            }
+        }
+
+        /** {@code size|mtime|mime|etag}, or {@code null} for a corrupted entry (ignored). */
+        private static IndexedEntry parseEntry(String value) {
+            String[] parts = value.split("\\|", 4);
+            if (parts.length != 4) return null;
+            try {
+                return new IndexedEntry(Long.parseLong(parts[0]), Long.parseLong(parts[1]), parts[2], parts[3]);
+            } catch (NumberFormatException _) {
+                return null;
+            }
         }
     }
 
@@ -615,15 +641,7 @@ public final class StaticFileHandler implements Handler {
             if (notFoundFile != null && spaFallback != null) {
                 throw new IllegalStateException("notFoundFile and spaFallback are mutually exclusive");
             }
-            return new StaticFileHandler(
-                    sources,
-                    indexFile,
-                    cacheControl,
-                    cacheInMemory,
-                    notFoundFile,
-                    spaFallback,
-                    preferPrecompressed,
-                    cleanUrls);
+            return new StaticFileHandler(this);
         }
     }
 }
