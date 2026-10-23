@@ -107,8 +107,8 @@ public record ChappeConfig(Server server, Static staticCfg, Headers headers, Log
         if (m == null) return Map.of();
         LinkedHashMap<String, String> out = new LinkedHashMap<>();
         for (var e : m.entries().entrySet()) {
-            if (e.getValue() instanceof YamlNode.Scalar s) {
-                out.put(e.getKey(), s.value());
+            if (e.getValue() instanceof YamlNode.Scalar(String value)) {
+                out.put(e.getKey(), value);
             }
         }
         return Map.copyOf(out);

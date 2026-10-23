@@ -36,14 +36,14 @@ public sealed interface YamlNode {
         }
 
         public Optional<String> string(String key) {
-            return get(key).flatMap(n -> n instanceof Scalar s ? Optional.of(s.value()) : Optional.empty());
+            return get(key).flatMap(n -> n instanceof Scalar(String value) ? Optional.of(value) : Optional.empty());
         }
 
         public Optional<Integer> integer(String key) {
             return string(key).map(s -> {
                 try {
                     return Integer.parseInt(s.trim());
-                } catch (NumberFormatException e) {
+                } catch (NumberFormatException _) {
                     return null;
                 }
             });
@@ -71,7 +71,7 @@ public sealed interface YamlNode {
     record Seq(java.util.List<YamlNode> items) implements YamlNode {
         public java.util.List<String> asStringList() {
             return items.stream()
-                    .map(n -> n instanceof Scalar s ? s.value() : "")
+                    .map(n -> n instanceof Scalar(String value) ? value : "")
                     .toList();
         }
     }

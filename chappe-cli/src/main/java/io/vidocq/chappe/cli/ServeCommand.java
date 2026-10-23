@@ -64,49 +64,31 @@ public final class ServeCommand {
             Map<String, String> stagingHeaders,
             boolean exposeBuildInfo) {
 
+        /** Port used when neither {@code --port} nor {@code server.port} is set. */
+        private static final int DEFAULT_PORT = 8080;
+        /** Address used when neither {@code --bind} nor {@code server.bind} is set. */
+        private static final String DEFAULT_HOST = "0.0.0.0";
+
         public static Effective resolve(CliArgs args, ChappeConfig yaml) {
-            Path root = args.root() != null
-                    ? args.root()
-                    : (yaml.staticCfg().root() != null
-                            ? Path.of(yaml.staticCfg().root())
-                            : null);
-            int port = args.port() != null
-                    ? args.port()
-                    : (yaml.server().port() != null ? yaml.server().port() : 8080);
-            String host = args.bind() != null
-                    ? args.bind()
-                    : (yaml.server().bind() != null ? yaml.server().bind() : "0.0.0.0");
-            String fallback =
-                    args.fallback() != null ? args.fallback() : yaml.staticCfg().fallback();
-            String spaFallback = args.spaFallback() != null
-                    ? args.spaFallback()
-                    : yaml.staticCfg().spaFallback();
-            String cache = args.cacheControl() != null
-                    ? args.cacheControl()
-                    : yaml.staticCfg().cacheControl();
-            boolean gzip = args.gzip() != null
-                    ? args.gzip()
-                    : (yaml.staticCfg().gzip() != null && yaml.staticCfg().gzip());
-            // CLI > env > YAML. Env "true" active.
-            boolean accessLog;
-            if (args.accessLog() != null) {
-                accessLog = args.accessLog();
-            } else if ("true".equals(System.getenv(ACCESS_LOG_ENV))) {
-                accessLog = true;
-            } else {
-                accessLog = yaml.logging().accessLog() != null && yaml.logging().accessLog();
-            }
-            List<String> indexFiles = yaml.staticCfg().indexFiles();
-            String indexFile = (indexFiles != null && !indexFiles.isEmpty()) ? indexFiles.getFirst() : null;
+            ChappeConfig.Static staticCfg = yaml.staticCfg();
+            Path root = cliOrYaml(args.root(), toPath(staticCfg.root()));
+            int port = cliOrYaml(args.port(), yaml.server().port(), DEFAULT_PORT);
+            String host = cliOrYaml(args.bind(), yaml.server().bind(), DEFAULT_HOST);
+            String fallback = cliOrYaml(args.fallback(), staticCfg.fallback());
+            String spaFallback = cliOrYaml(args.spaFallback(), staticCfg.spaFallback());
+            String cache = cliOrYaml(args.cacheControl(), staticCfg.cacheControl());
+            boolean gzip = cliOrYaml(args.gzip(), staticCfg.gzip(), Boolean.FALSE);
+            boolean accessLog =
+                    resolveAccessLog(args.accessLog(), yaml.logging().accessLog());
+            String indexFile = firstOrNull(staticCfg.indexFiles());
 
             LinkedHashMap<String, String> always =
                     new LinkedHashMap<>(yaml.headers().always());
             always.putAll(args.extraHeaders()); // CLI override / extension
             Map<String, String> staging = yaml.headers().staging();
             // CLI > YAML; off by default, so that the server does not tell which version to aim at.
-            boolean exposeBuildInfo = args.exposeBuildInfo() != null
-                    ? args.exposeBuildInfo()
-                    : Boolean.TRUE.equals(yaml.server().exposeBuildInfo());
+            boolean exposeBuildInfo =
+                    cliOrYaml(args.exposeBuildInfo(), yaml.server().exposeBuildInfo(), Boolean.FALSE);
 
             return new Effective(
                     root,
@@ -121,6 +103,32 @@ public final class ServeCommand {
                     Map.copyOf(always),
                     Map.copyOf(staging),
                     exposeBuildInfo);
+        }
+
+        /** The CLI value when the flag was given, else the YAML value (possibly {@code null}). */
+        private static <T> T cliOrYaml(T cli, T yaml) {
+            return cli != null ? cli : yaml;
+        }
+
+        /** The CLI value when the flag was given, else the YAML value, else {@code defaultValue}. */
+        private static <T> T cliOrYaml(T cli, T yaml, T defaultValue) {
+            T value = cliOrYaml(cli, yaml);
+            return value != null ? value : defaultValue;
+        }
+
+        /** CLI first, then {@link ServeCommand#ACCESS_LOG_ENV} when it equals {@code "true"}, then YAML; off by default. */
+        private static boolean resolveAccessLog(Boolean cli, Boolean yaml) {
+            if (cli != null) return cli;
+            if ("true".equals(System.getenv(ACCESS_LOG_ENV))) return true;
+            return Boolean.TRUE.equals(yaml);
+        }
+
+        private static Path toPath(String path) {
+            return path != null ? Path.of(path) : null;
+        }
+
+        private static String firstOrNull(List<String> values) {
+            return values != null && !values.isEmpty() ? values.getFirst() : null;
         }
     }
 
