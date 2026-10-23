@@ -24,13 +24,10 @@ import java.nio.ByteBuffer;
 import java.util.concurrent.Flow;
 
 /**
- * Empty body — singleton.
+ * Empty body: a single shared instance, held as the only constant of this enum.
  */
-final class EmptyBody implements Body {
-
-    static final EmptyBody INSTANCE = new EmptyBody();
-
-    private EmptyBody() {}
+enum EmptyBody implements Body {
+    INSTANCE;
 
     @Override
     public long contentLength() {
@@ -44,16 +41,16 @@ final class EmptyBody implements Body {
 
     @Override
     public Flow.Publisher<ByteBuffer> asPublisher() {
-        return subscriber -> {
-            subscriber.onSubscribe(new Flow.Subscription() {
-                @Override
-                public void request(long n) {
-                    subscriber.onComplete();
-                }
+        return subscriber -> subscriber.onSubscribe(new Flow.Subscription() {
+            @Override
+            public void request(long n) {
+                subscriber.onComplete();
+            }
 
-                @Override
-                public void cancel() {}
-            });
-        };
+            @Override
+            public void cancel() {
+                // nothing to stop: the publisher completes on the first request and holds no resource
+            }
+        });
     }
 }

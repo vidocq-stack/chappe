@@ -71,9 +71,7 @@ final class GrpcWebBufferedCall implements GrpcCall {
         this.mode = mode;
 
         var ct = request.headers().firstOrNull("content-type");
-        this.contentType = ct != null
-                ? ct
-                : (mode == GrpcWebDispatch.Mode.TEXT ? "application/grpc-web-text" : "application/grpc-web");
+        this.contentType = ct != null ? ct : defaultContentType(mode);
 
         long deadlineNs = -1L;
         var timeoutHeader = request.headers().firstOrNull("grpc-timeout");
@@ -89,6 +87,11 @@ final class GrpcWebBufferedCall implements GrpcCall {
                 ? Base64.getDecoder().decode(raw)
                 : raw;
         this.bodyStream = new ByteArrayInputStream(decoded);
+    }
+
+    /** The content type of the mode, used when the request carries none. */
+    static String defaultContentType(GrpcWebDispatch.Mode mode) {
+        return mode == GrpcWebDispatch.Mode.TEXT ? "application/grpc-web-text" : "application/grpc-web";
     }
 
     @Override
@@ -154,8 +157,8 @@ final class GrpcWebBufferedCall implements GrpcCall {
         if (initialEmissionDone) {
             throw new IllegalStateException("initial response already emitted");
         }
-        // In buffered H1 v1, addHeader is a silent no-op (response headers are
-        // fixed by Router.grpcWeb before the handler runs).
+        // Otherwise nothing happens: in this buffered fallback, the router has
+        // already fixed the response headers before the handler runs.
     }
 
     @Override
@@ -198,7 +201,7 @@ final class GrpcWebBufferedCall implements GrpcCall {
     }
 
     String responseContentType() {
-        return mode == GrpcWebDispatch.Mode.TEXT ? "application/grpc-web-text" : "application/grpc-web";
+        return defaultContentType(mode);
     }
 
     static String acceptEncodingHeader() {

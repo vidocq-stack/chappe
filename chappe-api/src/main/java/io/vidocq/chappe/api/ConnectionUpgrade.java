@@ -51,22 +51,23 @@ import io.vidocq.chappe.api.internal.HeaderFields;
  *       has no HTTP framing, and a 101 response must not carry them (RFC 9110 §8.6, RFC 9112
  *       §6.1).</li>
  * </ul>
+ *
+ * @param status  the status line to write, normally {@link StatusCode#SWITCHING_PROTOCOLS}
+ * @param headers the response headers, written as is (framing headers dropped); the accessor
+ *                returns the validated copy, without {@code Content-Length} /
+ *                {@code Transfer-Encoding}
+ * @param handler takes over the connection once the head is on the wire
  */
-public final class ConnectionUpgrade implements Response {
-
-    private final StatusCode status;
-    private final Headers headers;
-    private final UpgradeHandler handler;
+public record ConnectionUpgrade(StatusCode status, Headers headers, UpgradeHandler handler) implements Response {
 
     /**
-     * @param status  the status line to write, normally {@link StatusCode#SWITCHING_PROTOCOLS}
-     * @param headers the response headers, written as is (framing headers dropped)
-     * @param handler takes over the connection once the head is on the wire
+     * Validates the status and the headers, and keeps a copy of the headers without the framing ones.
+     *
      * @throws IllegalArgumentException if a header name or value is invalid (see class doc)
      */
-    public ConnectionUpgrade(StatusCode status, Headers headers, UpgradeHandler handler) {
-        this.status = Objects.requireNonNull(status, "status");
-        this.handler = Objects.requireNonNull(handler, "handler");
+    public ConnectionUpgrade {
+        Objects.requireNonNull(status, "status");
+        Objects.requireNonNull(handler, "handler");
         Objects.requireNonNull(headers, "headers");
         if (status.code() < 100 || status.code() > 999) {
             throw new IllegalArgumentException("Invalid upgrade status code: " + status.code());
@@ -89,23 +90,7 @@ public final class ConnectionUpgrade implements Response {
             }
             copy.add(name, value);
         }
-        this.headers = copy.build();
-    }
-
-    /** Handler taking over the connection once the response head is on the wire. */
-    public UpgradeHandler handler() {
-        return handler;
-    }
-
-    @Override
-    public StatusCode status() {
-        return status;
-    }
-
-    /** The validated headers, without {@code Content-Length} / {@code Transfer-Encoding}. */
-    @Override
-    public Headers headers() {
-        return headers;
+        headers = copy.build();
     }
 
     @Override

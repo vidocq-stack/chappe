@@ -28,17 +28,13 @@ import java.util.Objects;
  * Built by {@link Router.Builder#grpc(String, GrpcHandler)} and recognized by
  * {@code chappe-http} via {@code instanceof}. A normal application does not need
  * to instantiate it directly.
+ *
+ * @param handler the handler the call is dispatched to
  */
-public final class GrpcDispatch implements Response {
+public record GrpcDispatch(GrpcHandler handler) implements Response {
 
-    private final GrpcHandler handler;
-
-    public GrpcDispatch(GrpcHandler handler) {
-        this.handler = Objects.requireNonNull(handler, "handler");
-    }
-
-    public GrpcHandler handler() {
-        return handler;
+    public GrpcDispatch {
+        Objects.requireNonNull(handler, "handler");
     }
 
     @Override

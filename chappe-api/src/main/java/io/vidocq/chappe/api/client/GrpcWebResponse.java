@@ -41,7 +41,12 @@ public record GrpcWebResponse(List<byte[]> messages, int status, String message,
         return status == 0;
     }
 
-    /** First message received; convenient for unary calls. */
+    /**
+     * First message received; convenient for unary calls.
+     *
+     * @return the first message, or {@code null} when the server sent none (an empty array is a
+     *     valid, zero-length message, so it cannot stand for "no message")
+     */
     public byte[] firstMessage() {
         if (messages.isEmpty()) return null;
         return messages.get(0);

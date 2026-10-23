@@ -44,6 +44,7 @@ import java.util.Objects;
  *     when the client omits it); empty when the listener did not ask for one or the client sent none ({@code null} is read
  *     as empty)
  */
+@SuppressWarnings("ArrayRecordComponent") // equals, hashCode and the accessor handle the array's content
 public record TlsInfo(String protocol, String cipherSuite, byte[] sessionId, List<X509Certificate> peerCertificates) {
 
     public TlsInfo {
@@ -61,11 +62,11 @@ public record TlsInfo(String protocol, String cipherSuite, byte[] sessionId, Lis
 
     @Override
     public boolean equals(Object o) {
-        return o instanceof TlsInfo other
-                && protocol.equals(other.protocol)
-                && cipherSuite.equals(other.cipherSuite)
-                && Arrays.equals(sessionId, other.sessionId)
-                && peerCertificates.equals(other.peerCertificates);
+        return o instanceof TlsInfo(var otherProtocol, var otherCipherSuite, var otherSessionId, var otherPeers)
+                && protocol.equals(otherProtocol)
+                && cipherSuite.equals(otherCipherSuite)
+                && Arrays.equals(sessionId, otherSessionId)
+                && peerCertificates.equals(otherPeers);
     }
 
     @Override

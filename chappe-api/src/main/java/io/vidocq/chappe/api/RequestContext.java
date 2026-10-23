@@ -21,19 +21,11 @@ package io.vidocq.chappe.api;
 
 /**
  * ScopedValue-based request context, bound by the server before handler dispatch.
+ *
+ * @param request the request being handled
  */
-public final class RequestContext {
+public record RequestContext(Request request) {
     public static final ScopedValue<RequestContext> CURRENT = ScopedValue.newInstance();
-
-    private final Request request;
-
-    public RequestContext(Request request) {
-        this.request = request;
-    }
-
-    public Request request() {
-        return request;
-    }
 
     public static RequestContext current() {
         return CURRENT.get();

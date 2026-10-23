@@ -83,7 +83,6 @@ public final class CloseCodes {
         if (code < 1000 || code > 4999) return false;
         if (code == NO_STATUS_RCVD || code == ABNORMAL_CLOSURE || code == TLS_HANDSHAKE) return false;
         // 1016-2999 reserved but not used
-        if (code >= 1016 && code <= 2999) return false;
-        return true;
+        return code < 1016 || code > 2999;
     }
 }

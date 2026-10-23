@@ -37,8 +37,11 @@ import java.util.Objects;
  * <p>Built by {@link Router.Builder#grpcWeb(String, GrpcHandler)} and recognized by
  * {@code chappe-http} via {@code instanceof}. An application does not need to
  * instantiate it directly.
+ *
+ * @param handler the handler the call is dispatched to
+ * @param mode the body encoding of the call
  */
-public final class GrpcWebDispatch implements Response {
+public record GrpcWebDispatch(GrpcHandler handler, Mode mode) implements Response {
 
     /** Body encoding mode: binary or Base64. */
     public enum Mode {
@@ -48,20 +51,9 @@ public final class GrpcWebDispatch implements Response {
         TEXT
     }
 
-    private final GrpcHandler handler;
-    private final Mode mode;
-
-    public GrpcWebDispatch(GrpcHandler handler, Mode mode) {
-        this.handler = Objects.requireNonNull(handler, "handler");
-        this.mode = Objects.requireNonNull(mode, "mode");
-    }
-
-    public GrpcHandler handler() {
-        return handler;
-    }
-
-    public Mode mode() {
-        return mode;
+    public GrpcWebDispatch {
+        Objects.requireNonNull(handler, "handler");
+        Objects.requireNonNull(mode, "mode");
     }
 
     @Override

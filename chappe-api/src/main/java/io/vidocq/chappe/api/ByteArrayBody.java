@@ -47,24 +47,22 @@ final class ByteArrayBody implements Body {
 
     @Override
     public Flow.Publisher<ByteBuffer> asPublisher() {
-        return subscriber -> {
-            subscriber.onSubscribe(new Flow.Subscription() {
-                private boolean done;
+        return subscriber -> subscriber.onSubscribe(new Flow.Subscription() {
+            private boolean done;
 
-                @Override
-                public void request(long n) {
-                    if (!done && n > 0) {
-                        done = true;
-                        subscriber.onNext(ByteBuffer.wrap(bytes).asReadOnlyBuffer());
-                        subscriber.onComplete();
-                    }
-                }
-
-                @Override
-                public void cancel() {
+            @Override
+            public void request(long n) {
+                if (!done && n > 0) {
                     done = true;
+                    subscriber.onNext(ByteBuffer.wrap(bytes).asReadOnlyBuffer());
+                    subscriber.onComplete();
                 }
-            });
-        };
+            }
+
+            @Override
+            public void cancel() {
+                done = true;
+            }
+        });
     }
 }
