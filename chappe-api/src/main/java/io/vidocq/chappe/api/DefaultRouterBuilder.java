@@ -52,7 +52,7 @@ final class DefaultRouterBuilder implements Router.Builder {
     private static final String GRPC_WEB_TEXT_CONTENT_TYPE = "application/grpc-web-text";
 
     /**
-     * What {@link #matchPath} returns when the path does not match. A match without capture
+     * What {@link CompiledRouter#matchPath} returns when the path does not match. A match without capture
      * returns an ordinary empty map, so "no match" needs a value of its own: this map is empty
      * too, but its type tells it apart without an allocation per lookup.
      */
@@ -438,22 +438,103 @@ final class DefaultRouterBuilder implements Router.Builder {
         private static boolean isMatch(Map<String, String> params) {
             return !(params instanceof NoMatch);
         }
-    }
 
-    private static Response invoke(Route route, Request request, Map<String, String> params, List<Filter> globalFilters)
-            throws Exception {
-        var routedRequest = params.isEmpty() ? request : withPathParams(request, params);
-        Handler h = route.handler();
-        var routeFilters = route.filters();
-        for (int i = routeFilters.size() - 1; i >= 0; i--) {
-            h = routeFilters.get(i).apply(h);
-        }
-        for (int i = globalFilters.size() - 1; i >= 0; i--) {
-            if (!routeFilters.contains(globalFilters.get(i))) {
-                h = globalFilters.get(i).apply(h);
+        private static Response invoke(
+                Route route, Request request, Map<String, String> params, List<Filter> globalFilters) throws Exception {
+            var routedRequest = params.isEmpty() ? request : withPathParams(request, params);
+            Handler h = route.handler();
+            var routeFilters = route.filters();
+            for (int i = routeFilters.size() - 1; i >= 0; i--) {
+                h = routeFilters.get(i).apply(h);
             }
+            for (int i = globalFilters.size() - 1; i >= 0; i--) {
+                if (!routeFilters.contains(globalFilters.get(i))) {
+                    h = globalFilters.get(i).apply(h);
+                }
+            }
+            return h.handle(routedRequest);
         }
-        return h.handle(routedRequest);
+
+        /**
+         * Matches a pattern against a path. Returns the captured params (empty when the pattern has
+         * none), or {@code NO_MATCH} if the path does not match: test the result with {@link #isMatch}.
+         */
+        private static Map<String, String> matchPath(String pattern, String path) {
+            // Also normalize trailing slash on pattern
+            String normPattern = normalize(pattern);
+            if (normPattern.equals(path)) return Collections.emptyMap();
+            if (normPattern.endsWith("/*")) {
+                return matchWildcard(normPattern.substring(0, normPattern.length() - 2), path);
+            }
+            return matchSegments(normPattern.split("/", -1), path.split("/", -1));
+        }
+
+        private static Map<String, String> matchWildcard(String base, String path) {
+            return path.equals(base) || path.startsWith(base + "/") ? Collections.emptyMap() : NO_MATCH;
+        }
+
+        /** Segment by segment: a {param} segment captures the decoded path segment, any other must be equal. */
+        private static Map<String, String> matchSegments(String[] patternParts, String[] pathParts) {
+            if (patternParts.length != pathParts.length) return NO_MATCH;
+            Map<String, String> params = null;
+            for (int i = 0; i < patternParts.length; i++) {
+                var pp = patternParts[i];
+                if (pp.startsWith("{") && pp.endsWith("}")) {
+                    if (params == null) params = new LinkedHashMap<>();
+                    params.put(
+                            pp.substring(1, pp.length() - 1), URLDecoder.decode(pathParts[i], StandardCharsets.UTF_8));
+                } else if (!pp.equals(pathParts[i])) {
+                    return NO_MATCH;
+                }
+            }
+            return params != null ? Collections.unmodifiableMap(params) : Collections.emptyMap();
+        }
+
+        /**
+         * Creates a Request wrapper that adds pathParams. Forwards everything
+         * else (see {@link ForwardingRequest} for why hand-rolled wrappers are
+         * forbidden here).
+         */
+        private static Request withPathParams(Request delegate, Map<String, String> pathParams) {
+            return new ForwardingRequest() {
+                @Override
+                public Request delegate() {
+                    return delegate;
+                }
+
+                @Override
+                public Map<String, String> pathParams() {
+                    return pathParams;
+                }
+            };
+        }
+
+        private static Request withMount(Request delegate, String mountPrefix, String originalPath) {
+            String stripped = originalPath.substring(mountPrefix.length());
+            if (stripped.isEmpty()) stripped = "/";
+            final String mountedPath = stripped;
+            return new ForwardingRequest() {
+                @Override
+                public Request delegate() {
+                    return delegate;
+                }
+
+                @Override
+                public String path() {
+                    return mountedPath;
+                }
+
+                @Override
+                public String contextPath() {
+                    return mountPrefix;
+                }
+
+                @Override
+                public String pathInfo() {
+                    return mountedPath;
+                }
+            };
+        }
     }
 
     private static String normalize(String pattern) {
@@ -462,85 +543,5 @@ final class DefaultRouterBuilder implements Router.Builder {
 
     private static boolean isStaticPattern(String pattern) {
         return pattern.indexOf('{') < 0 && !pattern.endsWith("/*");
-    }
-
-    /**
-     * Matches a pattern against a path. Returns the captured params (empty when the pattern has
-     * none), or {@link #NO_MATCH} if the path does not match: test the result with {@code CompiledRouter.isMatch}.
-     */
-    private static Map<String, String> matchPath(String pattern, String path) {
-        // Also normalize trailing slash on pattern
-        String normPattern = normalize(pattern);
-        if (normPattern.equals(path)) return Collections.emptyMap();
-        if (normPattern.endsWith("/*")) {
-            return matchWildcard(normPattern.substring(0, normPattern.length() - 2), path);
-        }
-        return matchSegments(normPattern.split("/", -1), path.split("/", -1));
-    }
-
-    private static Map<String, String> matchWildcard(String base, String path) {
-        return path.equals(base) || path.startsWith(base + "/") ? Collections.emptyMap() : NO_MATCH;
-    }
-
-    /** Segment by segment: a {param} segment captures the decoded path segment, any other must be equal. */
-    private static Map<String, String> matchSegments(String[] patternParts, String[] pathParts) {
-        if (patternParts.length != pathParts.length) return NO_MATCH;
-        Map<String, String> params = null;
-        for (int i = 0; i < patternParts.length; i++) {
-            var pp = patternParts[i];
-            if (pp.startsWith("{") && pp.endsWith("}")) {
-                if (params == null) params = new LinkedHashMap<>();
-                params.put(pp.substring(1, pp.length() - 1), URLDecoder.decode(pathParts[i], StandardCharsets.UTF_8));
-            } else if (!pp.equals(pathParts[i])) {
-                return NO_MATCH;
-            }
-        }
-        return params != null ? Collections.unmodifiableMap(params) : Collections.emptyMap();
-    }
-
-    /**
-     * Creates a Request wrapper that adds pathParams. Forwards everything
-     * else (see {@link ForwardingRequest} for why hand-rolled wrappers are
-     * forbidden here).
-     */
-    private static Request withPathParams(Request delegate, Map<String, String> pathParams) {
-        return new ForwardingRequest() {
-            @Override
-            public Request delegate() {
-                return delegate;
-            }
-
-            @Override
-            public Map<String, String> pathParams() {
-                return pathParams;
-            }
-        };
-    }
-
-    private static Request withMount(Request delegate, String mountPrefix, String originalPath) {
-        String stripped = originalPath.substring(mountPrefix.length());
-        if (stripped.isEmpty()) stripped = "/";
-        final String mountedPath = stripped;
-        return new ForwardingRequest() {
-            @Override
-            public Request delegate() {
-                return delegate;
-            }
-
-            @Override
-            public String path() {
-                return mountedPath;
-            }
-
-            @Override
-            public String contextPath() {
-                return mountPrefix;
-            }
-
-            @Override
-            public String pathInfo() {
-                return mountedPath;
-            }
-        };
     }
 }

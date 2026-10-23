@@ -152,13 +152,13 @@ final class GrpcWebBufferedCall implements GrpcCall {
 
     @Override
     public void addHeader(String name, String value) {
-        // Initial headers are emitted by router through the Response builder;
-        // in buffered H1 we do not support addHeader after opening.
+        // The router emits the initial headers through the Response builder, and this buffered
+        // HTTP/1.1 fallback cannot add one once the response is open.
         if (initialEmissionDone) {
             throw new IllegalStateException("initial response already emitted");
         }
-        // Otherwise nothing happens: in this buffered fallback, the router has
-        // already fixed the response headers before the handler runs.
+        // Before that, nothing to do either: the router fixed the response headers before the
+        // handler ran.
     }
 
     @Override

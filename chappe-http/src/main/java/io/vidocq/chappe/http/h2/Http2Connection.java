@@ -756,7 +756,7 @@ public final class Http2Connection {
             }
 
             // gRPC switch: router returned a GrpcDispatch marker.
-            if (response instanceof io.vidocq.chappe.api.GrpcDispatch gd) {
+            if (response instanceof io.vidocq.chappe.api.GrpcDispatch(var grpcHandler)) {
                 // A call the router sent to a gRPC handler may stream its request for as long as it
                 // lives (client or bidi streaming), with pauses of any length: readTimeout does not
                 // bound it (ruling F-04). Decided by the route, never by a client header.
@@ -764,22 +764,22 @@ public final class Http2Connection {
                 // Nor does maxRequestSize: a stream of messages, each bounded by the gRPC layer (P-1).
                 stream.exemptFromBodyLimit();
                 var call = new io.vidocq.chappe.http.grpc.GrpcCallImpl(stream, request, this);
-                io.vidocq.chappe.http.grpc.GrpcCallImpl.run(call, gd.handler());
+                io.vidocq.chappe.http.grpc.GrpcCallImpl.run(call, grpcHandler);
                 completed = true;
                 return; // GrpcCallImpl handles initial headers, DATA, trailers, half-close
             }
 
             // gRPC-Web switch: trailers serialized inline as a 0x80 DATA frame.
-            if (response instanceof io.vidocq.chappe.api.GrpcWebDispatch gwd) {
+            if (response instanceof io.vidocq.chappe.api.GrpcWebDispatch(var grpcWebHandler, var mode)) {
                 // Binary mode frames each message as gRPC does: exempt as above (F-04, P-1). Text mode
                 // reads the whole base64 body at once before decoding it: it stays under readTimeout
                 // and maxRequestSize, as a plain body (CHAPPE-025).
-                if (gwd.mode() == io.vidocq.chappe.api.GrpcWebDispatch.Mode.BINARY) {
+                if (mode == io.vidocq.chappe.api.GrpcWebDispatch.Mode.BINARY) {
                     stream.bodyReadTimeout(null);
                     stream.exemptFromBodyLimit();
                 }
-                var call = new io.vidocq.chappe.http.grpc.GrpcWebCallImpl(stream, request, this, gwd.mode());
-                io.vidocq.chappe.http.grpc.GrpcWebCallImpl.run(call, gwd.handler());
+                var call = new io.vidocq.chappe.http.grpc.GrpcWebCallImpl(stream, request, this, mode);
+                io.vidocq.chappe.http.grpc.GrpcWebCallImpl.run(call, grpcWebHandler);
                 completed = true;
                 return;
             }
