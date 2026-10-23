@@ -26,6 +26,7 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.InetAddress;
 import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -346,7 +347,7 @@ class ResponseHeaderValidationTest {
 
     /** Sends one request with {@code Connection: close} and reads the raw response to EOF. */
     private String http11Exchange() throws IOException {
-        try (var socket = new Socket("127.0.0.1", server.port())) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), server.port())) {
             socket.setSoTimeout(5000);
             socket.getOutputStream()
                     .write("GET / HTTP/1.1\r\nHost: h\r\nConnection: close\r\n\r\n"
@@ -368,7 +369,19 @@ class ResponseHeaderValidationTest {
     private static final int FLAG_END_HEADERS = 0x4;
     private static final int FLAG_ACK = 0x1;
 
-    private record Frame(int type, int flags, int streamId, byte[] payload) {}
+    private static final class Frame {
+        final int type;
+        final int flags;
+        final int streamId;
+        final byte[] payload;
+
+        Frame(int type, int flags, int streamId, byte[] payload) {
+            this.type = type;
+            this.flags = flags;
+            this.streamId = streamId;
+            this.payload = payload;
+        }
+    }
 
     private static final class Exchange {
         final List<Map<String, String>> headers = new ArrayList<>();
@@ -377,7 +390,7 @@ class ResponseHeaderValidationTest {
 
     /** GET / on stream 1; returns every header block (decoded as ISO-8859-1) and the body. */
     private Exchange http2Exchange() throws IOException {
-        try (var socket = new Socket("127.0.0.1", server.port())) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), server.port())) {
             socket.setSoTimeout(5000);
             var in = new DataInputStream(socket.getInputStream());
             var out = new DataOutputStream(socket.getOutputStream());

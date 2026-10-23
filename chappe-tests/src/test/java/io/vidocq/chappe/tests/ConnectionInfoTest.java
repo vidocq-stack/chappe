@@ -23,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.URI;
@@ -37,6 +38,7 @@ import java.util.HexFormat;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 
 import javax.net.ssl.SSLContext;
 
@@ -58,6 +60,8 @@ import org.junit.jupiter.api.Test;
  * {@code null} addresses, and HTTP/2 (TLS or h2c) had no addresses at all.
  */
 class ConnectionInfoTest {
+
+    private static final Pattern PIPE = Pattern.compile("\\|");
 
     private static SSLContext serverContext;
     private static SSLContext clientContext;
@@ -128,7 +132,7 @@ class ConnectionInfoTest {
     }
 
     private void assertTls(String described) {
-        String[] parts = described.split("\\|");
+        String[] parts = PIPE.splitAsStream(described).toArray(String[]::new);
         assertEquals("true", parts[0], "isSecure: " + described);
         assertEquals("https", parts[1], "scheme: " + described);
         assertEquals("127.0.0.1", parts[2], "remote address: " + described);
@@ -221,7 +225,7 @@ class ConnectionInfoTest {
             var bodies = new HashSet<String>();
             for (int i = 0; i < 3; i++) bodies.add(send(client, "http", "/").body());
             assertEquals(1, bodies.size(), "one connection id for every request: " + bodies);
-            var parts = bodies.iterator().next().split("\\|");
+            var parts = PIPE.splitAsStream(bodies.iterator().next()).toArray(String[]::new);
             assertTrue(Long.parseLong(parts[0]) > 0, "positive: " + bodies);
             assertEquals("none", parts[1], "HTTP/1.1 has no stream id");
         }
@@ -234,7 +238,9 @@ class ConnectionInfoTest {
         for (int i = 0; i < 2; i++) {
             try (var client =
                     HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build()) {
-                seen.add(send(client, "http", "/").body().split("\\|")[0]);
+                seen.add(PIPE.splitAsStream(send(client, "http", "/").body())
+                        .findFirst()
+                        .orElseThrow());
             }
         }
         assertEquals(2, seen.size(), "distinct connection ids: " + seen);
@@ -249,7 +255,7 @@ class ConnectionInfoTest {
             for (int i = 0; i < 3; i++) {
                 var response = send(client, "https", "/");
                 assertEquals(HttpClient.Version.HTTP_2, response.version());
-                var parts = response.body().split("\\|");
+                var parts = PIPE.splitAsStream(response.body()).toArray(String[]::new);
                 connections.add(parts[0]);
                 streams.add(Integer.parseInt(parts[1]));
             }
@@ -264,7 +270,7 @@ class ConnectionInfoTest {
     void tlsHttp11ReportsAPositiveConnectionId() throws Exception {
         startTls(req -> Response.ok(ids(req)));
         try (var client = tlsClient(HttpClient.Version.HTTP_1_1)) {
-            var parts = send(client, "https", "/").body().split("\\|");
+            var parts = PIPE.splitAsStream(send(client, "https", "/").body()).toArray(String[]::new);
             assertTrue(Long.parseLong(parts[0]) > 0, "connection id");
             assertEquals("none", parts[1], "no stream id over HTTP/1.1");
         }
@@ -274,7 +280,8 @@ class ConnectionInfoTest {
     void aMountedHandlerSeesTheIds() throws Exception {
         startTls(Router.builder().mount("/app", req -> Response.ok(ids(req))).build());
         try (var client = tlsClient(HttpClient.Version.HTTP_2)) {
-            var parts = send(client, "https", "/app/x").body().split("\\|");
+            var parts =
+                    PIPE.splitAsStream(send(client, "https", "/app/x").body()).toArray(String[]::new);
             assertTrue(Long.parseLong(parts[0]) > 0, "connection id through the mount");
             assertTrue(Integer.parseInt(parts[1]) > 0, "stream id through the mount");
         }
@@ -308,7 +315,7 @@ class ConnectionInfoTest {
         server.start();
 
         try (var socket = new Socket()) {
-            socket.connect(new InetSocketAddress("127.0.0.1", server.port()), 5000);
+            socket.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), server.port()), 5000);
             var out = new DataOutputStream(socket.getOutputStream());
             out.write("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".getBytes(StandardCharsets.US_ASCII));
             writeFrame(out, 0x4, 0, 0, new byte[0]); // SETTINGS
@@ -319,9 +326,9 @@ class ConnectionInfoTest {
             assertEquals(
                     "false|http|127.0.0.1|" + server.port() + "|no-tls|no-tls|no-tls|HTTP_2",
                     described.substring(0, described.lastIndexOf("|", described.lastIndexOf("|") - 1)));
-            var idParts = described
-                    .substring(described.lastIndexOf("|", described.lastIndexOf("|") - 1) + 1)
-                    .split("\\|");
+            var idParts = PIPE.splitAsStream(
+                            described.substring(described.lastIndexOf("|", described.lastIndexOf("|") - 1) + 1))
+                    .toArray(String[]::new);
             assertTrue(Long.parseLong(idParts[0]) > 0, "connection id: " + described);
             assertEquals("1", idParts[1], "stream id: " + described);
         }

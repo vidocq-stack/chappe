@@ -23,6 +23,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
@@ -63,7 +64,41 @@ final class H2TestConnection implements AutoCloseable {
     private static final byte[] PREFACE = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".getBytes(StandardCharsets.US_ASCII);
 
     /** A frame from the server; {@code headers} is empty unless it is a HEADERS frame. */
-    record Frame(int type, int flags, int streamId, byte[] payload, Map<String, String> headers) {
+    static final class Frame {
+        private final int type;
+        private final int flags;
+        private final int streamId;
+        private final byte[] payload;
+        private final Map<String, String> headers;
+
+        Frame(int type, int flags, int streamId, byte[] payload, Map<String, String> headers) {
+            this.type = type;
+            this.flags = flags;
+            this.streamId = streamId;
+            this.payload = payload;
+            this.headers = headers;
+        }
+
+        int type() {
+            return type;
+        }
+
+        int flags() {
+            return flags;
+        }
+
+        int streamId() {
+            return streamId;
+        }
+
+        byte[] payload() {
+            return payload;
+        }
+
+        Map<String, String> headers() {
+            return headers;
+        }
+
         boolean endStream() {
             return (flags & FLAG_END_STREAM) != 0;
         }
@@ -105,7 +140,7 @@ final class H2TestConnection implements AutoCloseable {
     /** Connects, sends the preface and a SETTINGS frame with {@code settings} as its payload, and completes the exchange. */
     static H2TestConnection open(int port, byte[] settings) throws IOException {
         var socket = new Socket();
-        socket.connect(new InetSocketAddress("127.0.0.1", port), 5_000);
+        socket.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), port), 5_000);
         socket.setSoTimeout(5_000);
         var h2 = over(socket);
         h2.preface();

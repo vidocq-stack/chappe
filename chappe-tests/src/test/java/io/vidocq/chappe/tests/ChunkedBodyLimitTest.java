@@ -25,6 +25,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.Socket;
 import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
@@ -145,10 +146,10 @@ class ChunkedBodyLimitTest {
 
     @Test
     void aChunkSizeOverTheLimitFailsBeforeItsDataArrives() throws Exception {
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5_000);
             OutputStream out = socket.getOutputStream();
-            out.write(("POST /read HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n100000\r\n")
+            out.write("POST /read HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n100000\r\n"
                     .getBytes(StandardCharsets.US_ASCII));
             out.flush();
             // No chunk data is ever sent: the read must fail on the size line alone.
@@ -313,7 +314,7 @@ class ChunkedBodyLimitTest {
      * outcome with the connection still open: only a bound in the server can end the read.
      */
     private void sendWithoutEnd(String bodyStart) throws Exception {
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5_000);
             OutputStream out = socket.getOutputStream();
             out.write(("POST /read HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n" + bodyStart)
@@ -326,7 +327,7 @@ class ChunkedBodyLimitTest {
     }
 
     private String sendThenRead(String request) throws Exception {
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5_000);
             OutputStream out = socket.getOutputStream();
             out.write(request.getBytes(StandardCharsets.US_ASCII));

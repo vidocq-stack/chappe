@@ -23,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.net.InetAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CountDownLatch;
@@ -65,9 +66,8 @@ class DisconnectProbeTest {
                 .build();
         server.start();
 
-        try (var socket = new Socket("127.0.0.1", server.port())) {
-            socket.getOutputStream()
-                    .write(("GET /wait HTTP/1.1\r\nHost: x\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), server.port())) {
+            socket.getOutputStream().write("GET /wait HTTP/1.1\r\nHost: x\r\n\r\n".getBytes(StandardCharsets.US_ASCII));
             socket.getOutputStream().flush();
             assertTrue(handlerArmed.await(5, TimeUnit.SECONDS), "the handler should have armed the probe");
         } // client gone (FIN)
@@ -89,10 +89,10 @@ class DisconnectProbeTest {
                 .build();
         server.start();
 
-        try (var socket = new Socket("127.0.0.1", server.port())) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), server.port())) {
             socket.setSoTimeout(5000);
             socket.getOutputStream()
-                    .write(("GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+                    .write("GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"
                             .getBytes(StandardCharsets.US_ASCII));
             socket.getOutputStream().flush();
             String resp = new String(socket.getInputStream().readAllBytes(), StandardCharsets.US_ASCII);
@@ -116,10 +116,10 @@ class DisconnectProbeTest {
                 .build();
         server.start();
 
-        try (var socket = new Socket("127.0.0.1", server.port())) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), server.port())) {
             socket.setSoTimeout(5000);
             socket.getOutputStream()
-                    .write(("POST / HTTP/1.1\r\nHost: x\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello")
+                    .write("POST / HTTP/1.1\r\nHost: x\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello"
                             .getBytes(StandardCharsets.US_ASCII));
             socket.getOutputStream().flush();
             String resp = new String(socket.getInputStream().readAllBytes(), StandardCharsets.US_ASCII);
@@ -152,16 +152,16 @@ class DisconnectProbeTest {
                 .build();
         server.start();
 
-        try (var socket = new Socket("127.0.0.1", server.port())) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), server.port())) {
             socket.setSoTimeout(5000);
             var out = socket.getOutputStream();
-            out.write(("GET /wait HTTP/1.1\r\nHost: x\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+            out.write("GET /wait HTTP/1.1\r\nHost: x\r\n\r\n".getBytes(StandardCharsets.US_ASCII));
             out.flush();
             assertTrue(handlerArmed.await(5, TimeUnit.SECONDS), "the handler should have armed the probe");
             // Pipelined second request — the probe will read these bytes into
             // the parse buffer; they must be served after the first response.
-            out.write(("GET /second HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
-                    .getBytes(StandardCharsets.US_ASCII));
+            out.write(
+                    "GET /second HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n".getBytes(StandardCharsets.US_ASCII));
             out.flush();
 
             String all = new String(socket.getInputStream().readAllBytes(), StandardCharsets.US_ASCII);

@@ -28,6 +28,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InterruptedIOException;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
@@ -100,7 +101,7 @@ class ResponseBodyReleaseTest {
     void http11HeadResponseBodyIsReleased() throws Exception {
         var body = new ObservedBody();
         start(_ -> Response.builder().body(Body.of(body, -1)).build());
-        try (var socket = new Socket("127.0.0.1", server.port())) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), server.port())) {
             socket.setSoTimeout(5000);
             send(socket.getOutputStream(), "HEAD / HTTP/1.1\r\nHost: localhost\r\n\r\n");
             assertTrue(readHead(socket.getInputStream()).startsWith("HTTP/1.1 200"));
@@ -122,7 +123,7 @@ class ResponseBodyReleaseTest {
             for (int i = 0; i < 128; i++) builder.header("X-Filler-" + i, value);
             return builder.build();
         });
-        var socket = new Socket("127.0.0.1", server.port());
+        var socket = new Socket(InetAddress.getLoopbackAddress(), server.port());
         send(socket.getOutputStream(), "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
         // Reset only once the request was read: a reset discards unread request bytes.
         assertTrue(handling.await(5, TimeUnit.SECONDS));
@@ -141,7 +142,7 @@ class ResponseBodyReleaseTest {
             return Response.builder().body(Body.of(body, -1)).build();
         });
         try (var socket = new Socket()) {
-            socket.connect(new InetSocketAddress("127.0.0.1", server.port()), 5000);
+            socket.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), server.port()), 5000);
             socket.setSoTimeout(5000);
             var in = new DataInputStream(socket.getInputStream());
             var out = new DataOutputStream(socket.getOutputStream());
@@ -159,7 +160,7 @@ class ResponseBodyReleaseTest {
         var body = new ObservedBody();
         start(_ -> Response.builder().body(Body.of(body, -1)).build());
         try (var socket = new Socket()) {
-            socket.connect(new InetSocketAddress("127.0.0.1", server.port()), 5000);
+            socket.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), server.port()), 5000);
             socket.setSoTimeout(5000);
             var in = new DataInputStream(socket.getInputStream());
             var out = new DataOutputStream(socket.getOutputStream());

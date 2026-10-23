@@ -26,6 +26,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicReference;
@@ -129,7 +130,7 @@ class ResponseTrailersHttp11Test {
                 .add("nul", "a\0b")
                 .build()));
 
-        try (var socket = new Socket("127.0.0.1", server.port())) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), server.port())) {
             socket.setSoTimeout(5000);
             var out = socket.getOutputStream();
             var in = socket.getInputStream();
@@ -159,7 +160,7 @@ class ResponseTrailersHttp11Test {
                 .add("good", "kept\tvalue with obs-text é")
                 .build()));
 
-        try (var socket = new Socket("127.0.0.1", server.port())) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), server.port())) {
             socket.setSoTimeout(5000);
             var out = socket.getOutputStream();
             var in = socket.getInputStream();
@@ -199,7 +200,7 @@ class ResponseTrailersHttp11Test {
                 .trailer("myTrailer", "foo")
                 .build());
 
-        try (var socket = new Socket("127.0.0.1", server.port())) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), server.port())) {
             socket.setSoTimeout(5000);
             request(socket.getOutputStream(), "/", true);
             String raw = new String(socket.getInputStream().readAllBytes(), StandardCharsets.US_ASCII);
@@ -249,7 +250,7 @@ class ResponseTrailersHttp11Test {
     }
 
     private String exchange() throws IOException {
-        try (var socket = new Socket("127.0.0.1", server.port())) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), server.port())) {
             socket.setSoTimeout(5000);
             request(socket.getOutputStream(), "/", false);
             return readChunkedResponse(socket.getInputStream());

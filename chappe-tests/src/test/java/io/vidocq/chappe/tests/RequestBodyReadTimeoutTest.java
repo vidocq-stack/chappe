@@ -25,6 +25,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -77,7 +78,7 @@ class RequestBodyReadTimeoutTest {
     @Test
     void aStalledContentLengthBodyFailsTheReadAfterTheReadTimeout() throws Exception {
         int port = start(Duration.ofMillis(300));
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5_000);
             long sent = System.nanoTime();
             send(socket, "POST /read HTTP/1.1\r\nHost: localhost\r\nContent-Length: 10\r\n\r\nabc");
@@ -92,7 +93,7 @@ class RequestBodyReadTimeoutTest {
     @Test
     void aStalledChunkedBodyFailsTheReadAfterTheReadTimeout() throws Exception {
         int port = start(Duration.ofMillis(300));
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5_000);
             send(socket, "POST /read HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nabc");
 
@@ -103,7 +104,7 @@ class RequestBodyReadTimeoutTest {
     @Test
     void aSlowUploadWhoseGapsStayUnderTheReadTimeoutIsReadWhole() throws Exception {
         int port = start(Duration.ofSeconds(1));
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5_000);
             send(socket, "POST /read HTTP/1.1\r\nHost: localhost\r\nContent-Length: 5\r\n\r\n");
             for (char c : "hello".toCharArray()) {
@@ -118,7 +119,7 @@ class RequestBodyReadTimeoutTest {
     @Test
     void aStalledBodyTheHandlerIgnoredClosesTheConnectionAfterTheReadTimeout() throws Exception {
         int port = start(Duration.ofMillis(300));
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5_000);
             send(socket, "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 10\r\n\r\nabc");
 
@@ -132,7 +133,7 @@ class RequestBodyReadTimeoutTest {
     @Test
     void aZeroReadTimeoutDisablesTheBound() throws Exception {
         int port = start(Duration.ZERO);
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5_000);
             send(socket, "POST /read HTTP/1.1\r\nHost: localhost\r\nContent-Length: 10\r\n\r\nabc");
             Thread.sleep(500);
@@ -146,7 +147,7 @@ class RequestBodyReadTimeoutTest {
     @Test
     void aReadTimeoutOfForeverIsAccepted() throws Exception {
         int port = start(ChronoUnit.FOREVER.getDuration());
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5_000);
             send(socket, "POST /read HTTP/1.1\r\nHost: localhost\r\nContent-Length: 5\r\n\r\n");
             Thread.sleep(100); // the read waits: the deadline is armed
@@ -189,7 +190,7 @@ class RequestBodyReadTimeoutTest {
                         .build())
                 .build();
         server.start();
-        try (var socket = new Socket("127.0.0.1", server.port())) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), server.port())) {
             socket.setSoTimeout(5_000);
             send(socket, "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 10\r\n\r\n");
             Thread.sleep(200); // the body arrives apart from the head: it is not in the parse buffer
@@ -207,7 +208,7 @@ class RequestBodyReadTimeoutTest {
     @Test
     void aCompletedBodyReadLeavesNoTimerOnTheKeptConnection() throws Exception {
         int port = start(Duration.ofMillis(300));
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5_000);
             send(socket, "POST /read HTTP/1.1\r\nHost: localhost\r\nContent-Length: 5\r\n\r\nab");
             Thread.sleep(100); // the handler now waits for the rest: the read is timed
@@ -239,7 +240,7 @@ class RequestBodyReadTimeoutTest {
                 .build();
         server.start();
         String framed = ("1;" + "e".repeat(100) + "\r\nx\r\n").repeat(100);
-        try (var socket = new Socket("127.0.0.1", server.port())) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), server.port())) {
             socket.setSoTimeout(5_000);
             send(
                     socket,

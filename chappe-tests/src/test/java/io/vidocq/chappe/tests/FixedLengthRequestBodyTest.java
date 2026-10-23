@@ -22,6 +22,7 @@ package io.vidocq.chappe.tests;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
+import java.net.InetAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CompletableFuture;
@@ -59,9 +60,9 @@ class FixedLengthRequestBodyTest {
                 })
                 .build();
         server.start();
-        try (var socket = new Socket("127.0.0.1", server.port())) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), server.port())) {
             var out = socket.getOutputStream();
-            out.write(("POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: 10\r\n\r\nHello")
+            out.write("POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: 10\r\n\r\nHello"
                     .getBytes(StandardCharsets.US_ASCII));
             out.flush();
             socket.shutdownOutput();
@@ -89,9 +90,9 @@ class FixedLengthRequestBodyTest {
                 })
                 .build();
         server.start();
-        try (var socket = new Socket("127.0.0.1", server.port())) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), server.port())) {
             var out = socket.getOutputStream();
-            out.write(("POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: 10\r\n\r\nHel")
+            out.write("POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: 10\r\n\r\nHel"
                     .getBytes(StandardCharsets.US_ASCII));
             out.flush();
             socket.shutdownOutput();
@@ -115,10 +116,10 @@ class FixedLengthRequestBodyTest {
                 })
                 .build();
         server.start();
-        try (var socket = new Socket("127.0.0.1", server.port())) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), server.port())) {
             var out = socket.getOutputStream();
             // No body byte yet, then the end of input: a refill would fail the read.
-            out.write(("POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: 10\r\n\r\n")
+            out.write("POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: 10\r\n\r\n"
                     .getBytes(StandardCharsets.US_ASCII));
             out.flush();
             socket.shutdownOutput();

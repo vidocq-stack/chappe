@@ -29,6 +29,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.ByteBuffer;
@@ -92,7 +93,7 @@ class ConnectionUpgradeTest {
             // Head and the first upgraded bytes in ONE write: "hello\n" sits in the transport's
             // read buffer when the handler takes over.
             socket.getOutputStream()
-                    .write(("GET /u HTTP/1.1\r\nHost: h\r\nUpgrade: echo\r\nConnection: Upgrade\r\n\r\nhello\n")
+                    .write("GET /u HTTP/1.1\r\nHost: h\r\nUpgrade: echo\r\nConnection: Upgrade\r\n\r\nhello\n"
                             .getBytes(StandardCharsets.US_ASCII));
             socket.getOutputStream().flush();
 
@@ -178,7 +179,7 @@ class ConnectionUpgradeTest {
 
         try (var socket = connect()) {
             socket.getOutputStream()
-                    .write(("GET /u HTTP/1.1\r\nHost: h\r\nUpgrade: echo\r\nConnection: Upgrade\r\n\r\n")
+                    .write("GET /u HTTP/1.1\r\nHost: h\r\nUpgrade: echo\r\nConnection: Upgrade\r\n\r\n"
                             .getBytes(StandardCharsets.US_ASCII));
             InputStream in = socket.getInputStream();
             assertTrue(readHead(in).startsWith("HTTP/1.1 101 "));
@@ -216,7 +217,7 @@ class ConnectionUpgradeTest {
         try (var socket = connect()) {
             // "abc" lands in the transport's (pooled) read buffer together with the head.
             socket.getOutputStream()
-                    .write(("GET /u HTTP/1.1\r\nHost: h\r\nUpgrade: echo\r\nConnection: Upgrade\r\n\r\nabc")
+                    .write("GET /u HTTP/1.1\r\nHost: h\r\nUpgrade: echo\r\nConnection: Upgrade\r\n\r\nabc"
                             .getBytes(StandardCharsets.US_ASCII));
             InputStream in = socket.getInputStream();
             assertTrue(readHead(in).startsWith("HTTP/1.1 101 "));
@@ -253,7 +254,7 @@ class ConnectionUpgradeTest {
 
         try (var socket = connect()) {
             socket.getOutputStream()
-                    .write(("GET /u HTTP/1.1\r\nHost: h\r\nUpgrade: echo\r\nConnection: Upgrade\r\n\r\n")
+                    .write("GET /u HTTP/1.1\r\nHost: h\r\nUpgrade: echo\r\nConnection: Upgrade\r\n\r\n"
                             .getBytes(StandardCharsets.US_ASCII));
             assertTrue(readHead(socket.getInputStream()).startsWith("HTTP/1.1 101 "));
             // Stop reading: wait until the writer is stuck in a blocking write.
@@ -276,7 +277,7 @@ class ConnectionUpgradeTest {
 
         try (var socket = connect()) {
             socket.getOutputStream()
-                    .write(("GET /u HTTP/1.1\r\nHost: h\r\nUpgrade: echo\r\nConnection: Upgrade\r\n\r\n")
+                    .write("GET /u HTTP/1.1\r\nHost: h\r\nUpgrade: echo\r\nConnection: Upgrade\r\n\r\n"
                             .getBytes(StandardCharsets.US_ASCII));
             InputStream in = socket.getInputStream();
             assertTrue(readHead(in).startsWith("HTTP/1.1 101 "));
@@ -326,7 +327,7 @@ class ConnectionUpgradeTest {
 
         try (var socket = connect()) {
             socket.getOutputStream()
-                    .write(("GET /u HTTP/1.1\r\nHost: h\r\nUpgrade: echo\r\nConnection: Upgrade\r\n\r\n")
+                    .write("GET /u HTTP/1.1\r\nHost: h\r\nUpgrade: echo\r\nConnection: Upgrade\r\n\r\n"
                             .getBytes(StandardCharsets.US_ASCII));
             InputStream in = socket.getInputStream();
             assertTrue(readHead(in).startsWith("HTTP/1.1 101 "));
@@ -348,7 +349,7 @@ class ConnectionUpgradeTest {
 
         try (var socket = connect()) {
             socket.getOutputStream()
-                    .write(("GET /u HTTP/1.1\r\nHost: h\r\nUpgrade: echo\r\nConnection: Upgrade\r\n\r\n")
+                    .write("GET /u HTTP/1.1\r\nHost: h\r\nUpgrade: echo\r\nConnection: Upgrade\r\n\r\n"
                             .getBytes(StandardCharsets.US_ASCII));
             InputStream in = socket.getInputStream();
             assertTrue(readHead(in).startsWith("HTTP/1.1 101 "));
@@ -445,7 +446,7 @@ class ConnectionUpgradeTest {
 
     private Socket connect() throws IOException {
         var socket = new Socket();
-        socket.connect(new InetSocketAddress("127.0.0.1", port), 5000);
+        socket.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), port), 5000);
         socket.setSoTimeout(5000);
         socket.setTcpNoDelay(true);
         return socket;

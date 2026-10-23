@@ -23,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -67,7 +68,7 @@ class FilterHelpersTest {
         Response r = h.handle(req());
         assertEquals(io.vidocq.chappe.api.StatusCode.CREATED, r.status());
         try (var in = r.body().asInputStream()) {
-            assertEquals("payload", new String(in.readAllBytes()));
+            assertEquals("payload", new String(in.readAllBytes(), StandardCharsets.UTF_8));
         }
     }
 

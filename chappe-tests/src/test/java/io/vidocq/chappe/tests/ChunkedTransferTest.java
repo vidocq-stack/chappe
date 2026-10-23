@@ -24,8 +24,10 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 
 import io.vidocq.chappe.api.Response;
 import io.vidocq.chappe.api.Server;
@@ -60,7 +62,7 @@ class ChunkedTransferTest {
     @Test
     void chunkedRequestBody() throws IOException {
         // Send a request with Transfer-Encoding: chunked over a raw socket
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5000);
             var out = socket.getOutputStream();
             var in = socket.getInputStream();
@@ -96,7 +98,7 @@ class ChunkedTransferTest {
 
     @Test
     void emptyChunkedBody() throws IOException {
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5000);
             var out = socket.getOutputStream();
             var in = socket.getInputStream();
@@ -139,7 +141,7 @@ class ChunkedTransferTest {
                 .build();
         server.start();
         port = server.port();
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5000);
             var out = socket.getOutputStream();
             write(out, """
@@ -184,7 +186,7 @@ class ChunkedTransferTest {
                 .build();
         server.start();
         port = server.port();
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             var out = socket.getOutputStream();
             write(out, """
                     POST /echo HTTP/1.1\r
@@ -214,7 +216,7 @@ class ChunkedTransferTest {
                 int headerEnd = s.indexOf("\r\n\r\n") + 4;
                 String headers = s.substring(0, headerEnd);
                 // Extract Content-Length
-                var clIdx = headers.toLowerCase().indexOf("content-length: ");
+                var clIdx = headers.toLowerCase(Locale.ROOT).indexOf("content-length: ");
                 if (clIdx >= 0) {
                     var clEnd = headers.indexOf("\r\n", clIdx);
                     var clValue = headers.substring(clIdx + 16, clEnd).trim();

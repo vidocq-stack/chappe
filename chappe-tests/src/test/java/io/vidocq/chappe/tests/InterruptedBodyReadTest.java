@@ -24,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.InetAddress;
 import java.net.Socket;
 import java.net.SocketException;
 import java.nio.ByteBuffer;
@@ -98,7 +99,7 @@ class InterruptedBodyReadTest {
                 .build();
         server.start();
 
-        try (var socket = new Socket("127.0.0.1", server.port())) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), server.port())) {
             socket.setSoTimeout(5000);
             var out = socket.getOutputStream();
             out.write(("POST /up HTTP/1.1\r\nHost: localhost\r\nContent-Length: " + (PART1.length + 4) + "\r\n\r\n")

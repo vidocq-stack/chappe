@@ -24,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
@@ -77,7 +78,7 @@ class Http2PrefaceFragmentationTest {
     void fragmentedPrefaceIsStillDetectedAsHttp2() {
         assertTimeout(Duration.ofSeconds(10), () -> {
             try (var socket = new Socket()) {
-                socket.connect(new InetSocketAddress("127.0.0.1", port), 5000);
+                socket.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), port), 5000);
                 socket.setSoTimeout(5000);
                 var in = new DataInputStream(socket.getInputStream());
                 OutputStream out = socket.getOutputStream();

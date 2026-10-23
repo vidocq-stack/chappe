@@ -30,6 +30,7 @@ import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Pattern;
 
 import io.vidocq.chappe.api.Request;
 import io.vidocq.chappe.api.Response;
@@ -49,6 +50,8 @@ import org.junit.jupiter.api.Test;
  * decoder would fail or hand back another stream's values.
  */
 class Http2ConcurrentHeaderEncodingTest {
+
+    private static final Pattern SLASH = Pattern.compile("/");
 
     private static final int STREAMS = 64;
     private static final int ROUNDS = 30;
@@ -74,7 +77,7 @@ class Http2ConcurrentHeaderEncodingTest {
      * each round). One stream in three has no body, one a body, one a body and a trailer.
      */
     private Response handle(Request request) throws InterruptedException {
-        String[] parts = request.path().split("/");
+        String[] parts = SLASH.splitAsStream(request.path()).toArray(String[]::new);
         String round = parts[2];
         int id = Integer.parseInt(parts[3]);
         CountDownLatch latch = barrier.get();

@@ -24,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.EOFException;
 import java.io.IOException;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
@@ -101,7 +102,7 @@ class Http2WriteTimeoutTest {
         startServer(null, WRITE_TIMEOUT);
         try (var socket = new Socket()) {
             socket.setReceiveBufferSize(2048);
-            socket.connect(new InetSocketAddress("127.0.0.1", server.port()), 5_000);
+            socket.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), server.port()), 5_000);
             assertCutAfterStall(socket);
         }
         assertSmallResponse(plainSocket());
@@ -114,12 +115,12 @@ class Http2WriteTimeoutTest {
         var socket = (SSLSocket) clientContext.getSocketFactory().createSocket();
         try (socket) {
             socket.setReceiveBufferSize(2048);
-            socket.connect(new InetSocketAddress("127.0.0.1", server.port()), 5_000);
+            socket.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), server.port()), 5_000);
             handshakeH2(socket);
             assertCutAfterStall(socket);
         }
         var second = (SSLSocket) clientContext.getSocketFactory().createSocket();
-        second.connect(new InetSocketAddress("127.0.0.1", server.port()), 5_000);
+        second.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), server.port()), 5_000);
         handshakeH2(second);
         assertSmallResponse(second);
     }
@@ -133,7 +134,7 @@ class Http2WriteTimeoutTest {
         startServer(null, SLOW_READER_WRITE_TIMEOUT);
         // Default socket buffers: they fill well before 4 MiB, so the flushes do wait on this reader.
         try (var socket = new Socket()) {
-            socket.connect(new InetSocketAddress("127.0.0.1", server.port()), 5_000);
+            socket.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), server.port()), 5_000);
             socket.setSoTimeout(5_000);
             var h2 = H2TestConnection.over(socket);
             requestWithOpenWindows(h2, "/medium");
@@ -191,7 +192,7 @@ class Http2WriteTimeoutTest {
     void aZeroWriteTimeoutIsNoBound() throws Exception {
         startServer(null, Duration.ZERO);
         try (var socket = new Socket()) {
-            socket.connect(new InetSocketAddress("127.0.0.1", server.port()), 5_000);
+            socket.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), server.port()), 5_000);
             socket.setSoTimeout(5_000);
             var h2 = H2TestConnection.over(socket);
             requestWithOpenWindows(h2, "/mib");
@@ -247,7 +248,7 @@ class Http2WriteTimeoutTest {
 
     private Socket plainSocket() throws IOException {
         var socket = new Socket();
-        socket.connect(new InetSocketAddress("127.0.0.1", server.port()), 5_000);
+        socket.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), server.port()), 5_000);
         return socket;
     }
 

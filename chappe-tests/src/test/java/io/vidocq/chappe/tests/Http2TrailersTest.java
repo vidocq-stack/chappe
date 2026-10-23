@@ -25,6 +25,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.ByteBuffer;
@@ -81,7 +82,7 @@ class Http2TrailersTest {
                 .build());
 
         try (var socket = new Socket()) {
-            socket.connect(new InetSocketAddress("127.0.0.1", port), 5000);
+            socket.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), port), 5000);
             socket.setSoTimeout(5000);
             var in = new DataInputStream(socket.getInputStream());
             var out = new DataOutputStream(socket.getOutputStream());
@@ -131,7 +132,7 @@ class Http2TrailersTest {
         });
 
         try (var socket = new Socket()) {
-            socket.connect(new InetSocketAddress("127.0.0.1", port), 5000);
+            socket.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), port), 5000);
             socket.setSoTimeout(5000);
             var in = new DataInputStream(socket.getInputStream());
             var out = new DataOutputStream(socket.getOutputStream());
@@ -200,7 +201,19 @@ class Http2TrailersTest {
         out.write(payload);
     }
 
-    private record Frame(int length, int type, int flags, int streamId, byte[] payload) {}
+    private static final class Frame {
+        final int type;
+        final int flags;
+        final int streamId;
+        final byte[] payload;
+
+        Frame(int type, int flags, int streamId, byte[] payload) {
+            this.type = type;
+            this.flags = flags;
+            this.streamId = streamId;
+            this.payload = payload;
+        }
+    }
 
     private static Frame readFrame(DataInputStream in) throws IOException {
         int b0 = in.readUnsignedByte();
@@ -211,7 +224,7 @@ class Http2TrailersTest {
         int flags = in.readUnsignedByte();
         int streamId = in.readInt() & 0x7FFFFFFF;
         byte[] payload = in.readNBytes(len);
-        return new Frame(len, type, flags, streamId, payload);
+        return new Frame(type, flags, streamId, payload);
     }
 
     /** Encodes trailers without pseudo-headers. */

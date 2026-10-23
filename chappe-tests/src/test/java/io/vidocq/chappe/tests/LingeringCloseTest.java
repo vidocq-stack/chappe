@@ -25,6 +25,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 
@@ -111,10 +112,10 @@ class LingeringCloseTest {
      */
     @Test
     void anUploaderStillSendingAfterAFailedBodyReadGetsTheResponseAndAnOrderlyClose() throws Exception {
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5_000);
             OutputStream out = socket.getOutputStream();
-            out.write(("POST /read HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\nZ0\r\n\r\n")
+            out.write("POST /read HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\nZ0\r\n\r\n"
                     .getBytes(StandardCharsets.US_ASCII));
             out.flush();
             var sender = Thread.ofVirtual().start(() -> {
@@ -180,7 +181,7 @@ class LingeringCloseTest {
     /** Lingering is bounded: a client that never stops sending is cut off, not served forever. */
     @Test
     void lingeringIsBoundedForAClientThatKeepsSending() throws Exception {
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(10_000);
             OutputStream out = socket.getOutputStream();
             out.write(("GET / HTTP/1.1\r\nHost: localhost\r\nX-Oversized: " + "X".repeat(16_384) + "\r\n")
@@ -212,7 +213,7 @@ class LingeringCloseTest {
      * then reads to EOF. A reset while reading is a failure: the response was lost.
      */
     private String sendThenRead(String request) throws Exception {
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5_000);
             OutputStream out = socket.getOutputStream();
             out.write(request.getBytes(StandardCharsets.US_ASCII));

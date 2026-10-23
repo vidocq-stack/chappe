@@ -23,6 +23,7 @@ import static io.vidocq.chappe.tests.H2TestConnection.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.ByteBuffer;
@@ -134,7 +135,7 @@ class Http2HeaderBlockLimitTest {
     /** The SETTINGS_MAX_HEADER_LIST_SIZE in the first SETTINGS frame the server sends, or -1. */
     private static int advertisedMaxHeaderListSize(int port) throws IOException {
         var socket = new Socket();
-        socket.connect(new InetSocketAddress("127.0.0.1", port), 5_000);
+        socket.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), port), 5_000);
         socket.setSoTimeout(5_000);
         try (var h2 = H2TestConnection.over(socket)) {
             h2.preface();

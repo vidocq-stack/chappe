@@ -24,12 +24,14 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 
 import io.vidocq.chappe.api.Response;
 import io.vidocq.chappe.api.Server;
@@ -75,7 +77,7 @@ class KeepAliveTest {
     @Test
     void connectionCloseHeaderViaRawSocket() throws IOException {
         // HttpClient forbids the Connection header — use a raw socket
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5000);
             var out = socket.getOutputStream();
             var in = socket.getInputStream();
@@ -90,7 +92,8 @@ class KeepAliveTest {
             assertTrue(response.contains("200"), "Should be 200 OK: " + response);
             assertTrue(response.contains("ok"), "Body should contain 'ok': " + response);
             assertTrue(
-                    response.toLowerCase().contains("connection: close"), "Should have Connection: close: " + response);
+                    response.toLowerCase(Locale.ROOT).contains("connection: close"),
+                    "Should have Connection: close: " + response);
         }
     }
 

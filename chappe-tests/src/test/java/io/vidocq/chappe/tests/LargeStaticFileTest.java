@@ -26,6 +26,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
@@ -34,6 +36,7 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.SplittableRandom;
+import java.util.regex.Pattern;
 
 import io.vidocq.chappe.api.Server;
 import io.vidocq.chappe.api.StaticFileHandler;
@@ -51,6 +54,8 @@ import org.junit.jupiter.api.io.TempDir;
  * makes the browser hang indefinitely.
  */
 class LargeStaticFileTest {
+
+    private static final Pattern CRLF = Pattern.compile("\r\n");
 
     private static final int FILE_SIZE = 8 * 1024 * 1024; // 8 MiB > typical SO_SNDBUF
     private static final int CLIENT_RCVBUF = 16 * 1024;
@@ -82,7 +87,7 @@ class LargeStaticFileTest {
     private static byte[] drainSlowly(int port, String path, long expectedBodyLen) throws IOException {
         try (var socket = new Socket()) {
             socket.setReceiveBufferSize(CLIENT_RCVBUF);
-            socket.connect(new java.net.InetSocketAddress("127.0.0.1", port), 5000);
+            socket.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), port), 5000);
             socket.setSoTimeout(30_000);
 
             OutputStream out = socket.getOutputStream();
@@ -143,7 +148,7 @@ class LargeStaticFileTest {
     }
 
     private static long parseContentLength(String headers) {
-        for (String line : headers.split("\r\n")) {
+        for (String line : CRLF.splitAsStream(headers).toList()) {
             int colon = line.indexOf(':');
             if (colon < 0) continue;
             if (line.substring(0, colon).equalsIgnoreCase("Content-Length")) {

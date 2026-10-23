@@ -27,6 +27,7 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InterruptedIOException;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.ByteBuffer;
@@ -245,7 +246,7 @@ class Http2StreamAbortTest {
 
     private Socket connect() throws IOException {
         var socket = new Socket();
-        socket.connect(new InetSocketAddress("127.0.0.1", server.port()), 5000);
+        socket.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), server.port()), 5000);
         socket.setSoTimeout(5000);
         return socket;
     }
@@ -271,7 +272,19 @@ class Http2StreamAbortTest {
         out.write(payload);
     }
 
-    private record Frame(int type, int flags, int streamId, byte[] payload) {}
+    private static final class Frame {
+        final int type;
+        final int flags;
+        final int streamId;
+        final byte[] payload;
+
+        Frame(int type, int flags, int streamId, byte[] payload) {
+            this.type = type;
+            this.flags = flags;
+            this.streamId = streamId;
+            this.payload = payload;
+        }
+    }
 
     private static Frame readFrame(DataInputStream in) throws IOException {
         int len = (in.readUnsignedByte() << 16) | (in.readUnsignedByte() << 8) | in.readUnsignedByte();

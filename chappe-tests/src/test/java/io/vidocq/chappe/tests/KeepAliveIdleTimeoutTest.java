@@ -24,9 +24,11 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Locale;
 
 import io.vidocq.chappe.api.Response;
 import io.vidocq.chappe.api.Server;
@@ -69,7 +71,7 @@ class KeepAliveIdleTimeoutTest {
     @Test
     void idleKeepAliveConnectionIsClosed() throws IOException {
         int port = startWithIdleTimeout(Duration.ofMillis(500));
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5000);
             var out = socket.getOutputStream();
             var in = socket.getInputStream();
@@ -92,7 +94,7 @@ class KeepAliveIdleTimeoutTest {
     @Test
     void neverSendingClientIsClosed() throws IOException {
         int port = startWithIdleTimeout(Duration.ofMillis(500));
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5000);
             int eof = socket.getInputStream().read();
             assertEquals(-1, eof, "Server should close a connection that never sends a request");
@@ -103,7 +105,7 @@ class KeepAliveIdleTimeoutTest {
     @Test
     void activeKeepAliveSurvives() throws IOException, InterruptedException {
         int port = startWithIdleTimeout(Duration.ofMillis(800));
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5000);
             var out = socket.getOutputStream();
             var in = socket.getInputStream();
@@ -129,7 +131,7 @@ class KeepAliveIdleTimeoutTest {
             int headerEnd = sb.indexOf("\r\n\r\n");
             if (headerEnd >= 0) {
                 String headers = sb.substring(0, headerEnd + 4);
-                var clIdx = headers.toLowerCase().indexOf("content-length: ");
+                var clIdx = headers.toLowerCase(Locale.ROOT).indexOf("content-length: ");
                 int contentLength = 0;
                 if (clIdx >= 0) {
                     var clEnd = headers.indexOf("\r\n", clIdx);

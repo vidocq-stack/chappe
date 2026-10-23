@@ -24,8 +24,10 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 
 import io.vidocq.chappe.api.Response;
 import io.vidocq.chappe.api.Server;
@@ -72,7 +74,7 @@ class ChunkedTrailersTest {
     /** Exact TCK TrailerTest shape: Trailer header, two trailer fields, keep-alive. */
     @Test
     void tckTrailerRequest_isAnsweredAndTrailersExposed() throws IOException {
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5000); // the real TCK client has NO timeout — a hang here froze the suite
             var out = socket.getOutputStream();
             var in = socket.getInputStream();
@@ -104,7 +106,7 @@ class ChunkedTrailersTest {
     /** Trailer values may carry optional whitespace after the colon (RFC 9110 field syntax). */
     @Test
     void trailerValueWhitespaceIsTrimmed() throws IOException {
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5000);
             var out = socket.getOutputStream();
             var in = socket.getInputStream();
@@ -121,7 +123,7 @@ class ChunkedTrailersTest {
     /** No trailers after the terminal chunk → trailers() stays empty, request still answered. */
     @Test
     void chunkedWithoutTrailers_trailersEmpty() throws IOException {
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5000);
             var out = socket.getOutputStream();
             var in = socket.getInputStream();
@@ -142,7 +144,7 @@ class ChunkedTrailersTest {
      */
     @Test
     void keepAlive_secondRequestAfterTrailers() throws IOException {
-        try (var socket = new Socket("127.0.0.1", port)) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
             socket.setSoTimeout(5000);
             var out = socket.getOutputStream();
             var in = socket.getInputStream();
@@ -188,7 +190,7 @@ class ChunkedTrailersTest {
                 .build();
         var mounted = Server.builder().port(0).handler(router).build();
         mounted.start();
-        try (var socket = new Socket("127.0.0.1", mounted.port())) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), mounted.port())) {
             socket.setSoTimeout(5000);
             var out = socket.getOutputStream();
             var in = socket.getInputStream();
@@ -210,7 +212,7 @@ class ChunkedTrailersTest {
         var ignoring =
                 Server.builder().port(0).handler(req -> Response.ok("ignored")).build();
         ignoring.start();
-        try (var socket = new Socket("127.0.0.1", ignoring.port())) {
+        try (var socket = new Socket(InetAddress.getLoopbackAddress(), ignoring.port())) {
             socket.setSoTimeout(5000);
             var out = socket.getOutputStream();
             var in = socket.getInputStream();
@@ -244,7 +246,7 @@ class ChunkedTrailersTest {
             int headerEnd = sb.indexOf("\r\n\r\n");
             if (headerEnd >= 0) {
                 String headers = sb.substring(0, headerEnd + 4);
-                var clIdx = headers.toLowerCase().indexOf("content-length: ");
+                var clIdx = headers.toLowerCase(Locale.ROOT).indexOf("content-length: ");
                 int contentLength = 0;
                 if (clIdx >= 0) {
                     var clEnd = headers.indexOf("\r\n", clIdx);

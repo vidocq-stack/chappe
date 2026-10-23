@@ -26,6 +26,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -230,8 +231,8 @@ class ExtensionSpiTest {
                 .status(StatusCode.OK)
                 .body(Body.ofOutputStream(out -> {
                     try {
-                        out.write("streaming ".getBytes());
-                        out.write("body".getBytes());
+                        out.write("streaming ".getBytes(StandardCharsets.UTF_8));
+                        out.write("body".getBytes(StandardCharsets.UTF_8));
                     } catch (IOException _) {
                         // a failed write truncates the body: the assertion on the response reports it
                     }
