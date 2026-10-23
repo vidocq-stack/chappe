@@ -68,12 +68,24 @@ public final class HttpConnection {
     private volatile Runnable disconnectCallback;
     private volatile Thread probeThread;
 
+    /**
+     * The channels a connection reads from, writes to and closes: the socket itself in clear text, the
+     * {@link SslHandler} over TLS.
+     */
+    public record Channels(ReadableByteChannel read, WritableByteChannel write, Closeable closeable) {
+
+        /** The three roles played by one channel. */
+        public static <C extends ReadableByteChannel & WritableByteChannel> Channels of(C channel) {
+            return new Channels(channel, channel, channel);
+        }
+    }
+
     public HttpConnection(SocketChannel channel, Handler handler, ServerConfig config) {
-        this(channel, channel, channel, ConnectionInfo.of(channel, null), handler, config, null, null);
+        this(Channels.of(channel), ConnectionInfo.of(channel, null), handler, config, null, null);
     }
 
     public HttpConnection(SocketChannel channel, Handler handler, ServerConfig config, ByteBuffer prefilledBuffer) {
-        this(channel, channel, channel, ConnectionInfo.of(channel, null), handler, config, prefilledBuffer, null);
+        this(Channels.of(channel), ConnectionInfo.of(channel, null), handler, config, prefilledBuffer, null);
     }
 
     /**
@@ -81,17 +93,15 @@ public final class HttpConnection {
      * metadata every request of this connection reports.
      */
     public HttpConnection(
-            ReadableByteChannel readChannel,
-            WritableByteChannel writeChannel,
-            Closeable closeable,
+            Channels channels,
             ConnectionInfo connectionInfo,
             Handler handler,
             ServerConfig config,
             ByteBuffer prefilledBuffer,
             ByteBuffer writeBuffer) {
-        this.readChannel = readChannel;
-        this.writeChannel = writeChannel;
-        this.closeable = closeable;
+        this.readChannel = channels.read();
+        this.writeChannel = channels.write();
+        this.closeable = channels.closeable();
         this.handler = handler;
         this.config = config;
         this.bodyChannel = TimedReadChannel.of(readChannel, closeable, config.readTimeout());

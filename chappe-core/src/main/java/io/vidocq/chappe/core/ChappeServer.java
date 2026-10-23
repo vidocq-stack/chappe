@@ -466,9 +466,7 @@ final class ChappeServer implements Server {
             }
             readBuffer.flip();
             new HttpConnection(
-                            sslHandler,
-                            sslHandler,
-                            sslHandler,
+                            HttpConnection.Channels.of(sslHandler),
                             connectionInfo,
                             handler,
                             config,
@@ -514,9 +512,7 @@ final class ChappeServer implements Server {
             new Http2Connection(channel, handler, config, readBuffer).run();
         } else {
             new HttpConnection(
-                            channel,
-                            channel,
-                            channel,
+                            HttpConnection.Channels.of(channel),
                             ConnectionInfo.of(channel, null),
                             handler,
                             config,
