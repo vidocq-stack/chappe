@@ -61,43 +61,8 @@ public final class WebSocketFrameReader {
         boolean masked = (b1 & 0x80) != 0;
         int len7 = b1 & 0x7F;
 
-        if (rsv != 0) {
-            throw new WebSocketProtocolException(
-                    CloseCodes.PROTOCOL_ERROR, "RSV bits set without negotiated extension");
-        }
-        if (!masked) {
-            throw new WebSocketProtocolException(
-                    CloseCodes.PROTOCOL_ERROR, "Client frame must be masked (RFC 6455 §5.1)");
-        }
-        if (!isKnownOpcode(opcode)) {
-            throw new WebSocketProtocolException(
-                    CloseCodes.PROTOCOL_ERROR, "Unknown opcode: 0x" + Integer.toHexString(opcode));
-        }
-        boolean isControl = (opcode & 0x8) != 0;
-        if (isControl && !fin) {
-            throw new WebSocketProtocolException(CloseCodes.PROTOCOL_ERROR, "Control frame must not be fragmented");
-        }
-        if (isControl && len7 > 125) {
-            throw new WebSocketProtocolException(CloseCodes.PROTOCOL_ERROR, "Control frame payload > 125");
-        }
-
-        long payloadLen;
-        if (len7 < 126) {
-            payloadLen = len7;
-        } else if (len7 == 126) {
-            ensure(src, channel, 2);
-            payloadLen = ((src.get() & 0xFFL) << 8) | (src.get() & 0xFFL);
-        } else {
-            ensure(src, channel, 8);
-            payloadLen = src.getLong();
-            if (payloadLen < 0) {
-                throw new WebSocketProtocolException(CloseCodes.PROTOCOL_ERROR, "Negative 64-bit payload length");
-            }
-        }
-        if (payloadLen > maxPayloadSize) {
-            throw new WebSocketProtocolException(
-                    CloseCodes.MESSAGE_TOO_BIG, "Payload " + payloadLen + " > max " + maxPayloadSize);
-        }
+        checkHeader(fin, rsv, opcode, masked, len7);
+        long payloadLen = readPayloadLength(len7, src, channel);
 
         ensure(src, channel, 4);
         int m0 = src.get() & 0xFF;
@@ -130,6 +95,52 @@ public final class WebSocketFrameReader {
         }
 
         return new WebSocketFrame(fin, opcode, ByteBuffer.wrap(payload));
+    }
+
+    /** Checks the first two bytes of a client frame against RFC 6455 §5.2, §5.1 and §5.5. */
+    private static void checkHeader(boolean fin, int rsv, int opcode, boolean masked, int len7)
+            throws WebSocketProtocolException {
+        if (rsv != 0) {
+            throw new WebSocketProtocolException(
+                    CloseCodes.PROTOCOL_ERROR, "RSV bits set without negotiated extension");
+        }
+        if (!masked) {
+            throw new WebSocketProtocolException(
+                    CloseCodes.PROTOCOL_ERROR, "Client frame must be masked (RFC 6455 §5.1)");
+        }
+        if (!isKnownOpcode(opcode)) {
+            throw new WebSocketProtocolException(
+                    CloseCodes.PROTOCOL_ERROR, "Unknown opcode: 0x" + Integer.toHexString(opcode));
+        }
+        boolean isControl = (opcode & 0x8) != 0;
+        if (isControl && !fin) {
+            throw new WebSocketProtocolException(CloseCodes.PROTOCOL_ERROR, "Control frame must not be fragmented");
+        }
+        if (isControl && len7 > 125) {
+            throw new WebSocketProtocolException(CloseCodes.PROTOCOL_ERROR, "Control frame payload > 125");
+        }
+    }
+
+    /** The payload length: {@code len7} itself, or the 16-bit or 64-bit extended length that follows it. */
+    private long readPayloadLength(int len7, ByteBuffer src, ReadableByteChannel channel) throws IOException {
+        long payloadLen;
+        if (len7 < 126) {
+            payloadLen = len7;
+        } else if (len7 == 126) {
+            ensure(src, channel, 2);
+            payloadLen = ((src.get() & 0xFFL) << 8) | (src.get() & 0xFFL);
+        } else {
+            ensure(src, channel, 8);
+            payloadLen = src.getLong();
+            if (payloadLen < 0) {
+                throw new WebSocketProtocolException(CloseCodes.PROTOCOL_ERROR, "Negative 64-bit payload length");
+            }
+        }
+        if (payloadLen > maxPayloadSize) {
+            throw new WebSocketProtocolException(
+                    CloseCodes.MESSAGE_TOO_BIG, "Payload " + payloadLen + " > max " + maxPayloadSize);
+        }
+        return payloadLen;
     }
 
     private static boolean isKnownOpcode(int opcode) {

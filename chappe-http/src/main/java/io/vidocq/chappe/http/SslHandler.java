@@ -93,6 +93,12 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
      */
     private final Duration closeWriteTimeout;
 
+    /**
+     * Whether the handshake's next unwrap needs bytes from the socket ({@code BUFFER_UNDERFLOW}); used
+     * by the handshaking thread only.
+     */
+    private boolean handshakeNeedsBytes;
+
     /** The session of the completed handshake; {@code null} until {@link #doHandshake()} returns. */
     private volatile TlsInfo tlsInfo;
 
@@ -291,76 +297,94 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
     private void runHandshake() throws IOException {
         engine.beginHandshake();
         HandshakeStatus hs = engine.getHandshakeStatus();
-        boolean needsBytes = true;
+        handshakeNeedsBytes = true;
 
         while (hs != HandshakeStatus.FINISHED && hs != HandshakeStatus.NOT_HANDSHAKING) {
-            switch (hs) {
-                case NEED_UNWRAP -> {
-                    // Unwrap what is already buffered before touching the socket: the loop below stops when
-                    // the engine asks for a task or a wrap, possibly with whole records left (a TLS 1.2 client
-                    // sends Certificate..CertificateVerify, ChangeCipherSpec and Finished in one write, then
-                    // waits for the server's Finished). Reading first would block on a client that has sent
-                    // everything. Read only when nothing is buffered or the engine needs more bytes
-                    // (BUFFER_UNDERFLOW), as readInternal does (CHAPPE-004, chappe#24).
-                    if (needsBytes || netInBuffer.position() == 0) {
-                        int bytesRead = channel.read(netInBuffer);
-                        if (bytesRead < 0) {
-                            throw new IOException("Channel closed during TLS handshake");
-                        }
-                    }
-                    netInBuffer.flip();
-
-                    SSLEngineResult result;
-                    do {
-                        appInBuffer.clear();
-                        result = engine.unwrap(netInBuffer, appInBuffer);
-                        appInBuffer.flip();
-
-                        if (result.getStatus() == Status.BUFFER_UNDERFLOW) break;
-                        if (result.getStatus() == Status.BUFFER_OVERFLOW) {
-                            throw new IOException("appInBuffer overflow during handshake");
-                        }
-                        if (result.getStatus() == Status.CLOSED) {
-                            throw new IOException("SSLEngine closed during handshake");
-                        }
-                    } while (netInBuffer.hasRemaining()
-                            && result.getStatus() == Status.OK
-                            && result.getHandshakeStatus() == HandshakeStatus.NEED_UNWRAP);
-
-                    needsBytes = result.getStatus() == Status.BUFFER_UNDERFLOW;
-                    netInBuffer.compact();
-                    hs = result.getHandshakeStatus();
-                }
-                case NEED_WRAP -> {
-                    netOutBuffer.clear();
-                    SSLEngineResult result = engine.wrap(EMPTY, netOutBuffer);
-                    netOutBuffer.flip();
-                    if (result.getStatus() == Status.BUFFER_OVERFLOW) {
-                        throw new IOException("netOutBuffer overflow during handshake");
-                    }
-                    while (netOutBuffer.hasRemaining()) {
-                        channel.write(netOutBuffer);
-                    }
-                    hs = result.getHandshakeStatus();
-                }
-                case NEED_TASK -> {
-                    Runnable task;
-                    while ((task = engine.getDelegatedTask()) != null) {
-                        task.run();
-                    }
-                    hs = engine.getHandshakeStatus();
-                }
-                case NEED_UNWRAP_AGAIN -> {
-                    netInBuffer.flip();
-                    appInBuffer.clear();
-                    SSLEngineResult result = engine.unwrap(netInBuffer, appInBuffer);
-                    netInBuffer.compact();
-                    appInBuffer.flip();
-                    hs = result.getHandshakeStatus();
-                }
+            hs = switch (hs) {
+                case NEED_UNWRAP -> handshakeUnwrap();
+                case NEED_WRAP -> handshakeWrap();
+                case NEED_TASK -> runDelegatedTasks();
+                case NEED_UNWRAP_AGAIN -> handshakeUnwrapAgain();
                 default -> throw new IOException("Unexpected handshake status: " + hs);
+            };
+        }
+    }
+
+    /** Handshake step {@code NEED_UNWRAP}; returns the next handshake status. */
+    private HandshakeStatus handshakeUnwrap() throws IOException {
+        // Unwrap what is already buffered before touching the socket: the loop below stops when
+        // the engine asks for a task or a wrap, possibly with whole records left (a TLS 1.2 client
+        // sends Certificate..CertificateVerify, ChangeCipherSpec and Finished in one write, then
+        // waits for the server's Finished). Reading first would block on a client that has sent
+        // everything. Read only when nothing is buffered or the engine needs more bytes
+        // (BUFFER_UNDERFLOW), as readInternal does (CHAPPE-004, chappe#24).
+        if (handshakeNeedsBytes || netInBuffer.position() == 0) {
+            int bytesRead = channel.read(netInBuffer);
+            if (bytesRead < 0) {
+                throw new IOException("Channel closed during TLS handshake");
             }
         }
+        netInBuffer.flip();
+        SSLEngineResult result = unwrapHandshakeRecords();
+        handshakeNeedsBytes = result.getStatus() == Status.BUFFER_UNDERFLOW;
+        netInBuffer.compact();
+        return result.getHandshakeStatus();
+    }
+
+    /**
+     * Unwraps the handshake records {@code netInBuffer} holds while the engine asks for more
+     * unwraps, until it needs more bytes ({@code BUFFER_UNDERFLOW}) or another step.
+     */
+    private SSLEngineResult unwrapHandshakeRecords() throws IOException {
+        SSLEngineResult result;
+        do {
+            appInBuffer.clear();
+            result = engine.unwrap(netInBuffer, appInBuffer);
+            appInBuffer.flip();
+
+            if (result.getStatus() == Status.BUFFER_OVERFLOW) {
+                throw new IOException("appInBuffer overflow during handshake");
+            }
+            if (result.getStatus() == Status.CLOSED) {
+                throw new IOException("SSLEngine closed during handshake");
+            }
+        } while (netInBuffer.hasRemaining()
+                && result.getStatus() == Status.OK
+                && result.getHandshakeStatus() == HandshakeStatus.NEED_UNWRAP);
+        return result;
+    }
+
+    /** Handshake step {@code NEED_WRAP}; returns the next handshake status. */
+    private HandshakeStatus handshakeWrap() throws IOException {
+        netOutBuffer.clear();
+        SSLEngineResult result = engine.wrap(EMPTY, netOutBuffer);
+        netOutBuffer.flip();
+        if (result.getStatus() == Status.BUFFER_OVERFLOW) {
+            throw new IOException("netOutBuffer overflow during handshake");
+        }
+        while (netOutBuffer.hasRemaining()) {
+            channel.write(netOutBuffer);
+        }
+        return result.getHandshakeStatus();
+    }
+
+    /** Handshake step {@code NEED_TASK}; returns the next handshake status. */
+    private HandshakeStatus runDelegatedTasks() {
+        Runnable task;
+        while ((task = engine.getDelegatedTask()) != null) {
+            task.run();
+        }
+        return engine.getHandshakeStatus();
+    }
+
+    /** Handshake step {@code NEED_UNWRAP_AGAIN}; returns the next handshake status. */
+    private HandshakeStatus handshakeUnwrapAgain() throws IOException {
+        netInBuffer.flip();
+        appInBuffer.clear();
+        SSLEngineResult result = engine.unwrap(netInBuffer, appInBuffer);
+        netInBuffer.compact();
+        appInBuffer.flip();
+        return result.getHandshakeStatus();
     }
 
     // -------------------------------------------------------------------------
@@ -420,9 +444,10 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
             // Post-handshake events (TLS 1.3 key updates)
             handlePostUnwrap(result);
 
-            switch (result.getStatus()) {
+            Status status = result.getStatus();
+            if (status == Status.OK && appInBuffer.hasRemaining()) return drain(dst);
+            switch (status) {
                 case OK -> {
-                    if (appInBuffer.hasRemaining()) return drain(dst);
                     // Produced no application data (e.g. a non-app record was consumed)
                     // — loop to unwrap any further buffered records.
                 }
@@ -585,6 +610,17 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
      * write would then hold the connection forever. At the deadline the socket is closed.
      */
     void closeNotifyAndDrain(ByteBuffer buffer) {
+        if (writeCloseNotify()) {
+            LingeringClose.halfCloseAndDrain(channel, buffer);
+        }
+    }
+
+    /**
+     * Writes close_notify, each write bounded by the close write timeout.
+     *
+     * @return {@code false} when the connection is gone: nothing left to drain
+     */
+    private boolean writeCloseNotify() {
         writeLock.lock();
         try {
             engine.closeOutbound();
@@ -594,12 +630,12 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
             while (netOutBuffer.hasRemaining()) {
                 BoundedWrites.writeWithTimeout(channel, channel, netOutBuffer, closeWriteTimeout);
             }
+            return true;
         } catch (IOException _) {
-            return; // the connection is gone: nothing left to drain
+            return false;
         } finally {
             writeLock.unlock();
         }
-        LingeringClose.halfCloseAndDrain(channel, buffer);
     }
 
     /**

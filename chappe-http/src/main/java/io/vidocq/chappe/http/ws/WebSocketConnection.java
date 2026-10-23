@@ -77,6 +77,11 @@ public final class WebSocketConnection implements WebSocket {
     private int receivedCloseCode = CloseCodes.NO_STATUS_RCVD;
     private String receivedCloseReason = "";
 
+    // Data message being assembled, read by the reading thread only.
+    private int currentDataOpcode = -1;
+    /** Not {@code null} exactly while a message is being assembled. */
+    private ByteArrayOutputStream messageBuf;
+
     public WebSocketConnection(
             ReadableByteChannel readChannel,
             WritableByteChannel writeChannel,
@@ -109,57 +114,8 @@ public final class WebSocketConnection implements WebSocket {
             return;
         }
 
-        int currentDataOpcode = -1; // opcode of the data message being assembled
-        ByteArrayOutputStream messageBuf = null; // not null exactly while a message is being assembled
-
         try {
-            while (open && !closeReceived) {
-                WebSocketFrame frame;
-                try {
-                    frame = reader.readFrame(readBuffer, readChannel);
-                } catch (EOFException eof) {
-                    // Peer closed TCP without Close frame — abnormal closure.
-                    receivedCloseCode = CloseCodes.ABNORMAL_CLOSURE;
-                    break;
-                }
-
-                if (frame.isControl()) {
-                    handleControl(frame);
-                    continue;
-                }
-
-                // -- Data frames (TEXT / BINARY / CONTINUATION) --
-                if (frame.opcode() == WebSocketFrame.OP_CONTINUATION) {
-                    if (messageBuf == null) {
-                        throw new WebSocketProtocolException(
-                                CloseCodes.PROTOCOL_ERROR, "CONTINUATION without prior data frame");
-                    }
-                } else {
-                    if (messageBuf != null) {
-                        throw new WebSocketProtocolException(
-                                CloseCodes.PROTOCOL_ERROR, "New data frame while previous message incomplete");
-                    }
-                    currentDataOpcode = frame.opcode();
-                    messageBuf = new ByteArrayOutputStream();
-                }
-
-                int payloadLen = frame.payload().remaining();
-                if (messageBuf.size() + payloadLen > MAX_MESSAGE_SIZE) {
-                    throw new WebSocketProtocolException(
-                            CloseCodes.MESSAGE_TOO_BIG, "Re-assembled message exceeds " + MAX_MESSAGE_SIZE);
-                }
-                var bytes = new byte[payloadLen];
-                frame.payload().get(bytes);
-                messageBuf.write(bytes);
-
-                if (frame.fin()) {
-                    var full = messageBuf.toByteArray();
-                    int op = currentDataOpcode;
-                    currentDataOpcode = -1;
-                    messageBuf = null;
-                    dispatchMessage(op, full);
-                }
-            }
+            readLoop();
         } catch (WebSocketProtocolException pe) {
             safeError(pe);
             sendCloseSilent(pe.closeCode(), pe.getMessage());
@@ -167,15 +123,82 @@ public final class WebSocketConnection implements WebSocket {
             safeError(ioe);
             receivedCloseCode = CloseCodes.ABNORMAL_CLOSURE;
         } catch (Throwable t) {
+            // Intentional boundary: an Error from the application's handler must still close the
+            // WebSocket with 1011 (RFC 6455 §7.4.1) and report onError.
             safeError(t);
             sendCloseSilent(CloseCodes.INTERNAL_ERROR, "handler error");
         } finally {
-            try {
-                handler.onClose(this, receivedCloseCode, receivedCloseReason);
-            } catch (Exception e) {
-                safeError(e);
-            }
+            notifyClose();
             forceClose();
+        }
+    }
+
+    /** Reads and handles frames until the close handshake, or the peer's EOF without a Close frame. */
+    private void readLoop() throws Exception {
+        boolean connected = true;
+        while (connected && open && !closeReceived) {
+            WebSocketFrame frame = readFrameOrNull();
+            if (frame == null) {
+                // Peer closed TCP without Close frame — abnormal closure.
+                receivedCloseCode = CloseCodes.ABNORMAL_CLOSURE;
+                connected = false;
+            } else if (frame.isControl()) {
+                handleControl(frame);
+            } else {
+                handleData(frame);
+            }
+        }
+    }
+
+    /** The next frame, {@code null} when the peer closed TCP without a Close frame. */
+    private WebSocketFrame readFrameOrNull() throws IOException {
+        try {
+            return reader.readFrame(readBuffer, readChannel);
+        } catch (EOFException _) {
+            return null;
+        }
+    }
+
+    // -- Data frames (TEXT / BINARY / CONTINUATION) --
+    private void handleData(WebSocketFrame frame) throws Exception {
+        if (frame.opcode() == WebSocketFrame.OP_CONTINUATION) {
+            if (messageBuf == null) {
+                throw new WebSocketProtocolException(
+                        CloseCodes.PROTOCOL_ERROR, "CONTINUATION without prior data frame");
+            }
+        } else {
+            if (messageBuf != null) {
+                throw new WebSocketProtocolException(
+                        CloseCodes.PROTOCOL_ERROR, "New data frame while previous message incomplete");
+            }
+            currentDataOpcode = frame.opcode();
+            messageBuf = new ByteArrayOutputStream();
+        }
+
+        int payloadLen = frame.payload().remaining();
+        if (messageBuf.size() + payloadLen > MAX_MESSAGE_SIZE) {
+            throw new WebSocketProtocolException(
+                    CloseCodes.MESSAGE_TOO_BIG, "Re-assembled message exceeds " + MAX_MESSAGE_SIZE);
+        }
+        var bytes = new byte[payloadLen];
+        frame.payload().get(bytes);
+        messageBuf.write(bytes);
+
+        if (frame.fin()) {
+            var full = messageBuf.toByteArray();
+            int op = currentDataOpcode;
+            currentDataOpcode = -1;
+            messageBuf = null;
+            dispatchMessage(op, full);
+        }
+    }
+
+    /** Reports the end of the session to the handler; a failure of its {@code onClose} goes to {@code onError}. */
+    private void notifyClose() {
+        try {
+            handler.onClose(this, receivedCloseCode, receivedCloseReason);
+        } catch (Exception e) {
+            safeError(e);
         }
     }
 
@@ -189,7 +212,7 @@ public final class WebSocketConnection implements WebSocket {
                         .onMalformedInput(CodingErrorAction.REPORT)
                         .onUnmappableCharacter(CodingErrorAction.REPORT);
                 text = decoder.decode(ByteBuffer.wrap(payload)).toString();
-            } catch (CharacterCodingException e) {
+            } catch (CharacterCodingException _) {
                 throw new WebSocketProtocolException(CloseCodes.INVALID_PAYLOAD_DATA, "Invalid UTF-8 in TEXT frame");
             }
             handler.onText(this, text);
@@ -239,7 +262,7 @@ public final class WebSocketConnection implements WebSocket {
                             .onUnmappableCharacter(CodingErrorAction.REPORT)
                             .decode(ByteBuffer.wrap(reasonBytes))
                             .toString();
-                } catch (CharacterCodingException e) {
+                } catch (CharacterCodingException _) {
                     throw new WebSocketProtocolException(
                             CloseCodes.INVALID_PAYLOAD_DATA, "Invalid UTF-8 in Close reason");
                 }
@@ -388,7 +411,7 @@ public final class WebSocketConnection implements WebSocket {
     private void writeLocked(IoTask task) throws IOException {
         try {
             writeLock.lockInterruptibly();
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             throw new InterruptedIOException("Interrupted while acquiring WebSocket write lock");
         }
