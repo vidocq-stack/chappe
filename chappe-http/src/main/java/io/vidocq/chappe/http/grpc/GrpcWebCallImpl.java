@@ -54,9 +54,6 @@ import io.vidocq.chappe.http.h2.Http2Stream;
  */
 public final class GrpcWebCallImpl implements GrpcCall {
 
-    /** Codecs advertised by the server in {@code grpc-accept-encoding}. */
-    private static final String SERVER_ACCEPT_ENCODING = "identity, gzip";
-
     private final Http2Stream stream;
     private final HttpRequestImpl request;
     private final Http2Connection connection;
@@ -91,9 +88,7 @@ public final class GrpcWebCallImpl implements GrpcCall {
         this.connection = connection;
         this.mode = mode;
         var ct = request.headers().firstOrNull("content-type");
-        this.contentType = (ct != null)
-                ? ct
-                : (mode == GrpcWebDispatch.Mode.TEXT ? "application/grpc-web-text" : "application/grpc-web");
+        this.contentType = (ct != null) ? ct : defaultContentType(mode);
 
         long deadlineNs = -1L;
         var timeoutHeader = request.headers().firstOrNull("grpc-timeout");
@@ -104,7 +99,7 @@ public final class GrpcWebCallImpl implements GrpcCall {
         this.deadlineNanoTime = deadlineNs;
 
         // Inbound grpc-encoding negotiation (same logic as GrpcCallImpl).
-        var clientEncoding = request.headers().firstOrNull("grpc-encoding");
+        var clientEncoding = request.headers().firstOrNull(GrpcCallRunner.GRPC_ENCODING);
         this.requestEncodingUnsupported = GrpcCallImpl.unsupportedEncoding(clientEncoding);
         this.frameReader = new GrpcFrameReader(
                 GrpcFrameReader.DEFAULT_MAX_MESSAGE_SIZE, GrpcCallImpl.decompressor(clientEncoding));
@@ -248,9 +243,9 @@ public final class GrpcWebCallImpl implements GrpcCall {
                 (mode == GrpcWebDispatch.Mode.TEXT) ? "application/grpc-web-text" : "application/grpc-web";
         var builder = Headers.builder()
                 .add("content-type", responseContentType)
-                .add("grpc-accept-encoding", SERVER_ACCEPT_ENCODING);
+                .add("grpc-accept-encoding", GrpcCallRunner.SERVER_ACCEPT_ENCODING);
         if (responseEncoding != null) {
-            builder.add("grpc-encoding", responseEncoding);
+            builder.add(GrpcCallRunner.GRPC_ENCODING, responseEncoding);
         }
         for (var entry : responseHeadersBuilder.build()) {
             builder.add(entry.name(), entry.value());
@@ -283,63 +278,24 @@ public final class GrpcWebCallImpl implements GrpcCall {
      */
     public static void run(GrpcWebCallImpl call, io.vidocq.chappe.api.GrpcHandler handler) {
         if (call.requestBodyTooLarge) {
-            try {
-                call.complete(
-                        GrpcStatus.RESOURCE_EXHAUSTED,
-                        "request body exceeds the limit of " + call.bodyLimit + " bytes");
-            } catch (IOException _) {
-                // lost connection
-            }
+            GrpcCallRunner.completeQuietly(
+                    call,
+                    GrpcStatus.RESOURCE_EXHAUSTED,
+                    "request body exceeds the limit of " + call.bodyLimit + " bytes");
             return;
         }
         if (call.requestEncodingUnsupported) {
-            String clientEnc = call.request.headers().firstOrNull("grpc-encoding");
-            try {
-                call.complete(
-                        GrpcStatus.UNIMPLEMENTED,
-                        "grpc-encoding '" + clientEnc + "' not supported (accepted: " + SERVER_ACCEPT_ENCODING + ")");
-            } catch (IOException _) {
-                // lost connection
-            }
+            String clientEnc = call.request.headers().firstOrNull(GrpcCallRunner.GRPC_ENCODING);
+            GrpcCallRunner.completeQuietly(
+                    call, GrpcStatus.UNIMPLEMENTED, GrpcCallRunner.unsupportedEncodingMessage(clientEnc));
             return;
         }
+        GrpcCallRunner.run(
+                call, call.completed, call.stream, call.deadlineNanoTime, "chappe-grpcweb-deadline-", handler);
+    }
 
-        Thread watchdog = null;
-        if (call.deadlineNanoTime >= 0L) {
-            final long deadline = call.deadlineNanoTime;
-            watchdog = Thread.ofVirtual()
-                    .name("chappe-grpcweb-deadline-" + call.stream.streamId())
-                    .start(() -> {
-                        try {
-                            long sleepNanos = deadline - System.nanoTime();
-                            if (sleepNanos > 0L) Thread.sleep(Duration.ofNanos(sleepNanos));
-                            if (call.completed.get()) return;
-                            call.stream.cancel();
-                            try {
-                                call.complete(GrpcStatus.DEADLINE_EXCEEDED, "deadline exceeded");
-                            } catch (IOException _) {
-                                // lost connection
-                            }
-                        } catch (InterruptedException _) {
-                            Thread.currentThread().interrupt();
-                        }
-                    });
-        }
-        try {
-            handler.handle(call);
-            if (!call.completed.get()) {
-                call.complete(GrpcStatus.OK, "");
-            }
-        } catch (Exception e) {
-            if (!call.completed.get()) {
-                try {
-                    call.complete(GrpcStatus.INTERNAL, String.valueOf(e.getMessage()));
-                } catch (IOException _) {
-                    // lost connection
-                }
-            }
-        } finally {
-            if (watchdog != null) watchdog.interrupt();
-        }
+    /** The content type of a request that sent none: that of its gRPC-Web mode. */
+    private static String defaultContentType(GrpcWebDispatch.Mode mode) {
+        return mode == GrpcWebDispatch.Mode.TEXT ? "application/grpc-web-text" : "application/grpc-web";
     }
 }

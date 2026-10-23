@@ -45,8 +45,8 @@ import io.vidocq.chappe.http.h2.Http2Stream;
  */
 public final class GrpcCallImpl implements GrpcCall {
 
-    /** Codecs advertised by the server in {@code grpc-accept-encoding}. */
-    private static final String SERVER_ACCEPT_ENCODING = "identity, gzip";
+    private static final String CONTENT_TYPE = "content-type";
+    private static final String APPLICATION_GRPC = "application/grpc";
 
     private final Http2Stream stream;
     private final HttpRequestImpl request;
@@ -77,8 +77,8 @@ public final class GrpcCallImpl implements GrpcCall {
         this.stream = stream;
         this.request = request;
         this.connection = connection;
-        var ct = request.headers().firstOrNull("content-type");
-        this.contentType = (ct != null) ? ct : "application/grpc";
+        var ct = request.headers().firstOrNull(CONTENT_TYPE);
+        this.contentType = (ct != null) ? ct : APPLICATION_GRPC;
 
         long deadlineNs = -1L;
         var timeoutHeader = request.headers().firstOrNull("grpc-timeout");
@@ -91,7 +91,7 @@ public final class GrpcCallImpl implements GrpcCall {
         // Inbound grpc-encoding negotiation: if codec is unknown, defer
         // complete(UNIMPLEMENTED) to run() so error output goes through
         // the normal pipeline (trailers-only response).
-        var clientEncoding = request.headers().firstOrNull("grpc-encoding");
+        var clientEncoding = request.headers().firstOrNull(GrpcCallRunner.GRPC_ENCODING);
         this.requestEncodingUnsupported = unsupportedEncoding(clientEncoding);
         this.frameReader = new GrpcFrameReader(GrpcFrameReader.DEFAULT_MAX_MESSAGE_SIZE, decompressor(clientEncoding));
         this.bodyStream = stream.createBody().asInputStream();
@@ -145,7 +145,7 @@ public final class GrpcCallImpl implements GrpcCall {
                 // Trailers-only response (gRPC RFC "Responses"):
                 // a single HEADERS frame containing :status, content-type and grpc-status, END_STREAM=1.
                 var combined = Headers.builder()
-                        .add("content-type", "application/grpc")
+                        .add(CONTENT_TYPE, APPLICATION_GRPC)
                         .add("grpc-status", Integer.toString(grpcStatus));
                 if (message != null && !message.isEmpty()) {
                     combined.add("grpc-message", encodePercent(message));
@@ -235,10 +235,10 @@ public final class GrpcCallImpl implements GrpcCall {
     private void ensureInitialHeadersSent() throws IOException {
         if (initialHeadersSent) return;
         var builder = Headers.builder()
-                .add("content-type", "application/grpc")
-                .add("grpc-accept-encoding", SERVER_ACCEPT_ENCODING);
+                .add(CONTENT_TYPE, APPLICATION_GRPC)
+                .add("grpc-accept-encoding", GrpcCallRunner.SERVER_ACCEPT_ENCODING);
         if (responseEncoding != null) {
-            builder.add("grpc-encoding", responseEncoding);
+            builder.add(GrpcCallRunner.GRPC_ENCODING, responseEncoding);
         }
         for (var entry : responseHeadersBuilder.build()) {
             builder.add(entry.name(), entry.value());
@@ -338,55 +338,11 @@ public final class GrpcCallImpl implements GrpcCall {
         // Short-circuit: unknown request codec -> immediate UNIMPLEMENTED,
         // without even calling the handler (gRPC RFC "Compression").
         if (call.requestEncodingUnsupported) {
-            String clientEnc = call.request.headers().firstOrNull("grpc-encoding");
-            try {
-                call.complete(
-                        GrpcStatus.UNIMPLEMENTED,
-                        "grpc-encoding '" + clientEnc + "' not supported (accepted: " + SERVER_ACCEPT_ENCODING + ")");
-            } catch (IOException _) {
-                // lost connection
-            }
+            String clientEnc = call.request.headers().firstOrNull(GrpcCallRunner.GRPC_ENCODING);
+            GrpcCallRunner.completeQuietly(
+                    call, GrpcStatus.UNIMPLEMENTED, GrpcCallRunner.unsupportedEncodingMessage(clientEnc));
             return;
         }
-
-        Thread watchdog = null;
-        if (call.deadlineNanoTime >= 0L) {
-            final long deadline = call.deadlineNanoTime;
-            watchdog = Thread.ofVirtual()
-                    .name("chappe-grpc-deadline-" + call.stream.streamId())
-                    .start(() -> {
-                        try {
-                            long sleepNanos = deadline - System.nanoTime();
-                            if (sleepNanos > 0L) Thread.sleep(Duration.ofNanos(sleepNanos));
-                            if (call.completed.get()) return;
-                            // Cancel stream first: unblocks a handler stuck in receive()
-                            // and toggles isCancelled() for polling loops.
-                            call.stream.cancel();
-                            try {
-                                call.complete(GrpcStatus.DEADLINE_EXCEEDED, "deadline exceeded");
-                            } catch (IOException _) {
-                                // lost connection; nothing to do
-                            }
-                        } catch (InterruptedException _) {
-                            Thread.currentThread().interrupt();
-                        }
-                    });
-        }
-        try {
-            handler.handle(call);
-            if (!call.completed.get()) {
-                call.complete(GrpcStatus.OK, "");
-            }
-        } catch (Exception e) {
-            if (!call.completed.get()) {
-                try {
-                    call.complete(GrpcStatus.INTERNAL, String.valueOf(e.getMessage()));
-                } catch (IOException _) {
-                    // lost connection
-                }
-            }
-        } finally {
-            if (watchdog != null) watchdog.interrupt();
-        }
+        GrpcCallRunner.run(call, call.completed, call.stream, call.deadlineNanoTime, "chappe-grpc-deadline-", handler);
     }
 }
