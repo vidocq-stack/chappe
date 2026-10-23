@@ -215,33 +215,36 @@ public final class Http2Connection {
     private void frameLoop() throws IOException {
         while (!goawaySent) {
             Http2Frame frame = frameReader.readFrame(remoteSettings.maxFrameSize());
-
             // PRIORITY frames are skipped (null)
-            if (frame == null) continue;
+            if (frame != null) handleFrame(frame);
+        }
+    }
 
-            // CONTINUATION state enforcement (RFC 9113 §6.10)
-            if (expectingContinuationForStream >= 0) {
-                if (!(frame instanceof Http2Frame.ContinuationFrame cont)
-                        || cont.streamId() != expectingContinuationForStream) {
-                    throw new Http2ConnectionException(
-                            Http2ErrorCode.PROTOCOL_ERROR,
-                            "Expected CONTINUATION for stream " + expectingContinuationForStream);
-                }
-                handleContinuation(cont);
-                continue;
+    private void handleFrame(Http2Frame frame) throws IOException {
+        // CONTINUATION state enforcement (RFC 9113 §6.10)
+        if (expectingContinuationForStream >= 0) {
+            if (!(frame instanceof Http2Frame.ContinuationFrame cont)
+                    || cont.streamId() != expectingContinuationForStream) {
+                throw new Http2ConnectionException(
+                        Http2ErrorCode.PROTOCOL_ERROR,
+                        "Expected CONTINUATION for stream " + expectingContinuationForStream);
             }
+            handleContinuation(cont);
+            return;
+        }
 
-            switch (frame) {
-                case Http2Frame.DataFrame f -> handleData(f);
-                case Http2Frame.HeadersFrame f -> handleHeaders(f);
-                case Http2Frame.RstStreamFrame f -> handleRstStream(f);
-                case Http2Frame.SettingsFrame f -> handleSettings(f);
-                case Http2Frame.PingFrame f -> handlePing(f);
-                case Http2Frame.GoawayFrame f -> handleGoaway(f);
-                case Http2Frame.WindowUpdateFrame f -> handleWindowUpdate(f);
-                case Http2Frame.ContinuationFrame _ ->
-                    throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR, "Unexpected CONTINUATION frame");
-                case Http2Frame.UnknownFrame _ -> {} // ignore
+        switch (frame) {
+            case Http2Frame.DataFrame f -> handleData(f);
+            case Http2Frame.HeadersFrame f -> handleHeaders(f);
+            case Http2Frame.RstStreamFrame f -> handleRstStream(f);
+            case Http2Frame.SettingsFrame f -> handleSettings(f);
+            case Http2Frame.PingFrame f -> handlePing(f);
+            case Http2Frame.GoawayFrame f -> handleGoaway(f);
+            case Http2Frame.WindowUpdateFrame f -> handleWindowUpdate(f);
+            case Http2Frame.ContinuationFrame _ ->
+                throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR, "Unexpected CONTINUATION frame");
+            case Http2Frame.UnknownFrame _ -> {
+                // an unknown frame type is ignored (RFC 9113 §4.1)
             }
         }
     }
@@ -722,6 +725,16 @@ public final class Http2Connection {
     // Dispatch and response
     // -------------------------------------------------------------------------
 
+    /** Runs the handler with {@link RequestContext#CURRENT} bound; a failure is a 500. */
+    private Response invokeHandler(HttpRequestImpl request) {
+        try {
+            var ctx = new RequestContext(request);
+            return ScopedValue.where(RequestContext.CURRENT, ctx).call(() -> handler.handle(request));
+        } catch (Exception _) {
+            return Response.of(StatusCode.INTERNAL_SERVER_ERROR);
+        }
+    }
+
     private void dispatchStream(Http2Stream stream, boolean hasBody) {
         Response handled = null;
         boolean completed = false;
@@ -733,13 +746,7 @@ public final class Http2Connection {
                 request.setBody(stream.createBody());
             }
 
-            Response response;
-            try {
-                var ctx = new RequestContext(request);
-                response = ScopedValue.where(RequestContext.CURRENT, ctx).call(() -> handler.handle(request));
-            } catch (Exception _) {
-                response = Response.of(StatusCode.INTERNAL_SERVER_ERROR);
-            }
+            Response response = invokeHandler(request);
             // Released on every exit below (see the finally block), whatever happens to the stream.
             handled = response;
 
@@ -896,8 +903,6 @@ public final class Http2Connection {
     }
 
     private void sendResponse(Http2Stream stream, Response response) throws IOException {
-        int streamId = stream.streamId();
-
         Body body = response.body();
         boolean hasBody = body != null && body.contentLength() != 0;
 
@@ -909,55 +914,24 @@ public final class Http2Connection {
         if (hasBody) {
             // HEADERS (without END_STREAM, body follows)
             sendHeaderBlock(stream, () -> hpackEncoder.encode(status, headers), false);
-
-            try (InputStream is = body.asInputStream()) {
-                byte[] buf = new byte[DATA_CHUNK_SIZE];
-                int read;
-                while ((read = is.read(buf)) != -1) {
-                    int offset = 0;
-                    int remaining = read;
-                    while (remaining > 0) {
-                        // Wait for flow control window availability
-                        int allowed = waitForSendWindow(stream);
-                        int chunkSize = Math.min(remaining, allowed);
-
-                        frameWriter.writeData(streamId, buf, offset, chunkSize, false);
-
-                        // Decrement both windows
-                        connectionSendWindow.addAndGet(-chunkSize);
-                        stream.consumeSendWindow(chunkSize);
-
-                        offset += chunkSize;
-                        remaining -= chunkSize;
-                    }
-                }
-            } catch (InterruptedException _) {
-                Thread.currentThread().interrupt();
-                throw new IOException("Interrupted while waiting for flow control window");
-            } catch (IOException e) {
-                throw e; // propagated to dispatchStream
-            }
+            sendBody(stream, body);
 
             // Trailers computed AFTER body consumption (lets streaming impls
             // determine trailers at the end — e.g. grpc-status).
             Headers trailers = response.trailers();
-            boolean hasTrailers = trailers != null && !trailers.isEmpty();
-
-            if (hasTrailers) {
+            if (hasTrailers(trailers)) {
                 // RFC 9113 §8.1: trailer HEADERS frame with END_STREAM=1
                 sendHeaderBlock(stream, () -> hpackEncoder.encodeTrailers(trailers), true);
             } else {
                 // Final empty DATA frame with END_STREAM
-                frameWriter.writeData(streamId, new byte[0], 0, 0, true);
+                frameWriter.writeData(stream.streamId(), new byte[0], 0, 0, true);
             }
 
             stream.halfCloseLocal();
         } else {
             // No body: trailers known immediately (default impl does not depend on body)
             Headers trailers = response.trailers();
-            boolean hasTrailers = trailers != null && !trailers.isEmpty();
-
-            if (hasTrailers) {
+            if (hasTrailers(trailers)) {
                 // Initial HEADERS without END_STREAM, then trailer HEADERS with END_STREAM
                 sendHeaderBlock(stream, () -> hpackEncoder.encode(status, headers), false);
                 sendHeaderBlock(stream, () -> hpackEncoder.encodeTrailers(trailers), true);
@@ -966,6 +940,44 @@ public final class Http2Connection {
                 // Usual case: a single HEADERS with END_STREAM
                 sendHeaderBlock(stream, () -> hpackEncoder.encode(status, headers), true);
             }
+        }
+    }
+
+    private static boolean hasTrailers(Headers trailers) {
+        return trailers != null && !trailers.isEmpty();
+    }
+
+    /** Sends the response body as DATA frames without END_STREAM, within the flow-control windows. */
+    private void sendBody(Http2Stream stream, Body body) throws IOException {
+        try (InputStream is = body.asInputStream()) {
+            byte[] buf = new byte[DATA_CHUNK_SIZE];
+            int read;
+            while ((read = is.read(buf)) != -1) {
+                writeFlowControlled(stream, buf, read);
+            }
+        } catch (InterruptedException _) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while waiting for flow control window");
+        }
+    }
+
+    /** Writes {@code len} bytes of {@code buf} as DATA frames, waiting for the send windows as needed. */
+    private void writeFlowControlled(Http2Stream stream, byte[] buf, int len) throws IOException, InterruptedException {
+        int offset = 0;
+        int remaining = len;
+        while (remaining > 0) {
+            // Wait for flow control window availability
+            int allowed = waitForSendWindow(stream);
+            int chunkSize = Math.min(remaining, allowed);
+
+            frameWriter.writeData(stream.streamId(), buf, offset, chunkSize, false);
+
+            // Decrement both windows
+            connectionSendWindow.addAndGet(-chunkSize);
+            stream.consumeSendWindow(chunkSize);
+
+            offset += chunkSize;
+            remaining -= chunkSize;
         }
     }
 
@@ -1076,29 +1088,32 @@ public final class Http2Connection {
                 return allowed;
             }
 
-            // Wait on connection-level condition if connection window is the bottleneck
-            if (connWindow <= 0) {
-                connectionSendLock.lock();
-                try {
-                    while (connectionSendWindow.get() <= 0 && !stream.isCancelled()) {
-                        connectionSendWindowAvailable.await();
-                    }
-                } finally {
-                    connectionSendLock.unlock();
-                }
-            }
+            // Wait on the connection-level condition if the connection window is the bottleneck,
+            // then on the stream-level one if the stream window is
+            if (connWindow <= 0) awaitConnectionWindow(stream);
+            if (streamWindow <= 0) awaitStreamWindow(stream);
+        }
+    }
 
-            // Wait on stream-level condition if stream window is the bottleneck
-            if (streamWindow <= 0) {
-                stream.sendLock().lock();
-                try {
-                    while (stream.sendWindow() <= 0 && !stream.isCancelled()) {
-                        stream.sendWindowAvailable().await();
-                    }
-                } finally {
-                    stream.sendLock().unlock();
-                }
+    private void awaitConnectionWindow(Http2Stream stream) throws InterruptedException {
+        connectionSendLock.lock();
+        try {
+            while (connectionSendWindow.get() <= 0 && !stream.isCancelled()) {
+                connectionSendWindowAvailable.await();
             }
+        } finally {
+            connectionSendLock.unlock();
+        }
+    }
+
+    private static void awaitStreamWindow(Http2Stream stream) throws InterruptedException {
+        stream.sendLock().lock();
+        try {
+            while (stream.sendWindow() <= 0 && !stream.isCancelled()) {
+                stream.sendWindowAvailable().await();
+            }
+        } finally {
+            stream.sendLock().unlock();
         }
     }
 
@@ -1106,117 +1121,116 @@ public final class Http2Connection {
     // Pseudo-headers
     // -------------------------------------------------------------------------
 
-    /**
-     * Extracts HTTP/2 pseudo-headers (:method, :path, :scheme, :authority)
-     * and converts them to request properties, then removes them from the array.
-     */
     private static final java.util.Set<String> FORBIDDEN_HEADERS =
             java.util.Set.of("connection", "keep-alive", "proxy-connection", "transfer-encoding", "upgrade");
 
-    private void extractPseudoHeaders(HttpRequestImpl request) throws Http2ConnectionException {
-        String method = null;
-        String path = null;
-        String authority = null;
-        boolean seenRegularHeader = false;
-        boolean seenMethod = false;
-        boolean seenPath = false;
-        boolean seenScheme = false;
-        boolean seenAuthority = false;
+    private static final String PSEUDO_METHOD = ":method";
+    private static final String PSEUDO_PATH = ":path";
+    private static final String PSEUDO_SCHEME = ":scheme";
+    private static final String PSEUDO_AUTHORITY = ":authority";
 
+    // Bits of the fields seen while a header list is checked.
+    private static final int SEEN_METHOD = 1;
+    private static final int SEEN_PATH = 1 << 1;
+    private static final int SEEN_SCHEME = 1 << 2;
+    private static final int SEEN_AUTHORITY = 1 << 3;
+    private static final int SEEN_REGULAR = 1 << 4;
+
+    /**
+     * Checks the HTTP/2 pseudo-headers (:method, :path, :scheme, :authority), converts them to
+     * request properties, then removes them from the header list. The authority becomes the
+     * {@code host} header unless the request carries one (RFC 9113 §8.3.1, CHAPPE-047).
+     */
+    private void extractPseudoHeaders(HttpRequestImpl request) throws Http2ConnectionException {
         // Walk headers: validate ordering, duplicates, forbidden headers (RFC 9113 §8.2.2, §8.3)
         int count = request.headerCount();
+        int seen = 0;
         for (int i = 0; i < count; i++) {
             String name = request.headerName(i);
-            if (name == null) continue;
-
-            if (name.charAt(0) == ':') {
-                // Pseudo-headers must appear before regular headers (RFC 9113 §8.3)
-                if (seenRegularHeader) {
-                    throw new Http2ConnectionException(
-                            Http2ErrorCode.PROTOCOL_ERROR, "Pseudo-header after regular header: " + name);
-                }
-                switch (name) {
-                    case ":method" -> {
-                        if (seenMethod)
-                            throw new Http2ConnectionException(
-                                    Http2ErrorCode.PROTOCOL_ERROR, "Duplicate :method pseudo-header");
-                        seenMethod = true;
-                        method = request.headerValue(i);
-                    }
-                    case ":path" -> {
-                        if (seenPath)
-                            throw new Http2ConnectionException(
-                                    Http2ErrorCode.PROTOCOL_ERROR, "Duplicate :path pseudo-header");
-                        seenPath = true;
-                        path = request.headerValue(i);
-                        if (path == null || path.isEmpty()) {
-                            throw new Http2ConnectionException(
-                                    Http2ErrorCode.PROTOCOL_ERROR, ":path must not be empty");
-                        }
-                    }
-                    case ":scheme" -> {
-                        if (seenScheme)
-                            throw new Http2ConnectionException(
-                                    Http2ErrorCode.PROTOCOL_ERROR, "Duplicate :scheme pseudo-header");
-                        seenScheme = true;
-                    }
-                    case ":authority" -> {
-                        if (seenAuthority)
-                            throw new Http2ConnectionException(
-                                    Http2ErrorCode.PROTOCOL_ERROR, "Duplicate :authority pseudo-header");
-                        seenAuthority = true;
-                        authority = request.headerValue(i);
-                    }
-                    default ->
-                        throw new Http2ConnectionException(
-                                Http2ErrorCode.PROTOCOL_ERROR, "Unknown pseudo-header: " + name);
-                }
-            } else {
-                seenRegularHeader = true;
-
-                // Forbidden connection-specific headers (RFC 9113 §8.2.2)
-                if (FORBIDDEN_HEADERS.contains(name)) {
-                    throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR, "Forbidden header: " + name);
-                }
-                // TE header is only allowed with value "trailers" (RFC 9113 §8.2.2)
-                if ("te".equals(name)) {
-                    String val = request.headerValue(i);
-                    if (val == null || !val.equals("trailers")) {
-                        throw new Http2ConnectionException(
-                                Http2ErrorCode.PROTOCOL_ERROR,
-                                "te header only allowed with value 'trailers', got: " + val);
-                    }
-                }
-            }
+            if (name != null) seen = checkField(name, request.headerValue(i), seen);
         }
 
         // :method and :path are required (RFC 9113 §8.3.1)
-        if (!seenMethod) {
+        if ((seen & SEEN_METHOD) == 0) {
             throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR, "Missing required :method pseudo-header");
         }
-        if (!seenPath) {
+        if ((seen & SEEN_PATH) == 0) {
             throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR, "Missing required :path pseudo-header");
         }
 
-        // Apply to request
-        if (method != null) request.setMethod(HttpMethod.of(method));
-        if (path != null) request.setRawUri(path);
+        applyPseudoHeaders(request, count);
+    }
 
-        // Add :authority as Host header
-        if (authority != null) {
-            request.addHeader("host", authority);
+    /**
+     * Checks one field of a request header list against the fields {@code seen} before it.
+     *
+     * @return {@code seen} with the bit of this field
+     */
+    private static int checkField(String name, String value, int seen) throws Http2ConnectionException {
+        if (name.charAt(0) != ':') {
+            checkRegularField(name, value);
+            return seen | SEEN_REGULAR;
         }
+        // Pseudo-headers must appear before regular headers (RFC 9113 §8.3)
+        if ((seen & SEEN_REGULAR) != 0) {
+            throw new Http2ConnectionException(
+                    Http2ErrorCode.PROTOCOL_ERROR, "Pseudo-header after regular header: " + name);
+        }
+        int bit = pseudoHeaderBit(name);
+        if ((seen & bit) != 0) {
+            throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR, "Duplicate " + name + " pseudo-header");
+        }
+        if (bit == SEEN_PATH && (value == null || value.isEmpty())) {
+            throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR, ":path must not be empty");
+        }
+        return seen | bit;
+    }
 
-        // Compact: remove all pseudo-headers (names starting with ":")
+    private static int pseudoHeaderBit(String name) throws Http2ConnectionException {
+        return switch (name) {
+            case PSEUDO_METHOD -> SEEN_METHOD;
+            case PSEUDO_PATH -> SEEN_PATH;
+            case PSEUDO_SCHEME -> SEEN_SCHEME;
+            case PSEUDO_AUTHORITY -> SEEN_AUTHORITY;
+            default ->
+                throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR, "Unknown pseudo-header: " + name);
+        };
+    }
+
+    private static void checkRegularField(String name, String value) throws Http2ConnectionException {
+        // Forbidden connection-specific headers (RFC 9113 §8.2.2)
+        if (FORBIDDEN_HEADERS.contains(name)) {
+            throw new Http2ConnectionException(Http2ErrorCode.PROTOCOL_ERROR, "Forbidden header: " + name);
+        }
+        // TE header is only allowed with value "trailers" (RFC 9113 §8.2.2)
+        if ("te".equals(name) && !"trailers".equals(value)) {
+            throw new Http2ConnectionException(
+                    Http2ErrorCode.PROTOCOL_ERROR, "te header only allowed with value 'trailers', got: " + value);
+        }
+    }
+
+    /**
+     * Applies the checked pseudo-headers to the request and compacts the header list without them.
+     * The {@code host} header from {@code :authority} is added once the list is compacted: added
+     * before, it fell past the new end of the list and was lost (CHAPPE-047).
+     */
+    private static void applyPseudoHeaders(HttpRequestImpl request, int count) {
+        String authority = null;
+        boolean hostSent = false;
         int write = 0;
         for (int read = 0; read < count; read++) {
             String name = request.headerName(read);
-            if (name != null && name.charAt(0) != ':') {
-                if (write != read) {
-                    request.setHeaderName(write, name);
-                    request.setHeaderValue(write, request.headerValue(read));
-                }
+            if (name == null) continue; // a dropped field: its slot is reclaimed
+            String value = request.headerValue(read);
+            if (name.charAt(0) != ':') {
+                hostSent |= "host".equalsIgnoreCase(name);
+                request.setHeaderName(write, name);
+                request.setHeaderValue(write, value);
                 write++;
+            } else if (PSEUDO_AUTHORITY.equals(name)) {
+                authority = value;
+            } else {
+                applyPseudoHeader(request, name, value);
             }
         }
         // Clear trailing slots
@@ -1225,6 +1239,19 @@ public final class Http2Connection {
             request.setHeaderValue(i, null);
         }
         request.setHeaderCount(write);
+
+        if (authority != null && !hostSent) {
+            request.addHeader("host", authority);
+        }
+    }
+
+    /** Applies {@code :method} or {@code :path}; {@code :scheme} is checked, not applied. */
+    private static void applyPseudoHeader(HttpRequestImpl request, String name, String value) {
+        if (PSEUDO_METHOD.equals(name)) {
+            if (value != null) request.setMethod(HttpMethod.of(value));
+        } else if (PSEUDO_PATH.equals(name)) {
+            request.setRawUri(value);
+        }
     }
 
     // -------------------------------------------------------------------------

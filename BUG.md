@@ -44,6 +44,42 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-047 — the `host` header taken from an HTTP/2 `:authority` was lost
+
+- **Date**: 2026-10-23
+- **Status**: FIXED on `refactor/zero-issues-2` (`Http2AuthorityHostTest`)
+- **Module**: `chappe-http` (`h2/Http2Connection.extractPseudoHeaders`)
+- **Symptom**: over HTTP/2, `req.header("Host")` was empty and `req.uri()` had no authority, for a client
+  that sends `:authority` and no `host` field, as RFC 9113 §8.3.1 asks (the JDK `HttpClient`, curl,
+  browsers). A router dispatching on `Host`, as the "Virtual hosts" section of the usage page advises, saw
+  every HTTP/2 request as hostless. Found while splitting the method for SonarQube (Vidocq/vidocq#285).
+- **Minimal reproduction**: a TLS server whose handler answers
+  `req.headers().firstOrNull("host") + "|" + req.uri().getAuthority()`, called with an `HttpClient` on
+  `HTTP_2`: the body is `null|null` instead of `127.0.0.1:<port>|127.0.0.1:<port>`.
+- **Cause**: `extractPseudoHeaders` appended the `host` header at the end of the list, then compacted the
+  list without its pseudo-headers over the count read before the append, and set the new count: the
+  appended field fell past the end of the list.
+- **Fix**: the `host` header is appended once the list is compacted, unless the request carries one.
+
+---
+
+## CHAPPE-046 — HPACK accepted Huffman padding that is not a prefix of EOS
+
+- **Date**: 2026-10-23
+- **Status**: FIXED on `refactor/zero-issues-2` (`HpackHuffmanPaddingTest`)
+- **Module**: `chappe-http` (`h2/HpackHuffman.decode`)
+- **Symptom**: a Huffman string whose padding holds a 0 bit followed by 1 bits (`101`, `011`) decoded
+  without error, where RFC 7541 §5.2 makes any padding other than the most significant bits of the EOS code
+  (all 1s) a decoding error, hence a `COMPRESSION_ERROR`. Found while splitting the method for SonarQube
+  (Vidocq/vidocq#285).
+- **Minimal reproduction**: `HpackHuffman.decode(ByteBuffer.wrap(new byte[] {0x05}), 1)` returns `"0"`
+  (the 5-bit code of `'0'`, then padding `101`) instead of throwing.
+- **Cause**: the padding counter was reset to 0 by a 0 bit inside a code, then counted the 1 bits after it,
+  so only the trailing run of 1s was checked, not every bit read since the last symbol.
+- **Fix**: a 0 bit inside a code makes the padding invalid until the next symbol.
+
+---
+
 ## CHAPPE-042 — the bench images no longer build: vidocq-parent SNAPSHOT is not resolvable
 
 - **Date**: 2026-10-23

@@ -21,6 +21,7 @@ package io.vidocq.chappe.http.h2;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 
 /**
  * HPACK Huffman codec — RFC 7541 Appendix B.
@@ -114,6 +115,9 @@ public final class HpackHuffman {
     // EOS symbol index
     private static final int EOS = 256;
 
+    /** A padding count no valid padding reaches: padding is shorter than 8 bits. */
+    private static final int INVALID_PADDING = 8;
+
     // -------------------------------------------------------------------------
     // Decode tree
     // -------------------------------------------------------------------------
@@ -174,52 +178,60 @@ public final class HpackHuffman {
         int outLen = 0;
 
         Node node = ROOT;
-        int paddingBits = 0; // count of trailing 1-bits (potential EOS padding)
+        // Bits read since the last symbol while they are all 1s, the only valid padding; a 0 bit
+        // sets it to INVALID_PADDING, which no later 1 bit brings back below 8.
+        int paddingBits = 0;
 
         for (int i = 0; i < length; i++) {
             int b = src.get() & 0xFF;
             for (int bit = 7; bit >= 0; bit--) {
                 int v = (b >>> bit) & 1;
-                node = (v == 0) ? node.left : node.right;
-                if (node == null) {
-                    throw new IllegalArgumentException("Invalid Huffman code in HPACK stream");
-                }
+                node = child(node, v);
                 if (node.symbol >= 0) {
-                    if (node.symbol == EOS) {
-                        throw new IllegalArgumentException("EOS symbol encountered in HPACK Huffman stream");
-                    }
-                    if (outLen == out.length) {
-                        // grow buffer
-                        byte[] tmp = new byte[out.length * 2];
-                        System.arraycopy(out, 0, tmp, 0, outLen);
-                        out = tmp;
-                    }
-                    out[outLen++] = (byte) node.symbol;
+                    out = ensureRoom(out, outLen);
+                    out[outLen++] = symbol(node);
                     node = ROOT;
                     paddingBits = 0;
                 } else {
-                    // Track potential EOS padding: every 1-bit advances into the EOS code
-                    paddingBits = (v == 1) ? paddingBits + 1 : 0;
+                    paddingBits = (v == 1) ? paddingBits + 1 : INVALID_PADDING;
                 }
             }
         }
 
-        // After consuming all bytes the traversal must end at the root or on a
-        // path that is consistent with EOS padding (remaining bits all 1s).
-        if (node != ROOT) {
-            // Verify that the partial code matches the EOS prefix of the same length
-            // i.e. all remaining bits read were 1s (paddingBits == bits consumed past last symbol).
-            // A simpler check: the node we're on must be reachable only via all-1 bits from
-            // the last emitted symbol, which is exactly what paddingBits tracks.
-            // RFC 7541 §5.2: padding MUST be EOS prefix bits (all ones) and < 8 bits.
-            if (paddingBits == 0 || paddingBits >= 8) {
-                throw new IllegalArgumentException(
-                        "Invalid HPACK Huffman padding: " + paddingBits + " trailing bit(s)");
-            }
-            // Verify all padding bits are 1 (they are by construction of paddingBits counter)
-        }
-
+        checkPadding(node, paddingBits);
         return new String(out, 0, outLen, StandardCharsets.ISO_8859_1);
+    }
+
+    /** The child of {@code node} for {@code bit}. */
+    private static Node child(Node node, int bit) {
+        Node next = (bit == 0) ? node.left : node.right;
+        if (next == null) {
+            throw new IllegalArgumentException("Invalid Huffman code in HPACK stream");
+        }
+        return next;
+    }
+
+    /** The octet of a leaf, which must not be EOS (RFC 7541 §5.2). */
+    private static byte symbol(Node leaf) {
+        if (leaf.symbol == EOS) {
+            throw new IllegalArgumentException("EOS symbol encountered in HPACK Huffman stream");
+        }
+        return (byte) leaf.symbol;
+    }
+
+    /** {@code out}, or a copy twice as long when it is full. */
+    private static byte[] ensureRoom(byte[] out, int outLen) {
+        return outLen == out.length ? Arrays.copyOf(out, out.length * 2) : out;
+    }
+
+    /**
+     * Checks the end of the stream: it ends on a symbol, or within a code on padding, which must be
+     * the most significant bits of EOS (all 1s) and shorter than 8 bits (RFC 7541 §5.2, CHAPPE-046).
+     */
+    private static void checkPadding(Node node, int paddingBits) {
+        if (node != ROOT && (paddingBits == 0 || paddingBits >= 8)) {
+            throw new IllegalArgumentException("Invalid HPACK Huffman padding: not an EOS prefix shorter than 8 bits");
+        }
     }
 
     /**
