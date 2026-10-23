@@ -51,13 +51,14 @@ final class LingeringClose {
             channel.shutdownOutput();
             long deadline = System.nanoTime() + TIME.toNanos();
             long drained = 0;
-            while (drained < MAX_BYTES) {
-                long left = deadline - System.nanoTime();
-                if (left <= 0) break;
+            boolean peerClosed = false;
+            long left = deadline - System.nanoTime();
+            while (!peerClosed && drained < MAX_BYTES && left > 0) {
                 buffer.clear();
                 int n = BoundedReads.readWithTimeout(channel, channel, buffer, Duration.ofNanos(left));
-                if (n == -1) break; // the client closed its side
-                drained += n;
+                peerClosed = n == -1; // the client closed its side
+                if (!peerClosed) drained += n;
+                left = deadline - System.nanoTime();
             }
         } catch (IOException _) {
             // reset by the client, or closed by the watchdog at the deadline

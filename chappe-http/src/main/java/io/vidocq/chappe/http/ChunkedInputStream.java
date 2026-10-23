@@ -156,44 +156,43 @@ final class ChunkedInputStream extends RequestBodyInputStream {
 
     private int decodeBytes(byte[] b, int off, int len) throws IOException {
         if (chunkState == ChunkState.DONE) return -1;
+        if (len == 0) return 0;
 
-        int totalRead = 0;
-        while (totalRead < len) {
+        while (true) {
             switch (chunkState) {
-                case READ_SIZE -> {
-                    readChunkSize();
-                    if (chunkState == ChunkState.DONE) {
-                        return totalRead > 0 ? totalRead : -1;
-                    }
-                }
+                case READ_SIZE -> readChunkSize();
                 case READ_DATA -> {
-                    if (chunkRemaining > 0) {
-                        // Bytes already read are returned rather than waiting on the socket for more.
-                        if (totalRead > 0 && !buffer.hasRemaining()) return totalRead;
-                        if (!ensureData()) throw truncated();
-                        int toRead =
-                                (int) Math.min(Math.min((long) len - totalRead, chunkRemaining), buffer.remaining());
-                        buffer.get(b, off + totalRead, toRead);
-                        chunkRemaining -= toRead;
-                        totalRead += toRead;
-                    }
-                    if (chunkRemaining == 0) {
-                        chunkState = ChunkState.READ_DATA_CRLF;
-                        // A chunk ends here: the next chunk may not have arrived yet, and a
-                        // streaming reader must see this one now (CHAPPE-010).
-                        return totalRead;
-                    }
+                    return readChunkData(b, off, len);
                 }
                 case READ_DATA_CRLF -> {
                     consumeCrlf();
                     chunkState = ChunkState.READ_SIZE;
                 }
                 case DONE -> {
-                    return totalRead > 0 ? totalRead : -1;
+                    return -1;
                 }
             }
         }
-        return totalRead;
+    }
+
+    /**
+     * Reads up to {@code len} bytes of the current chunk's data, at most what the buffer holds once
+     * it is non-empty: bytes already read are returned rather than waiting on the socket for more.
+     */
+    private int readChunkData(byte[] b, int off, int len) throws IOException {
+        int read = 0;
+        if (chunkRemaining > 0) {
+            if (!ensureData()) throw truncated();
+            read = (int) Math.min(Math.min(len, chunkRemaining), buffer.remaining());
+            buffer.get(b, off, read);
+            chunkRemaining -= read;
+        }
+        if (chunkRemaining == 0) {
+            // A chunk ends here: the next chunk may not have arrived yet, and a
+            // streaming reader must see this one now (CHAPPE-010).
+            chunkState = ChunkState.READ_DATA_CRLF;
+        }
+        return read;
     }
 
     @Override
@@ -216,38 +215,50 @@ final class ChunkedInputStream extends RequestBodyInputStream {
             int b = nextFramingByte();
             lineLength = countLineByte(lineLength);
 
-            if (b == '\r') {
-                continue;
-            }
             if (b == '\n' || b == ';') {
-                if (b == ';') {
-                    // Chunk extension — ignore until LF, still counted and bounded
-                    skipUntilLf(lineLength);
-                } else if (!started) {
-                    throw new IOException("Empty chunk size");
-                }
-                chunkRemaining = size;
-                if (size == 0) {
-                    // Terminal chunk — consume the trailer section and its final CRLF
-                    consumeTrailers();
-                    chunkState = ChunkState.DONE;
-                } else {
-                    countChunk(size);
-                    chunkState = ChunkState.READ_DATA;
-                }
+                endSizeLine(b == ';', started, size, lineLength);
                 return;
             }
-
-            started = true;
-            int digit = hexDigit(b);
-            if (digit < 0) {
-                throw new IOException("Invalid hex digit in chunk size: " + (char) b);
+            if (b != '\r') {
+                started = true;
+                size = appendHexDigit(size, b);
             }
-            if (size > (Long.MAX_VALUE >> 4)) {
-                throw new IOException("Chunk size overflow");
-            }
-            size = (size << 4) | digit;
         }
+    }
+
+    /**
+     * Ends a chunk-size line at its LF or at the {@code ;} of a chunk extension, {@code lineLength}
+     * bytes into the line, and moves on to the chunk's data, or to the trailer section after the
+     * terminal chunk.
+     */
+    private void endSizeLine(boolean extension, boolean started, long size, int lineLength) throws IOException {
+        if (extension) {
+            // Chunk extension — ignore until LF, still counted and bounded
+            skipUntilLf(lineLength);
+        } else if (!started) {
+            throw new IOException("Empty chunk size");
+        }
+        chunkRemaining = size;
+        if (size == 0) {
+            // Terminal chunk — consume the trailer section and its final CRLF
+            consumeTrailers();
+            chunkState = ChunkState.DONE;
+        } else {
+            countChunk(size);
+            chunkState = ChunkState.READ_DATA;
+        }
+    }
+
+    /** {@code size} with one more hexadecimal digit {@code b}. */
+    private static long appendHexDigit(long size, int b) throws IOException {
+        int digit = hexDigit(b);
+        if (digit < 0) {
+            throw new IOException("Invalid hex digit in chunk size: " + (char) b);
+        }
+        if (size > (Long.MAX_VALUE >> 4)) {
+            throw new IOException("Chunk size overflow");
+        }
+        return (size << 4) | digit;
     }
 
     /**
@@ -281,14 +292,11 @@ final class ChunkedInputStream extends RequestBodyInputStream {
     }
 
     private void consumeCrlf() throws IOException {
-        // Consume CRLF after chunk data
-        while (true) {
-            if (!ensureData()) return;
-            int b = nextFramingByte();
-            if (b == '\r') continue;
-            if (b == '\n') return;
-            // Unexpected byte — tolerate it (some servers only send LF)
-            return;
+        // Consume CRLF after chunk data. Any byte but CR ends it: the LF, or an unexpected byte,
+        // tolerated (some servers only send LF).
+        int b = '\r';
+        while (b == '\r' && ensureData()) {
+            b = nextFramingByte();
         }
     }
 
@@ -298,29 +306,34 @@ final class ChunkedInputStream extends RequestBodyInputStream {
         StringBuilder line = new StringBuilder();
         int lineLength = 0;
         Headers.Builder trailers = null;
-        while (true) {
-            if (!ensureData()) break; // EOF — deliver what was parsed so far
+        boolean end = false;
+        while (!end && ensureData()) { // at EOF, deliver what was parsed so far
             int b = nextFramingByte();
             lineLength = countLineByte(lineLength);
-            if (b == '\r') continue;
             if (b == '\n') {
-                if (line.isEmpty()) break; // empty line = end of trailers
-                int colon = line.indexOf(":");
-                if (colon > 0) {
-                    String name = line.substring(0, colon).trim();
-                    String value = line.substring(colon + 1).trim();
-                    if (trailers == null) trailers = Headers.builder();
-                    trailers.add(name, value);
-                }
+                end = line.isEmpty(); // empty line = end of trailers
+                trailers = addTrailer(trailers, line);
                 line.setLength(0);
                 lineLength = 0;
-            } else {
+            } else if (b != '\r') {
                 line.append((char) b); // header field bytes, latin-1
             }
         }
         if (trailersConsumer != null && trailers != null) {
             trailersConsumer.accept(trailers.build());
         }
+    }
+
+    /**
+     * Adds the {@code name: value} trailer {@code line} holds to {@code trailers}, created on the first
+     * one; a line without a name is ignored.
+     */
+    private static Headers.Builder addTrailer(Headers.Builder trailers, StringBuilder line) {
+        int colon = line.indexOf(":");
+        if (colon <= 0) return trailers;
+        Headers.Builder builder = trailers != null ? trailers : Headers.builder();
+        builder.add(line.substring(0, colon).trim(), line.substring(colon + 1).trim());
+        return builder;
     }
 
     /** Skips a chunk extension to the end of its size line, {@code lineLength} bytes into the line. */

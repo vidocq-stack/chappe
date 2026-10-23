@@ -49,8 +49,17 @@ import java.util.concurrent.locks.LockSupport;
  */
 final class TimedReadChannel implements ReadableByteChannel {
 
-    /** One armed wait: its own identity, so a stale deadline is never mistaken for a new one. */
-    private record Deadline(long nanos) {}
+    /**
+     * One armed wait: its own identity, so a stale deadline is never mistaken for a new one. A class,
+     * not a record: it is compared by identity only, as {@link #armed} does.
+     */
+    private static final class Deadline {
+        private final long nanos;
+
+        Deadline(long nanos) {
+            this.nanos = nanos;
+        }
+    }
 
     /**
      * Longest bound applied: a larger timeout (up to {@code ChronoUnit.FOREVER}) is saturated to it,
@@ -104,14 +113,16 @@ final class TimedReadChannel implements ReadableByteChannel {
         if (!armed.compareAndSet(null, deadline)) throw timedOut(null); // only FIRED is left
         wakeWatchdog();
         int n;
+        boolean returned = false;
         try {
             n = delegate.read(dst);
+            returned = true;
         } catch (IOException e) {
             if (!armed.compareAndSet(deadline, null)) throw timedOut(e);
             throw e;
-        } catch (RuntimeException | Error e) {
-            armed.compareAndSet(deadline, null);
-            throw e;
+        } finally {
+            // Any other failure (an unchecked exception, an error) disarms the deadline too.
+            if (!returned) armed.compareAndSet(deadline, null);
         }
         if (!armed.compareAndSet(deadline, null)) throw timedOut(null);
         return n;
@@ -160,7 +171,7 @@ final class TimedReadChannel implements ReadableByteChannel {
                 watchdogIdle = false;
                 continue;
             }
-            long wait = d.nanos() - System.nanoTime();
+            long wait = d.nanos - System.nanoTime();
             if (wait > 0) {
                 LockSupport.parkNanos(this, wait); // a later deadline is re-read on wake-up
             } else if (armed.compareAndSet(d, FIRED)) {

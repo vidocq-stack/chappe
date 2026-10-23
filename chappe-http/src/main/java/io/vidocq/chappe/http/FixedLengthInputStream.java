@@ -45,9 +45,7 @@ final class FixedLengthInputStream extends RequestBodyInputStream {
     int readByte() throws IOException {
         if (remaining <= 0) return -1;
 
-        if (!buffer.hasRemaining()) {
-            if (!refill()) throw truncated();
-        }
+        if (!buffer.hasRemaining() && !refill()) throw truncated();
 
         remaining--;
         return buffer.get() & 0xFF;
@@ -60,9 +58,7 @@ final class FixedLengthInputStream extends RequestBodyInputStream {
 
         int toRead = (int) Math.min(len, remaining);
 
-        if (!buffer.hasRemaining()) {
-            if (!refill()) throw truncated();
-        }
+        if (!buffer.hasRemaining() && !refill()) throw truncated();
 
         int available = Math.min(toRead, buffer.remaining());
         buffer.get(b, off, available);
