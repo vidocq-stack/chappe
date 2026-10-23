@@ -23,6 +23,8 @@
 #   SHOOTOUT_CONNECTIONS      connections wrk (default 100)
 #   SHOOTOUT_THREADS          threads wrk (default 4)
 #   SHOOTOUT_KEEP_UP          = 1 → ne fait pas `compose down` à la fin (debug)
+#   SHOOTOUT_INTERFERENCE_PCT CPU used outside the benchmark (% of one CPU) above
+#                             which a measurement is flagged as disturbed (default 25)
 
 set -euo pipefail
 
@@ -38,6 +40,7 @@ WARMUP_RATE="${SHOOTOUT_WARMUP_RATE:-100000}"
 CONNECTIONS="${SHOOTOUT_CONNECTIONS:-100}"
 THREADS="${SHOOTOUT_THREADS:-4}"
 KEEP_UP="${SHOOTOUT_KEEP_UP:-0}"
+INTERFERENCE_PCT="${SHOOTOUT_INTERFERENCE_PCT:-25}"
 
 # Rates par défaut élargis en mode unleashed (machine entière)
 if [ "$UNLEASHED" = "1" ]; then
@@ -58,7 +61,7 @@ SUMMARY_TSV="$RESULTS_DIR/_summary.tsv"
 mkdir -p "$RESULTS_DIR"
 # Raw runs of an earlier invocation (other rates, other services) would be read as
 # part of this one.
-rm -f "$RESULTS_DIR"/*-rate*.txt "$RESULTS_DIR"/fingerprint.json
+rm -f "$RESULTS_DIR"/*-rate*.txt "$RESULTS_DIR"/*-rate*.interference "$RESULTS_DIR"/fingerprint.json
 : > "$SUMMARY_TSV"
 
 # ─── Compose file choisi selon le mode ────────────────────────────────────────
@@ -126,6 +129,8 @@ cleanup() {
         echo "▶ Cleanup containers (down -v --remove-orphans)"
         COMPOSE_PROFILES="$COMPOSE_PROFILES" compose down -v --remove-orphans 2>/dev/null || true
     fi
+    # Stops an interference watcher left running by an interrupted measurement
+    rm -f "$RESULTS_DIR"/*.watching
     exit $exit_code
 }
 trap cleanup EXIT INT TERM
@@ -192,6 +197,7 @@ echo
 echo "▶ Démarrage des serveurs : $ALL_SERVICES"
 # shellcheck disable=SC2086
 COMPOSE_PROFILES="$COMPOSE_PROFILES" compose up -d $ALL_SERVICES wrk2
+BENCH_IDS=$(COMPOSE_PROFILES="$COMPOSE_PROFILES" compose ps -q | tr '\n' ' ')
 
 # ─── Environment fingerprint ──────────────────────────────────────────────────
 # Written next to the raw wrk2 runs, so that a result never travels without the
@@ -244,7 +250,8 @@ write_fingerprint() {
     "warmup_rate": $WARMUP_RATE,
     "connections": $CONNECTIONS,
     "threads": $THREADS,
-    "slo_p99_ms": 10
+    "slo_p99_ms": 10,
+    "interference_cpu_pct": $INTERFERENCE_PCT
   },
   "cpusets": $cpusets,
   "host": {
@@ -293,6 +300,38 @@ wait_ready() {
     done
     echo "  [error] $service did not become ready within ${max_wait}s ($url)" >&2
     return 1
+}
+
+# ─── Interference watch (workspace ADR 0001) ──────────────────────────────────
+# A CI job started on the same host during a measurement would pass for a slow
+# server. While wrk2 measures, the CPU used by every container outside the
+# shootout is sampled (`docker stats`, % of one CPU, a Docker-in-Docker runner
+# counting its nested jobs); each sample is the sum over those containers.
+watch_interference() {
+    local out="$1"
+    while [ -e "$out.watching" ]; do
+        dk stats --no-stream --format '{{.ID}}\t{{.Name}}\t{{.CPUPerc}}' 2>/dev/null \
+            | awk -F'\t' -v t="$(date +%s)" -v bench="$BENCH_IDS" '
+                BEGIN { n = split(bench, ids, " "); for (i = 1; i <= n; i++) mine[substr(ids[i], 1, 12)] = 1 }
+                !(substr($1, 1, 12) in mine) {
+                    cpu = $3; sub(/%/, "", cpu); cpu += 0; sum += cpu
+                    if (cpu > top) { top = cpu; name = $2 }
+                }
+                END { printf "%s\t%.1f\t%s\n", t, sum, (name == "" ? "-" : name) }' || true
+    done > "$out.samples"
+}
+
+# Stops the watcher and writes <service>-rate<N>.interference, one line:
+#   start end (epoch s), samples, mean and max foreign CPU (%), busiest container
+end_interference() {
+    local out="$1" watcher="$2" start="$3"
+    rm -f "$out.watching"
+    wait "$watcher" 2>/dev/null || true
+    awk -F'\t' -v s="$start" -v e="$(date +%s)" '
+        { n++; sum += $2; if ($2 + 0 > max) { max = $2 + 0; who = $3 } }
+        END { printf "%s\t%s\t%d\t%.1f\t%.1f\t%s\n", s, e, n, (n ? sum / n : 0), max, (who == "" ? "-" : who) }' \
+        "$out.samples" > "$out"
+    rm -f "$out.samples"
 }
 
 # Convertit "1.23ms" / "456.78us" / "1.23s" en millisecondes flottantes
@@ -351,12 +390,23 @@ measure_one() {
             "$url" >/dev/null 2>&1 || true
 
         echo "  measure $DURATION @ rate $rate"
-        local out
+        local out watch watcher start foreign
+        watch="$RESULTS_DIR/${service}-rate${rate}.interference"
+        touch "$watch.watching"
+        watch_interference "$watch" &
+        watcher=$!
+        start=$(date +%s)
         if ! out=$(compose exec -T wrk2 wrk -d"$DURATION" -t"$THREADS" \
                    -c"$CONNECTIONS" -R"$rate" --latency \
                    "$url" 2>&1); then
+            end_interference "$watch" "$watcher" "$start"
             echo "    [warn] wrk failed at rate $rate"
             continue
+        fi
+        end_interference "$watch" "$watcher" "$start"
+        foreign=$(cut -f5 "$watch")
+        if awk -v f="$foreign" -v t="$INTERFERENCE_PCT" 'BEGIN{exit !(f > t)}'; then
+            echo "    [warn] disturbed: up to ${foreign}% CPU outside the benchmark ($(cut -f6 "$watch"))"
         fi
 
         local req_per_sec p50 p99 p999

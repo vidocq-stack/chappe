@@ -66,6 +66,12 @@ SHOOTOUT_RATES="10000 50000" SHOOTOUT_DURATION=10s \
 
 - Summary Markdown: `chappe-bench/target/shootout/shootout-results.md`
 - Raw wrk2 runs: `chappe-bench/target/shootout/<service>-rate<N>.txt`
+- Interference watch: `chappe-bench/target/shootout/<service>-rate<N>.interference`. While wrk2
+  measures, `docker stats` samples the CPU used by every container outside the shootout (a CI
+  runner's Docker-in-Docker container counts its jobs). One line per measurement: start and end
+  (epoch seconds), samples, mean and max of that CPU (% of one CPU), busiest container. Above
+  `SHOOTOUT_INTERFERENCE_PCT` (default 25) the harness prints a `disturbed` warning, and the
+  report leaves the measurement out.
 - Environment fingerprint: `chappe-bench/target/shootout/fingerprint.json` (machine, CPU
   governor and turbo, CPU sets, JVM, versions of every target, commit). `Vidocq/ci`
   `bench-report/import-wrk2-shootout.py` turns this directory into a `results.json`.
