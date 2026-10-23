@@ -20,6 +20,7 @@
 package io.vidocq.chappe.api;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
@@ -163,33 +164,45 @@ public interface Filter {
         return next -> request -> {
             String acceptEnc = request.header("Accept-Encoding").orElse(null);
             Response r = next.handle(request);
-            if (!AcceptEncoding.accepts(acceptEnc, "gzip")) return r;
-            if (r.headers().contains("Content-Encoding")) return r;
-            String cc = r.headers().firstOrNull("Cache-Control");
-            if (cc != null && cc.toLowerCase(Locale.ROOT).contains("no-transform")) return r;
-            if (!isCompressible(r.headers().firstOrNull("Content-Type"))) return r;
-            long len = r.body().contentLength();
-            if (len >= 0 && len < threshold) return r;
-
-            byte[] compressed;
-            try (var in = r.body().asInputStream();
-                    var bos = new ByteArrayOutputStream();
-                    var gout = new GZIPOutputStream(bos)) {
-                in.transferTo(gout);
-                gout.finish();
-                compressed = bos.toByteArray();
-            }
-
-            Headers.Builder hb = Headers.builder();
-            for (Headers.Entry e : r.headers()) {
-                if (!e.name().equalsIgnoreCase("Content-Length")) {
-                    hb.add(e.name(), e.value());
-                }
-            }
-            hb.add("Content-Encoding", "gzip");
-            hb.add("Vary", "Accept-Encoding");
-            return withHeaders(r, hb.build(), Body.of(compressed));
+            return shouldGzip(acceptEnc, r, threshold) ? gzipped(r) : r;
         };
+    }
+
+    /**
+     * Whether {@link #gzip(int)} compresses the response: the client accepts gzip, the response is
+     * not encoded yet, does not forbid transformations, has a compressible type and is not known
+     * to be below the threshold.
+     */
+    private static boolean shouldGzip(String acceptEncoding, Response r, int threshold) {
+        if (!AcceptEncoding.accepts(acceptEncoding, "gzip")) return false;
+        if (r.headers().contains("Content-Encoding")) return false;
+        String cc = r.headers().firstOrNull("Cache-Control");
+        if (cc != null && cc.toLowerCase(Locale.ROOT).contains("no-transform")) return false;
+        if (!isCompressible(r.headers().firstOrNull("Content-Type"))) return false;
+        long len = r.body().contentLength();
+        return len < 0 || len >= threshold;
+    }
+
+    /** The response with its body gzipped, without {@code Content-Length}, with {@code Content-Encoding} and {@code Vary}. */
+    private static Response gzipped(Response r) throws IOException {
+        byte[] compressed;
+        try (var in = r.body().asInputStream();
+                var bos = new ByteArrayOutputStream();
+                var gout = new GZIPOutputStream(bos)) {
+            in.transferTo(gout);
+            gout.finish();
+            compressed = bos.toByteArray();
+        }
+
+        Headers.Builder hb = Headers.builder();
+        for (Headers.Entry e : r.headers()) {
+            if (!e.name().equalsIgnoreCase("Content-Length")) {
+                hb.add(e.name(), e.value());
+            }
+        }
+        hb.add("Content-Encoding", "gzip");
+        hb.add("Vary", "Accept-Encoding");
+        return withHeaders(r, hb.build(), Body.of(compressed));
     }
 
     /** Apache date format: {@code [day/Mon/yyyy:HH:mm:ss +0000]}. */
@@ -224,21 +237,20 @@ public interface Filter {
         Objects.requireNonNull(sink, "sink");
         return next -> request -> {
             long startNanos = System.nanoTime();
-            Response response;
-            int status;
+            boolean answered = false;
             try {
-                response = next.handle(request);
-                status = response.status().code();
-            } catch (RuntimeException | Error e) {
-                logLine(sink, request, 500, -1, startNanos);
-                throw e;
-            } catch (Exception e) {
-                logLine(sink, request, 500, -1, startNanos);
-                throw new RuntimeException(e);
+                Response response = next.handle(request);
+                int status = response.status().code();
+                answered = true;
+                long size = response.body().contentLength();
+                logLine(sink, request, status, size, startNanos);
+                return response;
+            } finally {
+                // A failure is logged as a 500 and goes on unchanged, checked or not (CHAPPE-049).
+                if (!answered) {
+                    logLine(sink, request, 500, -1, startNanos);
+                }
             }
-            long size = response.body().contentLength();
-            logLine(sink, request, status, size, startNanos);
-            return response;
         };
     }
 

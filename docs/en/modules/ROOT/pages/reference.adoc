@@ -392,6 +392,7 @@ Format: `Chappe/<Maven version>+<short Git hash>(<build timestamp ISO-8601 UTC>)
 
 Idempotency: if the application has already set either header on the `Response`, Chappe will not overwrite it.
 
+[#access-log]
 === Access log
 
 Enabled via `--access-log` (CLI), `CHAPPE_ACCESS_LOG=true` (env), or `logging.access-log: true` (YAML). CLI overrides env, env overrides YAML.
@@ -409,6 +410,8 @@ Field resolution:
 * User: `X-Forwarded-User` → `Gap-Auth` (oauth2-proxy) → `-`.
 * Size: `Response.body().contentLength()` (or `-` for streamed/chunked bodies).
 * Duration: nanoseconds measured by the outermost filter wrapper, captures the final status even if the handler throws.
+
+A handler that throws is logged with status `500` and size `-`, and its exception goes on unchanged, a checked exception included, to the filters around it and to the server [.tag-new]#NEW#. Until 0.3.0 a checked exception came out wrapped in a `RuntimeException`.
 
 Available as a public API filter via `Filter.accessLog()` / `Filter.accessLog(Consumer<String>)`; the CLI launcher applies it as the outermost wrapper.
 

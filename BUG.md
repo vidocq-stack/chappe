@@ -80,6 +80,28 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-049 — `Filter.accessLog` wrapped a handler's checked exception in a `RuntimeException`
+
+- **Date**: 2026-10-23
+- **Status**: FIXED on `refactor/zero-issues-3` (`AccessLogFilterTest`)
+- **Module**: `chappe-api` (`Filter.accessLog(Consumer)`)
+- **Symptom**: a handler behind `Filter.accessLog` that throws a checked exception (an `IOException`, say)
+  made the filter throw `new RuntimeException(e)` instead. A filter placed around the access log that catches
+  the original type (to map a backend failure to `503`, for instance) never saw it; unchecked exceptions and
+  errors went through unchanged, so only checked ones were affected. Found while fixing SonarQube's `java:S112`
+  and `java:S1181` on that method (Vidocq/vidocq#285).
+- **Minimal repro**:
+  ```java
+  Handler h = Filter.accessLog(lines::add).apply(_ -> { throw new IOException("down"); });
+  h.handle(request); // threw RuntimeException(IOException), expected the IOException itself
+  ```
+- **Cause**: the filter caught `RuntimeException | Error` and `Exception` separately to log the `500` line, and
+  rethrew the latter wrapped, although `Handler.handle` declares `throws Exception` and could rethrow it as is.
+- **Fix**: the `500` line is written in a `finally` block when the handler did not answer, and the exception
+  goes on as it was thrown, checked or not. The log line itself is unchanged.
+
+---
+
 ## CHAPPE-042 — the bench images no longer build: vidocq-parent SNAPSHOT is not resolvable
 
 - **Date**: 2026-10-23
