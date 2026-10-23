@@ -133,15 +133,18 @@ public final class IndexMojo extends AbstractMojo {
         }
     }
 
-    private static boolean shouldCompress(Path file, int threshold) {
+    private boolean shouldCompress(Path file, int threshold) {
         try {
             if (Files.size(file) < threshold) return false;
-        } catch (IOException ignored) {
+        } catch (IOException e) {
+            // Release 21 has no unnamed catch parameter: the failure is reported at debug level instead.
+            getLog().debug("chappe-static-index: cannot read the size of " + file + ", not compressed: "
+                    + e.getMessage());
             return false;
         }
         String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
         // Skip already-compressed sidecars and non-compressible types.
-        if (name.endsWith(".gz")
+        return !(name.endsWith(".gz")
                 || name.endsWith(".br")
                 || name.endsWith(".zip")
                 || name.endsWith(".png")
@@ -154,10 +157,7 @@ public final class IndexMojo extends AbstractMojo {
                 || name.endsWith(".mp4")
                 || name.endsWith(".webm")
                 || name.endsWith(".pdf")
-                || name.endsWith(".wasm")) {
-            return false;
-        }
-        return true;
+                || name.endsWith(".wasm"));
     }
 
     private Path generateGzipSidecar(Path source) {

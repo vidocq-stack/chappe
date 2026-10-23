@@ -36,7 +36,8 @@ import io.vidocq.chappe.api.StaticFileHandler;
  */
 public final class StaticIndexedExample {
 
-    public static void main(String[] args) throws Exception {
+    /** Starts the example on port 8080; it takes no argument (a Java 25 argument-free {@code main}). */
+    public static void main() throws Exception {
         var router = Router.builder()
                 .mount(
                         "/assets",

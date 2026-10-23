@@ -28,7 +28,9 @@ import io.vidocq.chappe.api.ServerProvider;
 public final class ChappeServerProvider implements ServerProvider {
 
     /** Constructeur public requis par ServiceLoader. */
-    public ChappeServerProvider() {}
+    public ChappeServerProvider() {
+        // no state to set up: each newBuilder() call creates its own builder
+    }
 
     @Override
     public Server.Builder newBuilder() {

@@ -180,7 +180,8 @@ final class ChappeServer implements Server {
             return 0;
         }
         try (ServerSocketChannel probe = ServerSocketChannel.open()) {
-            probe.bind(new InetSocketAddress("127.0.0.1", 0));
+            // The IPv4 loopback as raw bytes: no name to resolve, whatever the IPv6 preference.
+            probe.bind(new InetSocketAddress(InetAddress.getByAddress(new byte[] {127, 0, 0, 1}), 0));
             return ((InetSocketAddress) probe.getLocalAddress()).getPort();
         }
     }
@@ -334,51 +335,64 @@ final class ChappeServer implements Server {
         if (ch == null || exec == null) return;
 
         int timeoutMs = soTimeoutMillis(config.idleTimeout());
-        while (running.get()) {
-            try {
-                SocketChannel clientChannel = ch.accept();
-                clientChannel.configureBlocking(true);
-                // Critical optimization for latency/throughput benchmarks
-                clientChannel.setOption(java.net.StandardSocketOptions.TCP_NODELAY, true);
-                // Configure read timeout (idle/read timeout)
-                clientChannel.socket().setSoTimeout(timeoutMs);
-                // Track for stop()-time force-close. Registering BEFORE submitting
-                // avoids a race where stop() runs between submit and the handler's
-                // own add: the handler removes itself in its finally block.
-                activeConnections.add(clientChannel);
-                // Race: stop() may have already iterated the live set and is now in
-                // the middle of shutdownNow(). Re-check `running`: if stop() has
-                // started, drop the freshly accepted client ourselves so its bytes
-                // can never reach the OS layer of a sibling Server (CHAPPE-004).
-                if (!running.get()) {
-                    activeConnections.remove(clientChannel);
-                    try {
-                        clientChannel.close();
-                    } catch (IOException _) {
-                        // best-effort
-                    }
-                    break;
-                }
-                try {
-                    exec.execute(() -> handleConnection(clientChannel));
-                } catch (java.util.concurrent.RejectedExecutionException _) {
-                    // Executor was shut down between our `running` check and submit.
-                    // Same remediation: deregister + close.
-                    activeConnections.remove(clientChannel);
-                    try {
-                        clientChannel.close();
-                    } catch (IOException _) {
-                        // best-effort
-                    }
-                    break;
-                }
-            } catch (AsynchronousCloseException _) {
-                break;
-            } catch (IOException e) {
-                if (running.get()) {
-                    LOG.log(System.Logger.Level.WARNING, "Accept error", e);
-                }
+        boolean accepting = true;
+        while (accepting && running.get()) {
+            accepting = acceptOne(ch, exec, timeoutMs);
+        }
+    }
+
+    /** Accepts one connection and hands it to the executor; {@code false} when the loop must stop. */
+    private boolean acceptOne(ServerSocketChannel ch, ExecutorService exec, int timeoutMs) {
+        try {
+            SocketChannel clientChannel = ch.accept();
+            clientChannel.configureBlocking(true);
+            // Critical optimization for latency/throughput benchmarks
+            clientChannel.setOption(java.net.StandardSocketOptions.TCP_NODELAY, true);
+            // Configure read timeout (idle/read timeout)
+            clientChannel.socket().setSoTimeout(timeoutMs);
+            // Track for stop()-time force-close. Registering BEFORE submitting
+            // avoids a race where stop() runs between submit and the handler's
+            // own add: the handler removes itself in its finally block.
+            activeConnections.add(clientChannel);
+            // Race: stop() may have already iterated the live set and is now in
+            // the middle of shutdownNow(). Re-check `running`: if stop() has
+            // started, drop the freshly accepted client ourselves so its bytes
+            // can never reach the OS layer of a sibling Server (CHAPPE-004).
+            if (!running.get()) {
+                dropAccepted(clientChannel);
+                return false;
             }
+            return dispatch(exec, clientChannel);
+        } catch (AsynchronousCloseException _) {
+            return false;
+        } catch (IOException e) {
+            if (running.get()) {
+                LOG.log(System.Logger.Level.WARNING, "Accept error", e);
+            }
+            return true;
+        }
+    }
+
+    /** Submits the connection to the executor; {@code false} when the executor was already shut down. */
+    private boolean dispatch(ExecutorService exec, SocketChannel clientChannel) {
+        try {
+            exec.execute(() -> handleConnection(clientChannel));
+            return true;
+        } catch (java.util.concurrent.RejectedExecutionException _) {
+            // Executor was shut down between our `running` check and submit.
+            // Same remediation: deregister + close.
+            dropAccepted(clientChannel);
+            return false;
+        }
+    }
+
+    /** Deregisters and closes a connection accepted while the server stops. */
+    private void dropAccepted(SocketChannel clientChannel) {
+        activeConnections.remove(clientChannel);
+        try {
+            clientChannel.close();
+        } catch (IOException _) {
+            // best-effort
         }
     }
 
