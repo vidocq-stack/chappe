@@ -5,6 +5,45 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-053 — a YAML block list whose first item is a bare dash is rejected
+
+- **Date**: 2026-10-23
+- **Status**: FIXED on `refactor/zero-issues-4` (Vidocq/vidocq#285)
+- **Module**: `chappe-cli` (`yaml/YamlReader`)
+- **Symptom**: a block list item written as a bare `-`, its value being the indented block below it, parses
+  everywhere except as the first item of a list: there the document fails with
+  `YAML error at 2:3 — missing ':' separator in map entry`.
+- **Minimal repro**:
+  ```
+  YamlReader.parse("items:\n  -\n    - x\n  - y\n");
+  ```
+- **Cause**: the list loop accepted `- ` and a bare `-` as items, but the code choosing the type of an indented
+  block only recognized `- `: a block opening with a bare `-` was parsed as a map.
+- **Fix**: one `isListItem` test serves the list loop, the block type and the map's "list item not expected here"
+  check (a bare `-` in a map now gets that message instead of "missing ':' separator").
+  `YamlReaderTest.blockListMayStartWithABareDash`.
+
+---
+
+## CHAPPE-052 — YAML lines indented less than the first line are silently dropped
+
+- **Date**: 2026-10-23
+- **Status**: FIXED on `refactor/zero-issues-4` (Vidocq/vidocq#285)
+- **Module**: `chappe-cli` (`yaml/YamlReader`)
+- **Symptom**: when the first line of a `chappe serve` configuration file is indented, the first line indented
+  less than it ends the document: that line and every line after it are ignored, with no error, so whole
+  sections (`static`, `headers`) can be lost.
+- **Minimal repro**:
+  ```
+  YamlReader.parse("  a: 1\nb: 2\n");   // returned {a=1}
+  ```
+- **Cause**: `parse` read the root map at the first line's indentation and returned it without checking that
+  the cursor had reached the end; a dedent is the only thing that stops the root map early.
+- **Fix**: `parse` rejects the remaining line with `unexpected indentation (expected <first>, got <n>)` and its
+  line and column. `YamlReaderTest.lineIndentedLessThanTheFirstOneIsRejected`.
+
+---
+
 ## CHAPPE-042 — the bench images no longer build: vidocq-parent SNAPSHOT is not resolvable
 
 - **Date**: 2026-10-23

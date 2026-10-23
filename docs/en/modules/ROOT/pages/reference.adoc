@@ -360,6 +360,8 @@ logging:
 
 Documented subset: nested maps, inline lists `[a, b]` and block `- item`, string/int/bool scalars, `#` comments. No anchors, no `!!` tags, no multilines.
 
+Indentation uses spaces only: a tab is rejected with its line and column. A line indented less than the first line of the document is rejected too [.tag-new]#NEW#, where the lines from there on used to be dropped without a word. A block list item may be a bare `-`, its value being the more indented block below it, the first item included [.tag-new]#NEW#.
+
 [#_observability]
 == Observability
 

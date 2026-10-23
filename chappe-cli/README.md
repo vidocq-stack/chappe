@@ -42,7 +42,8 @@ chappe serve --config /etc/chappe/config.yml
 
 Format aligned with `vidocq-docs/chappe-config.yml`. Documented subset (nested
 maps, inline/block lists, string/int/bool scalars, `#` comments). **No**
-anchors, `!!` tags, or multiline `|`/`>`.
+anchors, `!!` tags, or multiline `|`/`>`. Indentation uses spaces only, and a
+line indented less than the first line of the file is rejected.
 
 ```yaml
 server:
