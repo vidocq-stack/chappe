@@ -88,6 +88,28 @@ jobs:
           echo "docs-only=$docs_only" >> "$GITHUB_OUTPUT"
           echo "docs-only: $docs_only"
 
+          # Test-only change set: every file is under a src/test/ directory (any module) or is a doc
+          # file accepted above. Only the downstream rebuild (ci/build-impacted) is skipped for it:
+          # test code is not part of the produced artifacts, so consumers cannot observe the change.
+          # The producer's own build, unit tests and TCK still run. Forced to false when a pom.xml
+          # declares `<goal>test-jar</goal>`: a published test jar makes test changes visible downstream.
+          test_only=true
+          [ -n "$(printf '%s' "$files" | tr -d '[:space:]')" ] || test_only=false
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            case "$f" in
+              src/test/*|*/src/test/*) ;;
+              src/*|*/src/*) test_only=false; break ;;
+              *.md|*.adoc|docs/*|LICENSE|LICENSE.*|NOTICE|NOTICE.*) ;;
+              *) test_only=false; break ;;
+            esac
+          done <<< "$files"
+          if [ "$test_only" = true ] && grep -rqs --include=pom.xml -e '<goal>test-jar</goal>' .; then
+            test_only=false
+          fi
+          echo "test-only=$test_only" >> "$GITHUB_OUTPUT"
+          echo "test-only: $test_only"
+
       - uses: https://codefloe.com/Vidocq/ci/setup-maven@main
         if: steps.changes.outputs.docs-only != 'true'
 
@@ -168,7 +190,7 @@ jobs:
         run: mvn -B -ntp install
 
       - name: Rebuild impacted downstream consumers against the local PR artifacts
-        if: steps.changes.outputs.docs-only != 'true'
+        if: steps.changes.outputs.docs-only != 'true' && steps.changes.outputs.test-only != 'true'
         uses: https://codefloe.com/Vidocq/ci/build-impacted@main
         with:
           producer-slug: ${{ github.repository }}

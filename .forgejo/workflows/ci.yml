@@ -5,6 +5,12 @@ on:
   push:
     branches: [main]
 
+# One main run at a time, queued, never cancelled: a newer merge must not cut a deploy halfway
+# (Forgejo cancels superseded runs by default; with a group and cancel-in-progress: false it queues them).
+concurrency:
+  group: publish-${{ github.repository }}
+  cancel-in-progress: false
+
 jobs:
   build-and-deploy:
     runs-on: vidocq-runner
