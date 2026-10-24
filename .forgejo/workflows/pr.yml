@@ -1,16 +1,31 @@
-# Pull-request validation in a SINGLE job. There is NO staging registry anymore
-# (the old Reposilite repo.vidocq.dev is gone, and Maven Central cannot host
-# ephemeral PR artifacts): the producer AND every impacted downstream consumer is
-# built and resolved straight from the runner's local ~/.m2.
+# Pull-request validation: the producer, then its downstream consumers in PARALLEL ("flat"
+# check, Vidocq/vidocq#285, CI study step 2). There is NO staging registry: nothing is
+# published. Each job builds what it needs at a release-style PR version (<base>-PR<n>.<sha8>),
+# straight into its own local ~/.m2.
 #
-#   1. build the producer at a release-style PR version  -> installed in ~/.m2
-#   2. ci/build-impacted resolves the transitive consumers from the Vidocq graph
-#      and rebuilds each one, in topological order, against those local PR
-#      artifacts (release versions are immutable for Maven, so they are never
-#      re-fetched from the network — no -SNAPSHOT, no offline, no central pollution).
+#   governance-checks  CLA, GPG signature, Signed-off-by. Required context
+#                      `pr-validate / governance-checks (pull_request)`.
+#   producer           build, unit tests and declared TCK of this repository at the PR version,
+#                      plus its own checks.
+#   impacted           the transitive consumers, from the Vidocq dependency graph, as a matrix
+#                      (ci/resolve-impacted), in parallel with the producer.
+#   downstream         one job per consumer (ci/build-one-consumer): the producer rebuilt at the
+#                      PR version without tests, then the consumer against it, with its tests.
+#                      Only the producer's version is pinned; every other io.vidocq upstream
+#                      comes from central-snapshots as published, which is what Central holds
+#                      right after the merge. An intermediate upstream with a companion branch
+#                      for this PR is rebuilt first, in the same job.
+#   pr-validate        the aggregator. Required context `pr-validate / pr-validate
+#                      (pull_request)`, unchanged. It always runs and fails unless governance,
+#                      producer, impacted and downstream all succeeded. A skipped downstream
+#                      passes ONLY for a docs-only or test-only change set, or when no consumer
+#                      is impacted: on Forgejo a skipped job satisfies branch protection, so a
+#                      skip must never pass when work was expected.
 #
-# The success of this single `pr-validate` job is the only required check to set
-# in branch protection.
+# Pull requests no longer check the eventual state, where every intermediate consumer is rebuilt
+# in order against the new producer. The producers with at least 5 transitive consumers check it
+# every night on main with the sequential chain (downstream-nightly.yml, non-blocking, Slack on
+# red).
 #
 # Kept in sync with GestionProjet/workflow-templates/pr-producer.yml — edit there
 # and re-propagate to every producer repo.
@@ -38,11 +53,17 @@ jobs:
           pr-author: ${{ github.event.pull_request.user.login }}
           slack-webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
 
-  pr-validate:
-    # Gate the build on the governance checks: a PR that fails the CLA/GPG/sign-off gate
-    # is skipped here, so it never emits a "PR validated" success notification.
+  # Build, unit tests and declared TCK of this repository at the PR version, plus its own
+  # checks. Like every job, gated on the governance checks: a PR that fails the
+  # CLA/GPG/sign-off gate builds nothing and is never reported as validated.
+  producer:
     needs: governance-checks
     runs-on: vidocq-runner
+    outputs:
+      docs-only: ${{ steps.changes.outputs.docs-only }}
+      test-only: ${{ steps.changes.outputs.test-only }}
+      version: ${{ steps.version.outputs.version }}
+      suffix: ${{ steps.version.outputs.suffix }}
     steps:
       - uses: actions/checkout@v4
 
@@ -189,14 +210,81 @@ jobs:
         # install runs the full lifecycle incl. integration-test/verify.
         run: mvn -B -ntp install
 
-      - name: Rebuild impacted downstream consumers against the local PR artifacts
-        if: steps.changes.outputs.docs-only != 'true' && steps.changes.outputs.test-only != 'true'
-        uses: https://codefloe.com/Vidocq/ci/build-impacted@main
+  # Graph resolution only (no checkout, no Maven), in parallel with the producer build.
+  impacted:
+    needs: governance-checks
+    runs-on: vidocq-runner
+    outputs:
+      matrix: ${{ steps.resolve.outputs.matrix }}
+      count: ${{ steps.resolve.outputs.count }}
+      upstreams: ${{ steps.resolve.outputs.upstreams }}
+    steps:
+      - id: resolve
+        uses: https://codefloe.com/Vidocq/ci/resolve-impacted@main
         with:
           producer-slug: ${{ github.repository }}
-          producer-version: ${{ steps.version.outputs.version }}
-          version-suffix: ${{ steps.version.outputs.suffix }}
           bot-token: ${{ secrets.VIDOCQ_BOT_TOKEN }}
+
+  # One job per consumer, once the producer's own build and tests are green. Skipped for a
+  # docs-only or test-only change set (test code is not part of the produced artifacts) and when
+  # no consumer is impacted; the aggregator checks that a skip was expected.
+  downstream:
+    needs: [producer, impacted]
+    if: needs.producer.outputs.docs-only != 'true' && needs.producer.outputs.test-only != 'true' && needs.impacted.outputs.count != '0'
+    runs-on: vidocq-runner
+    strategy:
+      fail-fast: false          # report every broken consumer at once
+      max-parallel: 6           # 6 of the org's ~20 slots
+      matrix: ${{ fromJSON(needs.impacted.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: https://codefloe.com/Vidocq/ci/setup-maven@main
+      - uses: https://codefloe.com/Vidocq/ci/build-one-consumer@main
+        with:
+          consumer: ${{ matrix.repo }}
+          upstreams: ${{ fromJSON(needs.impacted.outputs.upstreams)[matrix.repo] }}
+          producer-slug: ${{ github.repository }}
+          producer-version: ${{ needs.producer.outputs.version }}
+          version-suffix: ${{ needs.producer.outputs.suffix }}
+          bot-token: ${{ secrets.VIDOCQ_BOT_TOKEN }}
+
+  # The aggregator, required context `pr-validate / pr-validate (pull_request)`. It always runs:
+  # a skipped job counts as a success for Forgejo branch protection, so this job decides, and a
+  # skip passes only when no work was expected.
+  pr-validate:
+    needs: [governance-checks, producer, impacted, downstream]
+    if: always()
+    runs-on: vidocq-runner
+    steps:
+      - name: Verdict
+        env:
+          GOVERNANCE: ${{ needs.governance-checks.result }}
+          PRODUCER: ${{ needs.producer.result }}
+          IMPACTED: ${{ needs.impacted.result }}
+          DOWNSTREAM: ${{ needs.downstream.result }}
+          DOCS_ONLY: ${{ needs.producer.outputs.docs-only }}
+          TEST_ONLY: ${{ needs.producer.outputs.test-only }}
+          COUNT: ${{ needs.impacted.outputs.count }}
+        run: |
+          set -eu
+          fail() { echo "::error title=pr-validate::$1"; exit 1; }
+          echo "governance=$GOVERNANCE producer=$PRODUCER impacted=$IMPACTED downstream=$DOWNSTREAM docs-only=${DOCS_ONLY:-?} test-only=${TEST_ONLY:-?} consumers=${COUNT:-?}"
+          [ "$GOVERNANCE" = success ] || fail "governance checks: ${GOVERNANCE}"
+          [ "$PRODUCER" = success ] || fail "producer build, tests or checks: ${PRODUCER}"
+          [ "$IMPACTED" = success ] || fail "the impacted consumers were not resolved: ${IMPACTED}"
+          case "$DOWNSTREAM" in
+            success)
+              echo "Every impacted consumer (${COUNT}) built against the pull request." ;;
+            skipped)
+              if [ "$DOCS_ONLY" = true ] || [ "$TEST_ONLY" = true ]; then
+                echo "Docs-only or test-only change set: no downstream build expected."
+              elif [ "$COUNT" = 0 ]; then
+                echo "No impacted consumer on the forge: nothing to build."
+              else
+                fail "downstream skipped although ${COUNT:-an unknown number of} consumer(s) were expected"
+              fi ;;
+            *) fail "downstream: ${DOWNSTREAM}. At least one consumer failed or was cancelled; see the downstream jobs." ;;
+          esac
 
       - name: Notify Slack on PR success
         if: success()

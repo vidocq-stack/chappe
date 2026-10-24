@@ -1,0 +1,114 @@
+# Nightly downstream chain (Vidocq/vidocq#285, CI study step 2c), added with the flat pr.yml.
+# Only the producers with at least 5 transitive consumers in the dependency graph run it
+# (vauban, chappe, cassini, champollion, ravel); their crons are staggered by 5 minutes.
+#
+# The pull-request check is "flat": each consumer is built against the PR producer plus the
+# SNAPSHOTs on central-snapshots as published. What it no longer checks is the eventual state,
+# where every intermediate consumer is rebuilt against the new producer, in topological order.
+# This workflow checks that state every night on main, with the sequential chain the pull
+# requests used before (ci/build-impacted): the producer at <base>-NIGHTLY.<sha8>, then every
+# transitive consumer pinned to the producer AND to every consumer rebuilt before it.
+#
+# Non-blocking: it gates nothing and publishes nothing (install only, into the job's local
+# repository). A red run posts to Slack; it means main of this repository plus the main
+# branches of its consumers do not build together (two producers merged the same day, a
+# consumer relying on an intermediate it did not pin, a latent downstream bug...). Flaky tests
+# are rerun once and listed in the job summary, as on pull requests.
+#
+# Prerequisite: org secrets VIDOCQ_BOT_TOKEN (read graph, clone consumers) and SLACK_WEBHOOK_URL.
+# ci/setup-maven leaves the `io/vidocq/*-NIGHTLY*` artifacts out of the saved Maven cache, as it
+# does for `*-PR<n>*`: merge that Vidocq/ci change before this workflow first runs.
+name: downstream-nightly
+on:
+  schedule:
+    - cron: '35 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  chain:
+    runs-on: vidocq-runner
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: https://codefloe.com/Vidocq/ci/setup-maven@main
+
+      - name: Compute the nightly version (release-style, no -SNAPSHOT)
+        id: version
+        run: |
+          set -euo pipefail
+          BASE=$(python3 - <<'PY'
+          import re, sys, xml.etree.ElementTree as ET
+          root = ET.parse("pom.xml").getroot()
+          ns = root.tag[1:].split("}", 1)[0] if root.tag.startswith("{") else ""
+          v = root.find(f"{{{ns}}}version") if ns else root.find("version")
+          if v is None or not v.text:
+              sys.stderr.write(f"root <version> not found (ns={ns!r})\n"); sys.exit(1)
+          print(re.sub(r"-SNAPSHOT$", "", v.text.strip()))
+          PY
+          )
+          SHA8="${GITHUB_SHA:0:8}"
+          SUFFIX="NIGHTLY.${SHA8}"
+          echo "suffix=$SUFFIX" >> "$GITHUB_OUTPUT"
+          echo "version=${BASE}-${SUFFIX}" >> "$GITHUB_OUTPUT"
+          echo "Nightly version: ${BASE}-${SUFFIX}"
+
+      - name: Set the nightly version across the reactor
+        run: |
+          mvn -B -ntp versions:set \
+            -DnewVersion=${{ steps.version.outputs.version }} \
+            -DprocessAllModules=true -DgenerateBackupPoms=false
+
+      - name: Sync plugin.xml descriptors with the nightly version
+        run: |
+          python3 - <<'PY'
+          import re, xml.etree.ElementTree as ET
+          from pathlib import Path
+          rp = ET.parse("pom.xml").getroot()
+          ns = rp.tag[1:].split("}", 1)[0] if rp.tag.startswith("{") else ""
+          v = rp.find(f"{{{ns}}}version") if ns else rp.find("version")
+          version = v.text.strip()
+          n = 0
+          for pom in Path(".").rglob("pom.xml"):
+              if "target" in pom.parts:
+                  continue
+              try:
+                  r = ET.parse(pom).getroot()
+              except ET.ParseError:
+                  continue
+              pns = r.tag[1:].split("}", 1)[0] if r.tag.startswith("{") else ""
+              pkg = r.find(f"{{{pns}}}packaging") if pns else r.find("packaging")
+              if pkg is None or (pkg.text or "").strip() != "maven-plugin":
+                  continue
+              px = pom.parent / "src/main/resources/META-INF/maven/plugin.xml"
+              if not px.is_file():
+                  continue
+              content = px.read_text(encoding="utf-8")
+              new = re.sub(r"(<artifactId>[^<]+</artifactId>\s*\n\s*<version>)[^<]+(</version>)",
+                           rf"\g<1>{version}\g<2>", content, count=1)
+              if new != content:
+                  px.write_text(new, encoding="utf-8"); n += 1
+          print(f"plugin.xml synced: {n}")
+          PY
+
+      # Tests already ran on main's own CI for this commit: the chain is what this job is for.
+      - name: Install the producer locally
+        run: mvn -B -ntp install -DskipTests
+
+      - name: Rebuild every downstream consumer in order (sequential chain)
+        uses: https://codefloe.com/Vidocq/ci/build-impacted@main
+        with:
+          producer-slug: ${{ github.repository }}
+          producer-version: ${{ steps.version.outputs.version }}
+          version-suffix: ${{ steps.version.outputs.suffix }}
+          bot-token: ${{ secrets.VIDOCQ_BOT_TOKEN }}
+          companion-branches: 'false'   # main against main
+
+      - name: Notify Slack on a red chain
+        if: failure()
+        uses: https://codefloe.com/Vidocq/ci/notify-slack@main
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          status: failure
+          repo: ${{ github.repository }}
+          ref: downstream-nightly
+          run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_number }}
