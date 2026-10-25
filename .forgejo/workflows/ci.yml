@@ -33,12 +33,14 @@ jobs:
 
       - uses: ./.ci-action/setup-maven
 
-      - name: Build & test
-        run: mvn -B -ntp -U verify
-
-      - name: Deploy to Maven Central
+      # One pass: the deploy builds and tests the reactor itself. Safe because vidocq-parent sets
+      # deployAtEnd (Vidocq/vidocq-parent#18): a failing test stops the build before the deferred
+      # upload, so nothing is published. The separate verify built everything twice.
+      - name: Build, test & deploy to Maven Central
         uses: ./.ci-action/deploy-maven
         with:
+          maven-args: -B -ntp -U
+          skip-tests: "false"
           central-username: ${{ secrets.CENTRAL_USERNAME }}
           central-password: ${{ secrets.CENTRAL_PASSWORD }}
           gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
