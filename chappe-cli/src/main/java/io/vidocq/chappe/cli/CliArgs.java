@@ -17,6 +17,7 @@
  *
  * SPDX-License-Identifier: EPL-2.0 OR EUPL-1.2 OR GPL-2.0-or-later
  */
+// Trial of the targeted downstream tests (Vidocq/vidocq#285): never merged.
 package io.vidocq.chappe.cli;
 
 import java.nio.file.Path;
