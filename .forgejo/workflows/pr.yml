@@ -251,6 +251,9 @@ jobs:
           producer-version: ${{ needs.producer.outputs.version }}
           version-suffix: ${{ needs.producer.outputs.suffix }}
           bot-token: ${{ secrets.VIDOCQ_BOT_TOKEN }}
+          # Run only the consumer tests whose build can see a chappe artifact. Every module still
+          # compiles and packages, and any doubt falls back to the full test run (Vidocq/ci#54).
+          tests: targeted
 
   # The aggregator, required context `pr-validate / pr-validate (pull_request)`. It always runs:
   # a skipped job counts as a success for Forgejo branch protection, so this job decides, and a
