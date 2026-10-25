@@ -1,7 +1,11 @@
 name: update-dependency-graph
 
-# Extracts this repo's io.vidocq.* dependencies and pushes them into
-# Vidocq/GestionProjet/data (source of truth for the cross-repo PR validation).
+# Extracts this repository's io.vidocq.* artifacts and dependencies and pushes them into
+# Vidocq/dep-graph (data/<owner>_<repo>.json, with graph/inverted.json rebuilt in the same
+# commit), the graph the pull-request downstream check reads (ci/resolve-impacted).
+#
+# Prerequisite: org secret VIDOCQ_BOT_TOKEN, with write access to Vidocq/dep-graph.
+# Run it once by hand (workflow_dispatch) after adding it, to register the repository.
 on:
   push:
     branches: [main, master]

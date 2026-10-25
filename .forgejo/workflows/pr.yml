@@ -3,6 +3,16 @@
 # published. Each job builds what it needs at a release-style PR version (<base>-PR<n>.<sha8>),
 # straight into its own local ~/.m2.
 #
+#   pr-state           what the pull request is NOW, read through the API (ci/pr-validate-gate, mode
+#                      state), and so which jobs run:
+#                        - a train member (label `train-member`, a line `Train-top: #N` in the
+#                          description) builds nothing: it is validated through its train's top and
+#                          landed by ci/scripts/train-merge.py;
+#                        - a WIP or blocked pull request (the maintainer's rule: `wip` anywhere in the
+#                          title, a `Draft:`/`[draft]` prefix, a draft, a label containing `wip` or
+#                          `blocked`) builds and tests the producer, not its consumers;
+#                        - an edit or a label change that leaves the pull request as it was reproduces
+#                          the verdict of the latest completed run on the same commit, builds nothing.
 #   governance-checks  CLA, GPG signature, Signed-off-by. Required context
 #                      `pr-validate / governance-checks (pull_request)`.
 #   producer           build, unit tests and declared TCK of this repository at the PR version,
@@ -16,11 +26,15 @@
 #                      right after the merge. An intermediate upstream with a companion branch
 #                      for this PR is rebuilt first, in the same job.
 #   pr-validate        the aggregator. Required context `pr-validate / pr-validate
-#                      (pull_request)`, unchanged. It always runs and fails unless governance,
-#                      producer, impacted and downstream all succeeded. A skipped downstream
-#                      passes ONLY for a docs-only or test-only change set, or when no consumer
-#                      is impacted: on Forgejo a skipped job satisfies branch protection, so a
-#                      skip must never pass when work was expected.
+#                      (pull_request)`, unchanged. It always runs, and ci/pr-validate-gate (mode
+#                      verdict) decides from toJSON(needs): it fails unless governance, producer,
+#                      impacted and downstream all succeeded. A skipped downstream passes ONLY for a
+#                      docs-only or test-only change set, or when no consumer is impacted: on Forgejo
+#                      a skipped job satisfies branch protection, so a skip must never pass when work
+#                      was expected. It FAILS a train member and a WIP or blocked pull request ("WIP:
+#                      downstream not run; remove WIP to validate", "Blocked: ..."), and reproduces a
+#                      verdict when the state job said so. Every rule lives in the composite, resolved from @main: a change of
+#                      policy needs no change here.
 #
 # Pull requests no longer check the eventual state, where every intermediate consumer is rebuilt
 # in order against the new producer. The producers with at least 5 transitive consumers check it
@@ -36,8 +50,28 @@ name: pr-validate
 on:
   pull_request:
     branches: [main]
+    # opened, synchronize, reopened: the defaults. edited: a title change (adding or removing `wip`, `Draft:`)
+    # validates again. labeled, unlabeled: adding or removing a wip, blocked or `train-member` label does too (Forgejo 16
+    # sends one of them per label added or removed). A run whose change is irrelevant (a description edit)
+    # reproduces the last verdict instead of building again: see the pr-state job.
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
 
 jobs:
+  # What the pull request is now (ready, WIP, train member), and which jobs run. No checkout: API reads only,
+  # anonymous on a fork pull request (public repositories).
+  pr-state:
+    runs-on: vidocq-runner
+    outputs:
+      state: ${{ steps.state.outputs.state }}
+      run-producer: ${{ steps.state.outputs.run-producer }}
+      run-downstream: ${{ steps.state.outputs.run-downstream }}
+    steps:
+      - id: state
+        uses: https://codefloe.com/Vidocq/ci/pr-validate-gate@main
+        with:
+          mode: state
+          token: ${{ secrets.VIDOCQ_BOT_TOKEN }}
+
   # CLA + GPG-signature + Signed-off-by gate, mutualised in a composite action
   # (https://codefloe.com/Vidocq/ci/governance-checks). Forgejo does not resolve
   # cross-repo reusable workflows, so the shared logic ships as a step-level action.
@@ -55,9 +89,11 @@ jobs:
 
   # Build, unit tests and declared TCK of this repository at the PR version, plus its own
   # checks. Like every job, gated on the governance checks: a PR that fails the
-  # CLA/GPG/sign-off gate builds nothing and is never reported as validated.
+  # CLA/GPG/sign-off gate builds nothing and is never reported as validated. Not run for a
+  # train member, nor when the state job reproduces an earlier verdict.
   producer:
-    needs: governance-checks
+    needs: [governance-checks, pr-state]
+    if: needs.pr-state.outputs.run-producer == 'true'
     runs-on: vidocq-runner
     outputs:
       docs-only: ${{ steps.changes.outputs.docs-only }}
@@ -229,9 +265,23 @@ jobs:
         # install runs the full lifecycle incl. integration-test/verify.
         run: mvn -B -ntp install
 
-  # Graph resolution only (no checkout, no Maven), in parallel with the producer build.
+      # Build the producer once (Vidocq/ci producer-artifacts, Vidocq/vidocq#285): the artifacts just
+      # installed at the PR version (no sources, javadoc or test jars) go to the run as
+      # producer-artifacts-<run id>, which the downstream jobs install, sha256-checked, instead of
+      # rebuilding the producer each (any problem: they rebuild). Published whenever the build runs and
+      # the downstream check may run, without waiting for the impacted matrix; the verdict job deletes
+      # it, and its one-day retention is the backstop.
+      - name: Share the producer artifacts with the downstream jobs
+        if: steps.changes.outputs.docs-only != 'true' && steps.changes.outputs.test-only != 'true' && steps.reuse.outputs.reused != 'true' && needs.pr-state.outputs.run-downstream == 'true'
+        uses: https://codefloe.com/Vidocq/ci/producer-artifacts@main
+        with:
+          producer-version: ${{ steps.version.outputs.version }}
+
+  # Graph resolution only (no checkout, no Maven), in parallel with the producer build. Only when the
+  # downstream check runs (not for a WIP pull request or a train member).
   impacted:
-    needs: governance-checks
+    needs: [governance-checks, pr-state]
+    if: needs.pr-state.outputs.run-downstream == 'true'
     runs-on: vidocq-runner
     outputs:
       matrix: ${{ steps.resolve.outputs.matrix }}
@@ -245,11 +295,12 @@ jobs:
           bot-token: ${{ secrets.VIDOCQ_BOT_TOKEN }}
 
   # One job per consumer, once the producer's own build and tests are green. Skipped for a
-  # docs-only or test-only change set (test code is not part of the produced artifacts) and when
-  # no consumer is impacted; the aggregator checks that a skip was expected.
+  # docs-only or test-only change set (test code is not part of the produced artifacts), when
+  # no consumer is impacted, for a WIP pull request and a train member; the aggregator checks
+  # that a skip was expected.
   downstream:
-    needs: [producer, impacted]
-    if: needs.producer.outputs.docs-only != 'true' && needs.producer.outputs.test-only != 'true' && needs.producer.outputs.reused != 'true' && needs.impacted.outputs.count != '0'
+    needs: [pr-state, producer, impacted]
+    if: needs.pr-state.outputs.run-downstream == 'true' && needs.producer.outputs.docs-only != 'true' && needs.producer.outputs.test-only != 'true' && needs.producer.outputs.reused != 'true' && needs.impacted.outputs.count != '0'
     runs-on: vidocq-runner
     strategy:
       fail-fast: false          # report every broken consumer at once
@@ -260,6 +311,8 @@ jobs:
       - uses: https://codefloe.com/Vidocq/ci/setup-maven@main
       - uses: https://codefloe.com/Vidocq/ci/build-one-consumer@main
         with:
+          # The producer artifacts the producer job shared; a missing or unsound one rebuilds it.
+          producer-artifacts: producer-artifacts-${{ github.run_id }}
           consumer: ${{ matrix.repo }}
           upstreams: ${{ fromJSON(needs.impacted.outputs.upstreams)[matrix.repo] }}
           producer-slug: ${{ github.repository }}
@@ -272,49 +325,34 @@ jobs:
 
   # The aggregator, required context `pr-validate / pr-validate (pull_request)`. It always runs:
   # a skipped job counts as a success for Forgejo branch protection, so this job decides, and a
-  # skip passes only when no work was expected.
+  # skip passes only when no work was expected. The whole verdict lives in ci/pr-validate-gate,
+  # which needs every job above under these exact ids.
   pr-validate:
-    needs: [governance-checks, producer, impacted, downstream]
+    needs: [governance-checks, pr-state, producer, impacted, downstream]
     if: always()
     runs-on: vidocq-runner
     steps:
+      # The shared producer artifacts are only needed during the run. Never fails; independent of the
+      # verdict below, which reads `needs` only.
+      - name: Delete the shared producer artifacts
+        if: always()
+        uses: https://codefloe.com/Vidocq/ci/producer-artifacts@main
+        with:
+          mode: delete
+
       - name: Verdict
-        env:
-          GOVERNANCE: ${{ needs.governance-checks.result }}
-          PRODUCER: ${{ needs.producer.result }}
-          IMPACTED: ${{ needs.impacted.result }}
-          DOWNSTREAM: ${{ needs.downstream.result }}
-          DOCS_ONLY: ${{ needs.producer.outputs.docs-only }}
-          TEST_ONLY: ${{ needs.producer.outputs.test-only }}
-          REUSED: ${{ needs.producer.outputs.reused }}
-          COUNT: ${{ needs.impacted.outputs.count }}
-        run: |
-          set -eu
-          fail() { echo "::error title=pr-validate::$1"; exit 1; }
-          echo "governance=$GOVERNANCE producer=$PRODUCER impacted=$IMPACTED downstream=$DOWNSTREAM docs-only=${DOCS_ONLY:-?} test-only=${TEST_ONLY:-?} consumers=${COUNT:-?}"
-          [ "$GOVERNANCE" = success ] || fail "governance checks: ${GOVERNANCE}"
-          [ "$PRODUCER" = success ] || fail "producer build, tests or checks: ${PRODUCER}"
-          [ "$IMPACTED" = success ] || fail "the impacted consumers were not resolved: ${IMPACTED}"
-          case "$DOWNSTREAM" in
-            success)
-              echo "Every impacted consumer (${COUNT}) built against the pull request." ;;
-            skipped)
-              if [ "$REUSED" = true ]; then
-                echo "Same code tree as a validated run (Vidocq/ci#57): no build expected."
-              elif [ "$DOCS_ONLY" = true ] || [ "$TEST_ONLY" = true ]; then
-                echo "Docs-only or test-only change set: no downstream build expected."
-              elif [ "$COUNT" = 0 ]; then
-                echo "No impacted consumer on the forge: nothing to build."
-              else
-                fail "downstream skipped although ${COUNT:-an unknown number of} consumer(s) were expected"
-              fi ;;
-            *) fail "downstream: ${DOWNSTREAM}. At least one consumer failed or was cancelled; see the downstream jobs." ;;
-          esac
+        id: gate
+        uses: https://codefloe.com/Vidocq/ci/pr-validate-gate@main
+        with:
+          mode: verdict
+          needs: ${{ toJSON(needs) }}
+          token: ${{ secrets.VIDOCQ_BOT_TOKEN }}
 
       - name: Record the validated code tree
         # A later push of the same code reuses this run (Vidocq/ci#57): a ref refs/validated/pr-validate/<id>, pushed with the
-        # bot token. Not for a docs-only change set, which built nothing.
-        if: success() && needs.producer.outputs.docs-only != 'true' && needs.producer.outputs.reused != 'true'
+        # bot token. Not for a docs-only change set, which built nothing, and only when the producer ran here: a run
+        # that reproduces an earlier verdict (ci/pr-validate-gate) has no tree id and nothing new to record.
+        if: success() && needs.producer.result == 'success' && needs.producer.outputs.docs-only != 'true' && needs.producer.outputs.reused != 'true'
         uses: https://codefloe.com/Vidocq/ci/validated-tree@main
         with:
           mode: record
@@ -322,8 +360,9 @@ jobs:
           tree-id: ${{ needs.producer.outputs.tree-id }}
           bot-token: ${{ secrets.VIDOCQ_BOT_TOKEN }}
 
+      # Not for a reproduced verdict (a description edit): the pull request was announced already.
       - name: Notify Slack on PR success
-        if: success()
+        if: success() && steps.gate.outputs.notify == 'true'
         uses: https://codefloe.com/Vidocq/ci/notify-slack@main
         with:
           webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
