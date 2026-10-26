@@ -10,7 +10,7 @@ Chappe is at `{project-version}`. A production migration is premature. The table
 ====
 
 [#upgrading]
-== Upgrading from {release-version} [.tag-new]#NEW#
+== Upgrading from {release-version}
 
 Chappe is still in `0.x`, and this release is a minor bump (`{release-version}` to `{project-version}`). No versioning policy is published beyond that. In `0.x`, a minor release may break the source or binary API. This one does, for `ServerConfig` and `Server.Builder` (see below), so read every bullet before upgrading.
 

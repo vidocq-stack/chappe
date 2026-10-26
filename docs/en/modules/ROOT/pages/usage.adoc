@@ -33,7 +33,7 @@ Key points:
 * Certificate and key are loaded from a JDK keystore (`KeyStore.getInstance("PKCS12")`). No native PEM loader on the Chappe side.
 
 [#client-certificates]
-=== Client certificates [.tag-new]#NEW#
+=== Client certificates
 
 A TLS listener can ask clients for a certificate. Pass a `ClientAuth` mode with the context; the context's trust managers decide which certificates are accepted, so build it with a `TrustManagerFactory` over the certificates or CAs you trust:
 
@@ -87,10 +87,10 @@ When the server rejects a handshake, it sends the TLS alert that says why, then 
 
 A `ClientAuth` other than `NONE` without an `SSLContext` fails at `build()` with an `IllegalArgumentException`.
 
-[.tag-new]#NEW# Client certificates work over TLS 1.2 and TLS 1.3. A TLS 1.2 client sends its certificate, its key exchange and its `Finished` together and then waits for the server: the handshake unwraps everything it has received before it reads the socket again (chappe#24).
+Client certificates work over TLS 1.2 and TLS 1.3. A TLS 1.2 client sends its certificate, its key exchange and its `Finished` together and then waits for the server: the handshake unwraps everything it has received before it reads the socket again (chappe#24).
 
 [#request-tls]
-=== Reading the TLS session in a handler [.tag-new]#NEW#
+=== Reading the TLS session in a handler
 
 `Request.tls()` returns the `TlsInfo` of the connection, or `Optional.empty()` on cleartext. It is present exactly when `isSecure()` is `true`:
 
@@ -108,9 +108,9 @@ HTTP/2 (RFC 9113) is carried by `chappe-http`: framing, HPACK (RFC 7541) with Hu
 
 Without TLS, Chappe supports HTTP/2 cleartext (h2c) with **prior knowledge** only: a client that opens the connection with the HTTP/2 preface (`PRI * HTTP/2.0`) is routed straight to the HTTP/2 pipeline; any other cleartext connection is parsed as HTTP/1.1. There is no `Upgrade: h2c` handshake (RFC 9113 deprecated it).
 
-[.tag-new]#NEW# A response's connection-specific fields (`Connection`, `Keep-Alive`, `Proxy-Connection`, `Transfer-Encoding`, `Upgrade`, and `TE` other than `trailers`) are not sent over HTTP/2: RFC 9113 §8.2.2 makes a message carrying one malformed. Chappe leaves them out of the headers and the trailers, and trims leading and trailing spaces and tabs from every value (§8.2.1). Over HTTP/1.1 they are sent as set.
+A response's connection-specific fields (`Connection`, `Keep-Alive`, `Proxy-Connection`, `Transfer-Encoding`, `Upgrade`, and `TE` other than `trailers`) are not sent over HTTP/2: RFC 9113 §8.2.2 makes a message carrying one malformed. Chappe leaves them out of the headers and the trailers, and trims leading and trailing spaces and tabs from every value (§8.2.1). Over HTTP/1.1 they are sent as set.
 
-[.tag-new]#NEW# An HTTP/2 request carries its authority in the `:authority` pseudo-header, not in a `Host` field (RFC 9113 §8.3.1). Chappe hands it to the handler as the `host` header, unless the request carries one, so `req.header("Host")` and `req.uri()` read the same on both protocols (CHAPPE-047).
+An HTTP/2 request carries its authority in the `:authority` pseudo-header, not in a `Host` field (RFC 9113 §8.3.1). Chappe hands it to the handler as the `host` header, unless the request carries one, so `req.header("Host")` and `req.uri()` read the same on both protocols (CHAPPE-047).
 
 Not supported over HTTP/2:
 

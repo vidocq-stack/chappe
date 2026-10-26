@@ -72,7 +72,7 @@ On HTTP/1.1, in-memory and file bodies are written with as few socket writes as 
 After the last chunk of a chunked body, the transport calls `Response.trailers()` and writes the fields it returns into the trailer section (RFC 9112 §7.1.2). Choosing which names may appear in a trailer section is left to the caller: RFC 9110 §6.5.1 forbids framing fields such as `Content-Length` or `Transfer-Encoding` there. HTTP/2 sends the same trailers as a final HEADERS frame.
 
 [#header-validation]
-=== Header and trailer validation [.tag-new]#NEW#
+=== Header and trailer validation
 
 Every response field follows one rule, so that no field can be injected into the response head and none reaches the wire truncated:
 
@@ -106,7 +106,7 @@ Helpers shipped on `Filter`:
 * `Filter.addHeaderIfEnv(envVar, expected, name, value)` — gate on an environment variable (typical: staging).
 * `Filter.gzip()` / `Filter.gzip(threshold)` — on-the-fly compression negotiated through `Accept-Encoding`.
 
-[.tag-new]#NEW# These helpers keep the handler's trailers: the filtered response asks the original for them once the body has been read, so trailers computed from the body survive.
+These helpers keep the handler's trailers: the filtered response asks the original for them once the body has been read, so trailers computed from the body survive.
 
 WARNING: Chappe recognises a connection takeover by the type of the response: a handler returns a
 `WebSocketUpgrade` or a `ConnectionUpgrade`, and the connection checks it with `instanceof`. A

@@ -94,17 +94,17 @@ The builder is the nested `Server.Builder` interface:
 * `handler(Handler)`
 * `backlog(int)`
 * `readTimeout(Duration)` / `writeTimeout(Duration)` / `idleTimeout(Duration)`
-* `maxRequestSize(long)` / `maxDrainSize(long)` [.tag-new]#NEW#
-* `maxHeaderSize(int)` — the request header section, 8 KiB by default. HTTP/1.1 counts its raw bytes and answers `431` past it. Over HTTP/2 it also sets the limits on a header list [.tag-new]#NEW#:
+* `maxRequestSize(long)` / `maxDrainSize(long)`
+* `maxHeaderSize(int)` — the request header section, 8 KiB by default. HTTP/1.1 counts its raw bytes and answers `431` past it. Over HTTP/2 it also sets the limits on a header list:
 ** the advertised `SETTINGS_MAX_HEADER_LIST_SIZE`, S below, is `maxHeaderSize + 32 * 100` (11,392 bytes by default), measured as RFC 9113 §6.5.2 does (each name and value plus 32 per field), so a section HTTP/1.1 accepts fits;
 ** a list past it is still decoded, so the HPACK context of the connection stays intact, and its stream alone gets `431 Request Header Fields Too Large`, then `RST_STREAM(NO_ERROR)` if its body has not ended; the handler is not called. A gRPC call gets the same HTTP `431` before it is routed, which gRPC clients report as `UNKNOWN` (the gRPC mapping of HTTP statuses). Trailers past it reset their stream with `RST_STREAM(ENHANCE_YOUR_CALM)`;
 ** the hard caps answer abuse with `GOAWAY(ENHANCE_YOUR_CALM)`, which ends the connection: a header block (HEADERS plus CONTINUATION) of more than `max(4 * S, 64 KiB)` encoded bytes (65,536 by default), or a list of more than `max(8 * S, 256 KiB)` decoded bytes (262,144 by default, an HPACK amplification);
 ** the setting is advisory: RFC-compliant clients do not send a larger list, so the `431` serves the clients that ignore it.
 * `tls(SSLContext)` — TLS, no client certificate (`ClientAuth.NONE`)
-* `tls(SSLContext, ClientAuth)` [.tag-new]#NEW# — TLS with a client certificate mode, see xref:usage.adoc#client-certificates[Usage — client certificates]; the last `tls(...)` call wins for both context and mode
+* `tls(SSLContext, ClientAuth)`— TLS with a client certificate mode, see xref:usage.adoc#client-certificates[Usage — client certificates]; the last `tls(...)` call wins for both context and mode
 * `alpnProtocols(String...)`
 * `shutdownGracePeriod(Duration)`
-* `exposeBuildInfo(boolean)` [.tag-new]#NEW# — puts Chappe's version and build in `Server` and `X-Chappe-Build`; off by default, see <<build-identification-headers>>
+* `exposeBuildInfo(boolean)`— puts Chappe's version and build in `Server` and `X-Chappe-Build`; off by default, see <<build-identification-headers>>
 * `build()` returns a `Server`
 
 The executor is not configurable: every connection is handled on its own virtual thread.
@@ -112,12 +112,12 @@ The executor is not configurable: every connection is handled on its own virtual
 [#timeouts]
 ==== Timeouts
 
-* `readTimeout` (default 30 s) [.tag-new]#NEW# bounds *each* blocking read of a request body. Over HTTP/1.1 (plaintext and TLS) it bounds each socket read, including the drain of a body the handler left unread; when no byte arrives for that long, the read throws `java.net.SocketTimeoutException` and Chappe closes the connection. Over HTTP/2 it bounds the wait for the stream's next DATA frame; when it expires, the read throws `java.net.SocketTimeoutException`, and, if the request body has not ended, the stream is reset once the response is sent. A call the router sends to a gRPC handler (`Router.grpc`), or to a gRPC-Web handler (`Router.grpcWeb`) in binary mode (`application/grpc-web`), is exempt: a client or bidi streaming call may pause for as long as it likes, and is held until the client or the connection ends it. A gRPC-Web call in text mode (`application/grpc-web-text`) is not: Chappe reads its whole base64 body before decoding it, and a stalled body resets the stream with `RST_STREAM(INTERNAL_ERROR)`. The exemption follows the route, not the request: a gRPC `content-type` on a request to any other handler leaves it bounded. It bounds each read, not the whole body: an upload is not cut as long as each read makes progress within the timeout. Over plaintext one byte is progress; over TLS a read returns only once a whole TLS record (up to 16 KiB) has arrived, so a client must deliver each record within `readTimeout`. `Duration.ZERO` or a negative value disables it; a value too large to count in nanoseconds (such as `ChronoUnit.FOREVER.getDuration()`) is saturated to about 73 years. Until 0.3.0 the value was accepted by the builder and never applied.
-* `idleTimeout` (default 60 s) bounds inactivity on the read side: a connection that sends nothing for that long is closed. [.tag-new]#NEW# It also bounds the whole TLS handshake, as a total deadline rather than a bound on each read: a client that has not completed its handshake `idleTimeout` after the server started it is disconnected, even if it keeps sending bytes (CHAPPE-028). The first read after the handshake and the HTTP/2 connection preface are not covered yet. Use a positive value: zero or a negative value removes the handshake deadline, but it does not disable the idle bound, and a connection waiting for a request may then be closed at once. A very large value, up to `ChronoUnit.FOREVER.getDuration()`, is accepted and saturated.
-* `writeTimeout` (default 30 s) [.tag-new]#NEW# bounds *one* blocking write of a response, over HTTP/1.1 and HTTP/2: how long the socket may refuse the bytes Chappe is sending, because the client does not read. When it expires, Chappe closes the connection, and the client gets a truncated body. It is not an inactivity bound on the response: nothing is timed while there is nothing to send, so a Server-Sent Events stream with long gaps between events is never cut by it. On HTTP/2 it bounds each write of a flushed frame buffer (up to 16 KiB): when it expires, Chappe closes the whole multiplexed connection, and every stream on it ends with it. Over TLS, a flush is one TLS write of the whole buffer, so the bound covers the whole flush, and the connection is closed at most 100 ms after it. Zero or negative means no bound for responses; the writes of a TLS close (the `close_notify`, and the alert of a rejected handshake) stay bounded, by `writeTimeout` when it is positive and by 2 s otherwise. Until 0.3.0 the value was accepted by the builder and never applied.
+* `readTimeout` (default 30 s)bounds *each* blocking read of a request body. Over HTTP/1.1 (plaintext and TLS) it bounds each socket read, including the drain of a body the handler left unread; when no byte arrives for that long, the read throws `java.net.SocketTimeoutException` and Chappe closes the connection. Over HTTP/2 it bounds the wait for the stream's next DATA frame; when it expires, the read throws `java.net.SocketTimeoutException`, and, if the request body has not ended, the stream is reset once the response is sent. A call the router sends to a gRPC handler (`Router.grpc`), or to a gRPC-Web handler (`Router.grpcWeb`) in binary mode (`application/grpc-web`), is exempt: a client or bidi streaming call may pause for as long as it likes, and is held until the client or the connection ends it. A gRPC-Web call in text mode (`application/grpc-web-text`) is not: Chappe reads its whole base64 body before decoding it, and a stalled body resets the stream with `RST_STREAM(INTERNAL_ERROR)`. The exemption follows the route, not the request: a gRPC `content-type` on a request to any other handler leaves it bounded. It bounds each read, not the whole body: an upload is not cut as long as each read makes progress within the timeout. Over plaintext one byte is progress; over TLS a read returns only once a whole TLS record (up to 16 KiB) has arrived, so a client must deliver each record within `readTimeout`. `Duration.ZERO` or a negative value disables it; a value too large to count in nanoseconds (such as `ChronoUnit.FOREVER.getDuration()`) is saturated to about 73 years. Until 0.3.0 the value was accepted by the builder and never applied.
+* `idleTimeout` (default 60 s) bounds inactivity on the read side: a connection that sends nothing for that long is closed.It also bounds the whole TLS handshake, as a total deadline rather than a bound on each read: a client that has not completed its handshake `idleTimeout` after the server started it is disconnected, even if it keeps sending bytes (CHAPPE-028). The first read after the handshake and the HTTP/2 connection preface are not covered yet. Use a positive value: zero or a negative value removes the handshake deadline, but it does not disable the idle bound, and a connection waiting for a request may then be closed at once. A very large value, up to `ChronoUnit.FOREVER.getDuration()`, is accepted and saturated.
+* `writeTimeout` (default 30 s)bounds *one* blocking write of a response, over HTTP/1.1 and HTTP/2: how long the socket may refuse the bytes Chappe is sending, because the client does not read. When it expires, Chappe closes the connection, and the client gets a truncated body. It is not an inactivity bound on the response: nothing is timed while there is nothing to send, so a Server-Sent Events stream with long gaps between events is never cut by it. On HTTP/2 it bounds each write of a flushed frame buffer (up to 16 KiB): when it expires, Chappe closes the whole multiplexed connection, and every stream on it ends with it. Over TLS, a flush is one TLS write of the whole buffer, so the bound covers the whole flush, and the connection is closed at most 100 ms after it. Zero or negative means no bound for responses; the writes of a TLS close (the `close_notify`, and the alert of a rejected handshake) stay bounded, by `writeTimeout` when it is positive and by 2 s otherwise. Until 0.3.0 the value was accepted by the builder and never applied.
 
 [#request-body-limits]
-==== Request body limits [.tag-new]#NEW#
+==== Request body limits
 
 * `maxRequestSize` (default 10 MiB) caps a request body. Over HTTP/1.1, a `Content-Length` above it is answered `413 Content Too Large` (RFC 9110 §15.5.14) before the handler runs, and the connection is closed. A chunked body is counted as it is on the wire, framing included (chunk-size lines with their extensions, CRLFs and the trailer section), so a body near the cap with heavy chunk overhead trips slightly earlier than its data alone would. The chunk that would take it past the cap fails the read with `RequestBodyTooLargeException`, an `IOException` whose `limit()` is the cap, before any of that chunk's data is read; every later read of the body throws the same exception. Whatever the cap, one chunk-size line or one trailer line longer than 8 KiB fails the read with an `IOException`. The handler can still answer (a `413` is the usual choice); Chappe then closes the connection gracefully and reads no other request from it. A `RequestBodyTooLargeException` that escapes the handler, as is or as the cause of another exception, is answered `413` instead of `500`, as over HTTP/2.
 * `maxDrainSize` (default 1 MiB) bounds what Chappe reads of a body the handler left unread. Over HTTP/1.1, the rest of the body sits between the response and the next request, so Chappe reads and discards it to keep the connection. When more than `maxDrainSize` bytes are left, it closes the connection gracefully instead, after the response; a `WebSocketUpgrade` or `ConnectionUpgrade` answer is refused the same way, and the connection closes without the `101`. A chunked body is counted as it is on the wire, framing and trailers included, and the unread rest of a chunk the handler started counts too. `0` closes the connection whenever a body was left unread. A negative value is refused with `IllegalArgumentException`.
@@ -190,7 +190,7 @@ public final class BuildInfo {
 }
 ----
 
-Loaded once at startup from `chappe-build.properties` at the jar root (generated by Maven resource filtering plus `git-commit-id-maven-plugin` when building `chappe-api`). The HTTP layer puts `serverHeader()` in the `Server` and `X-Chappe-Build` headers when the server exposes its build (`exposeBuildInfo`); otherwise responses say `Server: Chappe` [.tag-new]#NEW#. A value the build could not fill, such as the commit of a build without `git-commit-id-maven-plugin`, reads `unknown` [.tag-new]#NEW#.
+Loaded once at startup from `chappe-build.properties` at the jar root (generated by Maven resource filtering plus `git-commit-id-maven-plugin` when building `chappe-api`). The HTTP layer puts `serverHeader()` in the `Server` and `X-Chappe-Build` headers when the server exposes its build (`exposeBuildInfo`); otherwise responses say `Server: Chappe`. A value the build could not fill, such as the commit of a build without `git-commit-id-maven-plugin`, reads `unknown`.
 
 === `StaticFileHandler`
 
@@ -241,7 +241,7 @@ public final class RequestContext {
 }
 ----
 
-=== `ClientAuth` [.tag-new]#NEW#
+=== `ClientAuth`
 
 [source,java]
 ----
@@ -277,13 +277,13 @@ The mode is applied at the handshake only. A TLS 1.2 client-initiated renegotiat
 | `scheme()`
 | `"https"` on a TLS connection, `"http"` otherwise.
 
-| `tls()` [.tag-new]#NEW#
+| `tls()`
 | `Optional<TlsInfo>`: the TLS session, present exactly when `isSecure()` is `true`, empty on cleartext. All HTTP/2 streams of a connection share it.
 
-| `connectionId()` [.tag-new]#NEW#
+| `connectionId()`
 | `OptionalLong`: an identifier of the connection, positive and unique for the JVM lifetime, and stable for the connection's lifetime. Every HTTP/1.1 keep-alive request and every HTTP/2 stream of one connection reports the same value.
 
-| `streamId()` [.tag-new]#NEW#
+| `streamId()`
 | `OptionalInt`: the HTTP/2 stream identifier (odd and positive), empty over HTTP/1.1.
 |===
 
@@ -360,7 +360,7 @@ logging:
 
 Documented subset: nested maps, inline lists `[a, b]` and block `- item`, string/int/bool scalars, `#` comments. No anchors, no `!!` tags, no multilines.
 
-Indentation uses spaces only: a tab is rejected with its line and column. A line indented less than the first line of the document is rejected too [.tag-new]#NEW#, where the lines from there on used to be dropped without a word. A block list item may be a bare `-`, its value being the more indented block below it, the first item included [.tag-new]#NEW#.
+Indentation uses spaces only: a tab is rejected with its line and column. A line indented less than the first line of the document is rejected too, where the lines from there on used to be dropped without a word. A block list item may be a bare `-`, its value being the more indented block below it, the first item included.
 
 [#_observability]
 == Observability
@@ -368,7 +368,7 @@ Indentation uses spaces only: a tab is rejected with its line and column. A line
 [#build-identification-headers]
 === Build identification headers
 
-By default a response names Chappe and nothing more [.tag-new]#NEW#:
+By default a response names Chappe and nothing more:
 
 [source]
 ----
@@ -411,7 +411,7 @@ Field resolution:
 * Size: `Response.body().contentLength()` (or `-` for streamed/chunked bodies).
 * Duration: nanoseconds measured by the outermost filter wrapper, captures the final status even if the handler throws.
 
-A handler that throws is logged with status `500` and size `-`, and its exception goes on unchanged, a checked exception included, to the filters around it and to the server [.tag-new]#NEW#. Until 0.3.0 a checked exception came out wrapped in a `RuntimeException`.
+A handler that throws is logged with status `500` and size `-`, and its exception goes on unchanged, a checked exception included, to the filters around it and to the server. Until 0.3.0 a checked exception came out wrapped in a `RuntimeException`.
 
 Available as a public API filter via `Filter.accessLog()` / `Filter.accessLog(Consumer<String>)`; the CLI launcher applies it as the outermost wrapper.
 
@@ -448,9 +448,9 @@ Served zero-copy by `StaticFileHandler.preferPrecompressed(true)`.
 | Spec | Status | Notes
 
 | RFC 9110 (HTTP Semantics) | OK | Date, HEAD/204/304, 405+Allow, Host, 100-continue
-| RFC 9112 (HTTP/1.1)       | OK | request parsing, chunked (request and response trailers, §7.1.2), keep-alive, pipelining, lingering close (§9.6, plaintext and TLS) [.tag-new]#NEW#
-| RFC 9113 (HTTP/2)         | OK | framing, flow control, lifecycle, GOAWAY, SETTINGS, CONTINUATION, `RST_STREAM(NO_ERROR)` after an early response (§8.1), frames on reset streams ignored (§5.1), stream window reopened as the body is read (§6.9), `SETTINGS_MAX_HEADER_LIST_SIZE` derived from `maxHeaderSize`, a header list past it answered `431` on its stream, a header block (HEADERS plus CONTINUATION) past 64 KiB or a decoded list past 256 KiB by default ending the connection with `GOAWAY(ENHANCE_YOUR_CALM)` (§10.5, §10.5.1) [.tag-new]#NEW#
-| RFC 7541 (HPACK)          | OK | static table, dynamic table, Huffman encode/decode; the decoder's table bounded by the advertised `SETTINGS_HEADER_TABLE_SIZE` and the encoder's by the peer's (§4.2), a size update past it or after the first field and a length or integer the block cannot hold answered `GOAWAY(COMPRESSION_ERROR)` (§5.1, §5.2, §6.3) [.tag-new]#NEW#
+| RFC 9112 (HTTP/1.1)       | OK | request parsing, chunked (request and response trailers, §7.1.2), keep-alive, pipelining, lingering close (§9.6, plaintext and TLS)
+| RFC 9113 (HTTP/2)         | OK | framing, flow control, lifecycle, GOAWAY, SETTINGS, CONTINUATION, `RST_STREAM(NO_ERROR)` after an early response (§8.1), frames on reset streams ignored (§5.1), stream window reopened as the body is read (§6.9), `SETTINGS_MAX_HEADER_LIST_SIZE` derived from `maxHeaderSize`, a header list past it answered `431` on its stream, a header block (HEADERS plus CONTINUATION) past 64 KiB or a decoded list past 256 KiB by default ending the connection with `GOAWAY(ENHANCE_YOUR_CALM)` (§10.5, §10.5.1)
+| RFC 7541 (HPACK)          | OK | static table, dynamic table, Huffman encode/decode; the decoder's table bounded by the advertised `SETTINGS_HEADER_TABLE_SIZE` and the encoder's by the peer's (§4.2), a size update past it or after the first field and a length or integer the block cannot hold answered `GOAWAY(COMPRESSION_ERROR)` (§5.1, §5.2, §6.3)
 | RFC 6455 (WebSocket)      | OK | handshake, TEXT/BINARY framing, fragmentation, UTF-8 validation, client masking, close handshake, auto-PONG — over HTTP/1.1
 | gRPC over HTTP/2          | OK | transport framing (5-byte prefix), trailers, unary / server-stream / client-stream / bidi, gRPC-Web via `grpcWeb()`
 | RFC 9114 (HTTP/3)         | planned | QUIC via the JDK, targeting JDK 26+ — see link:{repo-chappe}/blob/main/ROADMAP.md[ROADMAP.md]
