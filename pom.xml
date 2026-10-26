@@ -1,20 +1,17 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd"
-         >
+<?xml version='1.0' encoding='utf-8'?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
         <groupId>io.vidocq</groupId>
         <artifactId>vidocq-parent</artifactId>
-        <version>0.4.0-SNAPSHOT</version>
-        <relativePath/>
+        <version>0.4.0-RC1</version>
+        <relativePath />
     </parent>
 
     <groupId>io.vidocq.chappe</groupId>
     <artifactId>chappe-parent</artifactId>
-    <version>0.4.0-SNAPSHOT</version>
+    <version>0.4.0-RC1</version>
     <packaging>pom</packaging>
 
     <name>Chappe</name>
@@ -38,13 +35,7 @@
         <url>https://codefloe.com/Vidocq/chappe</url>
     </scm>
 
-    <!--
-        Disjunctive triple license: a recipient may use this software under
-        ANY ONE of the three licences below, at their option. EPL-2.0 is the
-        anchor (see the LICENSE file); per EPL-2.0 section 1, GPL-2.0-or-later
-        is offered as a Secondary License.
-        SPDX-License-Identifier: EPL-2.0 OR EUPL-1.2 OR GPL-2.0-or-later
-    -->
+    
     <licenses>
         <license>
             <name>EPL-2.0</name>
@@ -64,26 +55,21 @@
     </licenses>
 
     <properties>
-        <!-- Quality -->
+        
         <spotless.version>2.46.1</spotless.version>
         <palantir.version>2.84.0</palantir.version>
         <errorprone.version>2.50.0</errorprone.version>
         <japicmp.version>0.26.3</japicmp.version>
-        <!-- The API compatibility report (quality profile) covers the modules that turn it on: chappe-api,
-             chappe-http and chappe-core, each with the packages its module-info.java exports. -->
+        
         <japicmp.skip>true</japicmp.skip>
         <sonar.projectKey>vidocq-chappe</sonar.projectKey>
         <sonar.java.source>25</sonar.java.source>
-        <!--
-            SonarQube calibration (Vidocq/vidocq#284). Every module reads the aggregated report of
-            chappe-coverage, built by the quality profile: most tests live in chappe-tests and
-            chappe-conformance, so a per-module report would hide what they cover.
-        -->
+        
         <sonar.coverage.jacoco.xmlReportPaths>${maven.multiModuleProjectDirectory}/chappe-coverage/target/site/jacoco-aggregate/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
-        <!-- The examples have no tests of their own: analysed, but out of the coverage. -->
+        
         <sonar.coverage.exclusions>**/chappe-examples/**</sonar.coverage.exclusions>
         <sonar.exclusions>**/generated/**</sonar.exclusions>
-        <!-- Writing to the console (java:S106) is what the CLI and the examples are for. -->
+        
         <sonar.issue.ignore.multicriteria>cli,examples</sonar.issue.ignore.multicriteria>
         <sonar.issue.ignore.multicriteria.cli.ruleKey>java:S106</sonar.issue.ignore.multicriteria.cli.ruleKey>
         <sonar.issue.ignore.multicriteria.cli.resourceKey>**/chappe-cli/src/main/java/**</sonar.issue.ignore.multicriteria.cli.resourceKey>
@@ -106,7 +92,7 @@
 
     <dependencyManagement>
         <dependencies>
-            <!-- Inter-project dependencies -->
+            
             <dependency>
                 <groupId>io.vidocq.chappe</groupId>
                 <artifactId>chappe-api</artifactId>
@@ -147,12 +133,12 @@
                                 <version>${palantir.version}</version>
                                 <style>PALANTIR</style>
                             </palantirJavaFormat>
-                            <removeUnusedImports/>
+                            <removeUnusedImports />
                             <importOrder>
                                 <order>java,javax,jakarta,io.vidocq,</order>
                             </importOrder>
-                            <trimTrailingWhitespace/>
-                            <endWithNewline/>
+                            <trimTrailingWhitespace />
+                            <endWithNewline />
                         </java>
                     </configuration>
                     <executions>
@@ -175,19 +161,14 @@
 
     <profiles>
         <profile>
-            <!--
-                Activated together with the quality profile of vidocq-parent (JaCoCo agent and
-                per-module reports): adds the module that aggregates them for SonarQube.
-            -->
+            
             <id>quality</id>
             <modules>
                 <module>chappe-coverage</module>
             </modules>
             <build>
                 <plugins>
-                    <!-- API compatibility with the last release (Vidocq/vidocq#288), report mode: japicmp
-                         compares each jar with the latest x.y.z release on Maven Central and writes
-                         target/japicmp/; nothing breaks the build until 1.0.0-RC1 makes it a gate. -->
+                    
                     <plugin>
                         <groupId>com.github.siom79.japicmp</groupId>
                         <artifactId>japicmp-maven-plugin</artifactId>
@@ -214,9 +195,7 @@
                 </plugins>
             </build>
         </profile>
-        <!-- Error Prone (Vidocq/vidocq#269): run locally with -Perrorprone, and by the SonarQube job, which
-             imports its warnings as external issues. Report mode, like the rest of the analysis: every
-             finding is a warning (-XepAllErrorsAsWarnings), none stops the build. -->
+        
         <profile>
             <id>errorprone</id>
             <build>
@@ -230,8 +209,7 @@
                                     <arg>-XDcompilePolicy=simple</arg>
                                     <arg>--should-stop=ifError=FLOW</arg>
                                     <arg>-Xplugin:ErrorProne -XepAllErrorsAsWarnings -XepExcludedPaths:.*(generated|generated-sources)/.* -XepDisableWarningsInGeneratedCode</arg>
-                                    <!-- javac stops printing warnings after 100 per module by default: SonarQube
-                                         would only import the first 100 findings of a module. -->
+                                    
                                     <arg>-Xmaxwarns</arg>
                                     <arg>100000</arg>
                                 </compilerArgs>
