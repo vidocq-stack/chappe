@@ -4,4 +4,4 @@
 [.lead]
 New in the `{project-version}` development line — everything listed here landed **after the {release-version} release** and is not part of it. Every entry links to the section that documents it, and those sections carry the [.tag-new]#NEW# badge. Each brick of the suite keeps its own page of this kind; xref:home::whats-new.adoc[the ecosystem index] gathers them. When the next release train ships, this page is frozen with it and restarts empty on the dev line.
 
-_Nothing documented yet for this cycle. Add entries here (and place [.tag-new]#NEW# badges on the relevant pages) as features land on main._
+* xref:internals.adoc[Internals, design points] — one watchdog virtual thread per connection bounds the wait for a next keep-alive request, the request body reads and the response writes. Until 0.4.0-RC1 every bounded wait started its own watchdog thread, slept it and interrupted it when the wait ended: two thread starts and two `InterruptedException` per HTTP/1.1 request. The xref:reference.adoc#_timeouts[timeouts] keep their meaning and their defaults.

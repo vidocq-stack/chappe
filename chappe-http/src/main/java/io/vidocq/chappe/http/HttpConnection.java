@@ -44,6 +44,10 @@ public final class HttpConnection {
     private static final int BUFFER_SIZE = 16 * 1024; // 16 KB
 
     private final ReadableByteChannel readChannel;
+    /** The one thread that bounds this connection's waits: the next request, a body read, a response write. */
+    private final ConnectionWatchdog watchdog;
+    /** {@code config.idleTimeout()} in nanoseconds, the bound of the wait for a next request. */
+    private final long idleTimeoutNanos;
     /** {@link #readChannel} bounded by {@code readTimeout}: request bodies are read from it (CHAPPE-022). */
     private final ReadableByteChannel bodyChannel;
 
@@ -104,7 +108,9 @@ public final class HttpConnection {
         this.closeable = channels.closeable();
         this.handler = handler;
         this.config = config;
-        this.bodyChannel = TimedReadChannel.of(readChannel, closeable, config.readTimeout());
+        this.watchdog = new ConnectionWatchdog(closeable);
+        this.idleTimeoutNanos = ConnectionWatchdog.nanos(config.idleTimeout());
+        this.bodyChannel = TimedReadChannel.of(readChannel, watchdog, config.readTimeout());
         if (prefilledBuffer != null) {
             this.readBuffer = prefilledBuffer;
         } else {
@@ -114,6 +120,7 @@ public final class HttpConnection {
         this.writeBuffer = writeBuffer != null ? writeBuffer : ByteBuffer.allocateDirect(BUFFER_SIZE);
         this.parser = new HttpRequestParser();
         this.writer = new HttpResponseWriter(config.exposeBuildInfo());
+        writer.boundWritesBy(watchdog);
         this.request = new HttpRequestImpl();
         this.context = new RequestContext(request);
 
@@ -432,7 +439,7 @@ public final class HttpConnection {
     public void close() {
         open = false;
         disarmDisconnectProbe();
-        if (bodyChannel instanceof TimedReadChannel timed) timed.stop();
+        watchdog.stop();
         try {
             closeable.close();
         } catch (IOException _) {
@@ -562,11 +569,11 @@ public final class HttpConnection {
      *
      * <p>Fast path: bytes already buffered (pipelining) or readable without
      * blocking — zero overhead for back-to-back keep-alive traffic. Slow
-     * path: a virtual-thread watchdog closes the connection at the deadline,
-     * which wakes the blocking channel read ({@code AsynchronousCloseException})
-     * — the Loom-friendly way to bound a blocking read; {@code Selector.select}
-     * would pin the carrier thread and {@code SO_TIMEOUT} does not apply to
-     * channel reads.</p>
+     * path: the connection's {@link ConnectionWatchdog} closes the connection
+     * at the deadline, which wakes the blocking channel read
+     * ({@code AsynchronousCloseException}) — the Loom-friendly way to bound a
+     * blocking read; {@code Selector.select} would pin the carrier thread and
+     * {@code SO_TIMEOUT} does not apply to channel reads.</p>
      *
      * @return {@code true} when request bytes are available; {@code false} on
      *         EOF, idle timeout or interruption (caller closes the connection)
@@ -588,18 +595,31 @@ public final class HttpConnection {
             if (n == -1) return false;
             if (readBuffer.hasRemaining()) return true;
 
-            // Slow path — blocking read bounded by a watchdog close.
+            // Slow path — blocking read bounded by the watchdog's close at the idle deadline.
             readBuffer.compact();
             try {
-                n = BoundedReads.readWithTimeout(readChannel, closeable, readBuffer, config.idleTimeout());
+                return readBoundedByIdleTimeout();
             } finally {
                 readBuffer.flip(); // a failed read leaves the buffer in read mode (CHAPPE-013)
             }
-            return n > 0;
         } catch (IOException _) {
             // closed by the watchdog (idle timeout) or connection lost
             return false;
         }
+    }
+
+    /** One blocking read of the next request's first bytes, bounded by {@link #idleTimeoutNanos}. */
+    private boolean readBoundedByIdleTimeout() {
+        ConnectionWatchdog.Deadline deadline = watchdog.armRead(idleTimeoutNanos);
+        if (deadline == null) return false; // the watchdog already closed the connection
+        int n;
+        try {
+            n = readChannel.read(readBuffer);
+        } catch (IOException _) {
+            watchdog.disarmRead(deadline);
+            return false; // closed by the watchdog (idle timeout) or connection lost
+        }
+        return watchdog.disarmRead(deadline) && n > 0;
     }
 
     /**

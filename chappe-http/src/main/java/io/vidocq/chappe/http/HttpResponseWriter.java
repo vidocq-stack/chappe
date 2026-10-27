@@ -122,6 +122,10 @@ public final class HttpResponseWriter {
     // parameter threaded through every private helper) is safe.
     private Duration writeTimeout = Duration.ZERO;
 
+    // The connection's watchdog, which bounds each channel.write() without a thread per write; null
+    // for a writer used outside a connection, whose writes are bounded by BoundedWrites.
+    private ConnectionWatchdog watchdog;
+
     // Whether a flush happened since the status line of the current write() was started: an
     // invalid header found after that can no longer be answered with a 500 (CHAPPE-008).
     private boolean headFlushed;
@@ -154,6 +158,11 @@ public final class HttpResponseWriter {
         this.serverLine = exposeBuildInfo ? SERVER_BUILD_LINE : SERVER_DISCREET_LINE;
         this.buildLine = exposeBuildInfo ? X_CHAPPE_BUILD_LINE : null;
         this.fast200Prefix = exposeBuildInfo ? FAST_200_KA_PREFIX_BUILD : FAST_200_KA_PREFIX_DISCREET;
+    }
+
+    /** Bounds the writes of this writer by the connection's watchdog, instead of a thread per write. */
+    void boundWritesBy(ConnectionWatchdog watchdog) {
+        this.watchdog = watchdog;
     }
 
     public void write(
@@ -670,8 +679,15 @@ public final class HttpResponseWriter {
     private void flush(ByteBuffer buffer, WritableByteChannel channel) throws IOException {
         headFlushed = true;
         buffer.flip();
-        while (buffer.hasRemaining()) {
-            BoundedWrites.writeWithTimeout(channel, channel, buffer, writeTimeout);
+        if (watchdog != null) {
+            long timeoutNanos = ConnectionWatchdog.nanos(writeTimeout);
+            while (buffer.hasRemaining()) {
+                watchdog.write(channel, buffer, timeoutNanos);
+            }
+        } else {
+            while (buffer.hasRemaining()) {
+                BoundedWrites.writeWithTimeout(channel, channel, buffer, writeTimeout);
+            }
         }
         buffer.clear();
     }
