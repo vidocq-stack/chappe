@@ -567,44 +567,33 @@ public final class HttpConnection {
      * Waits for the first byte of the next request, bounded by
      * {@code config.idleTimeout()}.
      *
-     * <p>Fast path: bytes already buffered (pipelining) or readable without
-     * blocking — zero overhead for back-to-back keep-alive traffic. Slow
-     * path: the connection's {@link ConnectionWatchdog} closes the connection
-     * at the deadline, which wakes the blocking channel read
+     * <p>Bytes already buffered (pipelining) are served first. Otherwise one
+     * blocking read, bounded by the connection's {@link ConnectionWatchdog}:
+     * it closes the connection at the deadline, which wakes the read
      * ({@code AsynchronousCloseException}) — the Loom-friendly way to bound a
      * blocking read; {@code Selector.select} would pin the carrier thread and
      * {@code SO_TIMEOUT} does not apply to channel reads.</p>
+     *
+     * <p>No non-blocking probe read comes first: a blocking read on a virtual
+     * thread already tries the socket without blocking before it parks, so a
+     * probe only added a read and two switches of the blocking mode per
+     * request. The probe paid off when every bounded wait started its own
+     * watchdog thread; arming the per-connection watchdog is a field write
+     * and a compare-and-set.</p>
      *
      * @return {@code true} when request bytes are available; {@code false} on
      *         EOF, idle timeout or interruption (caller closes the connection)
      */
     private boolean awaitNextRequest() {
         if (readBuffer.hasRemaining()) return true; // pipelined bytes
-        if (!(readChannel instanceof SocketChannel sc)) {
+        if (!(readChannel instanceof SocketChannel)) {
             return true; // TLS/wrapped channel: keep historical behavior for now
         }
+        readBuffer.compact();
         try {
-            // Fast path — non-blocking probe of the kernel buffer.
-            int n;
-            sc.configureBlocking(false);
-            try {
-                n = ReadBuffers.compactAndRead(readBuffer, sc);
-            } finally {
-                sc.configureBlocking(true);
-            }
-            if (n == -1) return false;
-            if (readBuffer.hasRemaining()) return true;
-
-            // Slow path — blocking read bounded by the watchdog's close at the idle deadline.
-            readBuffer.compact();
-            try {
-                return readBoundedByIdleTimeout();
-            } finally {
-                readBuffer.flip(); // a failed read leaves the buffer in read mode (CHAPPE-013)
-            }
-        } catch (IOException _) {
-            // closed by the watchdog (idle timeout) or connection lost
-            return false;
+            return readBoundedByIdleTimeout();
+        } finally {
+            readBuffer.flip(); // a failed read leaves the buffer in read mode (CHAPPE-013)
         }
     }
 
