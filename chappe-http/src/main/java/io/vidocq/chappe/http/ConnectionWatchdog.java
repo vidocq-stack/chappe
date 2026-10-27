@@ -78,7 +78,9 @@ final class ConnectionWatchdog {
     private final AtomicReference<Deadline> read = new AtomicReference<>();
     private final AtomicReference<Deadline> write = new AtomicReference<>();
 
-    private volatile Thread thread;
+    /** The watchdog thread, started at the first armed wait. */
+    private final AtomicReference<Thread> thread = new AtomicReference<>();
+
     private volatile boolean idle;
     /** The deadline the thread sleeps towards, {@code Long.MAX_VALUE} when it does not sleep. */
     private volatile long parkedUntil = Long.MAX_VALUE;
@@ -159,7 +161,7 @@ final class ConnectionWatchdog {
      * wake-up is needed.
      */
     private void wake(long deadlineNanos) {
-        Thread t = thread;
+        Thread t = thread.get();
         if (t == null) {
             start();
         } else if (idle || deadlineNanos - parkedUntil < 0) {
@@ -167,54 +169,76 @@ final class ConnectionWatchdog {
         }
     }
 
-    private synchronized void start() {
-        if (thread == null && !stopped) {
-            thread = Thread.ofVirtual().name("chappe-connection-watchdog").start(this::watch);
-        }
+    /** Starts the watchdog thread once; a thread losing the race to start it is never started. */
+    private void start() {
+        if (stopped) return;
+        Thread t = Thread.ofVirtual().name("chappe-connection-watchdog").unstarted(this::watch);
+        if (thread.compareAndSet(null, t)) t.start();
     }
 
     /** The watchdog loop: parks while nothing waits, sleeps to the nearest deadline, fires past it. */
     private void watch() {
-        while (!stopped) {
-            Deadline r = read.get();
-            Deadline w = write.get();
-            if (r == FIRED || w == FIRED) return;
-            if (r == null && w == null) {
-                // Dekker pairing with wake(): either this sees the new deadline, or the arming
-                // thread sees the idle flag and unparks.
-                idle = true;
-                if (read.get() == null && write.get() == null && !stopped) LockSupport.park(this);
-                idle = false;
-                continue;
-            }
-            long until = Long.MAX_VALUE;
-            if (r != null) until = r.nanos;
-            if (w != null && (r == null || w.nanos - r.nanos < 0)) until = w.nanos;
-            long now = System.nanoTime();
-            if (until - now > 0) {
-                // Dekker pairing with wake(): a shorter wait armed after this point sees
-                // parkedUntil and unparks; one armed before it is seen by the check below.
-                parkedUntil = until;
-                if (armedBefore(until)) {
-                    parkedUntil = Long.MAX_VALUE;
-                    continue;
-                }
-                LockSupport.parkNanos(this, until - now);
-                parkedUntil = Long.MAX_VALUE;
-                continue;
-            }
-            // A deadline passed: fire the side whose wait is still armed, and close.
-            if ((r != null && r.nanos - now <= 0 && read.compareAndSet(r, FIRED))
-                    || (w != null && w.nanos - now <= 0 && write.compareAndSet(w, FIRED))) {
-                try {
-                    closeable.close();
-                } catch (IOException _) {
-                    // already closing
-                }
-                return;
-            }
-            // The wait ended between the check and the compare-and-set: look again.
+        boolean running = true;
+        while (running && !stopped) {
+            running = turn();
         }
+    }
+
+    /** One turn of the watchdog loop; {@code false} once a deadline fired, which ends the watchdog. */
+    private boolean turn() {
+        Deadline r = read.get();
+        Deadline w = write.get();
+        if (r == FIRED || w == FIRED) return false;
+        if (r == null && w == null) {
+            parkWhileIdle();
+            return true;
+        }
+        long until = nearest(r, w);
+        long now = System.nanoTime();
+        if (until - now > 0) {
+            sleepUntil(until, now);
+            return true;
+        }
+        // A deadline passed: fire the side whose wait is still armed, and close. When the wait
+        // ended between the check and the compare-and-set, the next turn looks again.
+        return !fire(r, w, now);
+    }
+
+    private void parkWhileIdle() {
+        // Dekker pairing with wake(): either this sees the new deadline, or the arming thread
+        // sees the idle flag and unparks.
+        idle = true;
+        if (read.get() == null && write.get() == null && !stopped) LockSupport.park(this);
+        idle = false;
+    }
+
+    /** The earlier of the armed deadlines, one of which at least is armed. */
+    private static long nearest(Deadline r, Deadline w) {
+        if (r == null) return w.nanos;
+        if (w == null) return r.nanos;
+        return w.nanos - r.nanos < 0 ? w.nanos : r.nanos;
+    }
+
+    private void sleepUntil(long until, long now) {
+        // Dekker pairing with wake(): a shorter wait armed after this point sees parkedUntil and
+        // unparks; one armed before it is seen by the check below, and the next turn picks it up.
+        parkedUntil = until;
+        if (!armedBefore(until)) LockSupport.parkNanos(this, until - now);
+        parkedUntil = Long.MAX_VALUE;
+    }
+
+    /** Fires the side whose deadline passed and closes the connection; {@code false} when its wait ended meanwhile. */
+    private boolean fire(Deadline r, Deadline w, long now) {
+        boolean fired = (r != null && r.nanos - now <= 0 && read.compareAndSet(r, FIRED))
+                || (w != null && w.nanos - now <= 0 && write.compareAndSet(w, FIRED));
+        if (fired) {
+            try {
+                closeable.close();
+            } catch (IOException _) {
+                // already closing
+            }
+        }
+        return fired;
     }
 
     /** Whether a side holds a deadline earlier than {@code until}. */
@@ -227,7 +251,7 @@ final class ConnectionWatchdog {
     /** Ends the watchdog, if any; the connection closes on its own. */
     void stop() {
         stopped = true;
-        Thread t = thread;
+        Thread t = thread.get();
         if (t != null) LockSupport.unpark(t);
     }
 }
