@@ -66,9 +66,13 @@ public final class HttpBodyReader {
      */
     static boolean drain(RequestBodyInputStream bodyStream, long maxBytes) throws IOException {
         bodyStream.limitRemainingWireBytes(maxBytes);
-        byte[] buf = new byte[4096];
-        long left = maxBytes;
         try {
+            // Usually the handler read its body to the end: one read says so, with no buffer to
+            // allocate. Otherwise that byte counts against the budget like the others.
+            if (bodyStream.read() == -1) return true;
+            long left = maxBytes - 1;
+            if (left < 0) return false;
+            byte[] buf = new byte[4096];
             while (true) {
                 // One byte past the budget tells a body longer than the budget from one that ends at it.
                 int len = left >= buf.length ? buf.length : (int) left + 1;
