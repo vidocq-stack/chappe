@@ -2,8 +2,10 @@
 # push, pull requests on every update, on https://sonar.vidocq.dev (SonarQube
 # Community Build with the community branch plugin).
 #
-# Report mode: the job never fails on a finding, and the pull request gets one
-# comment, kept up to date, with the quality gate. Not a required check. Pull
+# Blocking mode (Vidocq/vidocq#284, October 2026): the job fails when the analysis
+# fails or the quality gate is not passed (new issues, new-code coverage under 80 %,
+# new duplication), and `sonar / sonar` is a required check of main. The pull
+# request still gets one comment, kept up to date, with the quality gate. Pull
 # requests from forks receive no secrets and skip the analysis.
 #
 # A manual run (workflow_dispatch) analyses main again, for instance after an
@@ -34,6 +36,8 @@ jobs:
           sonar-token: ${{ secrets.SONAR_TOKEN }}
           host-url: ${{ vars.SONAR_HOST_URL }}
           bot-token: ${{ secrets.VIDOCQ_BOT_TOKEN }}
+          # A finding, a coverage or a duplication the quality gate refuses fails the job (required check).
+          blocking: 'true'
           # Pilot of Error Prone in the analysis (Vidocq/vidocq#269): the action's default, plus the
           # errorprone profile, whose warnings the action imports as external issues.
           maven-args: -B -ntp -Pquality,errorprone -Dmaven.test.failure.ignore=true install
