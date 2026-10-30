@@ -43,6 +43,8 @@ jobs:
           skip-tests: "false"
           central-username: ${{ secrets.CENTRAL_USERNAME }}
           central-password: ${{ secrets.CENTRAL_PASSWORD }}
+          snapshot-username: ${{ secrets.REPOSILITE_USERNAME }}
+          snapshot-password: ${{ secrets.REPOSILITE_PASSWORD }}
           gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
           gpg-passphrase: ${{ secrets.GPG_PASSPHRASE }}
 
