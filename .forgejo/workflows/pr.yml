@@ -124,9 +124,10 @@ jobs:
           fi
           files=""
           page=1
+          # Codefloe (Forgejo v17) answers `null`, not `[]`, for the page after the last one; both end the loop.
           while :; do
             chunk=$(curl -fsS "${auth[@]}" "${api}?page=${page}&limit=50" \
-              | python3 -c 'import sys,json; print("\n".join(f["filename"] for f in json.load(sys.stdin)))')
+              | python3 -c 'import sys,json; print("\n".join(f["filename"] for f in (json.load(sys.stdin) or [])))')
             [ -z "$chunk" ] && break
             files="${files}${chunk}"$'\n'
             page=$((page+1))
