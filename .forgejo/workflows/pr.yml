@@ -106,73 +106,14 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Detect a docs-only change set
-        # Docs-only PRs (*.md, *.adoc, docs/, LICENSE*, NOTICE*) skip the whole
-        # Maven build AND the downstream rebuild — the job still completes and
-        # reports the required `pr-validate` check as green. Files under any
-        # src/ directory never count as docs (they may be packaged in the
-        # artifact). Implemented as step-level `if`s: a `paths:` trigger filter
-        # would leave the required check unreported and block /merge forever.
+        # Docs-only PRs skip the whole Maven build and the downstream rebuild, test-only PRs the downstream
+        # rebuild; the job still completes and reports the required `pr-validate` check. Step-level `if`s, not a
+        # `paths:` trigger filter, which would leave the required check unreported and block /merge forever.
+        # The rules live in Vidocq/ci (docs-only-changes), one copy for every producer.
         id: changes
-        run: |
-          set -euo pipefail
-          api="${{ github.server_url }}/api/v1/repos/${{ github.repository }}/pulls/${{ github.event.number }}/files"
-          # VIDOCQ_BOT_TOKEN lifts rate limits on internal PRs; external fork
-          # PRs get no secrets and fall back to anonymous reads (public repo).
-          auth=()
-          if [ -n "${{ secrets.VIDOCQ_BOT_TOKEN }}" ]; then
-            auth=(-H "Authorization: token ${{ secrets.VIDOCQ_BOT_TOKEN }}")
-          fi
-          files=""
-          page=1
-          # Codefloe (Forgejo v17) answers `null`, not `[]`, for the page after the last one; both end the loop.
-          while :; do
-            chunk=$(curl -fsS "${auth[@]}" "${api}?page=${page}&limit=50" \
-              | python3 -c 'import sys,json; print("\n".join(f["filename"] for f in (json.load(sys.stdin) or [])))')
-            [ -z "$chunk" ] && break
-            files="${files}${chunk}"$'\n'
-            page=$((page+1))
-          done
-          echo "Changed files:"; printf '%s' "$files" | sed 's/^/  /'
-          docs_only=true
-          [ -n "$(printf '%s' "$files" | tr -d '[:space:]')" ] || docs_only=false
-          while IFS= read -r f; do
-            [ -z "$f" ] && continue
-            case "$f" in
-              src/*|*/src/*) docs_only=false; break ;;
-              *.md|*.adoc|docs/*|LICENSE|LICENSE.*|NOTICE|NOTICE.*) ;;
-              *) docs_only=false; break ;;
-            esac
-          done <<EOF
-          $files
-          EOF
-          echo "docs-only=$docs_only" >> "$GITHUB_OUTPUT"
-          echo "docs-only: $docs_only"
-
-          # Test-only change set: every file is under a src/test/ directory (any module), is CI
-          # configuration (.forgejo/), or is a doc file accepted above. None of them is part of the
-          # produced artifacts, so consumers cannot observe the change: only the downstream rebuild is
-          # skipped. The producer's own build, unit tests and TCK still run (they also exercise a changed
-          # workflow). When test files changed, forced to false if a pom.xml declares
-          # `<goal>test-jar</goal>`: a published test jar makes test changes visible downstream.
-          test_only=true
-          has_test=false
-          [ -n "$(printf '%s' "$files" | tr -d '[:space:]')" ] || test_only=false
-          while IFS= read -r f; do
-            [ -z "$f" ] && continue
-            case "$f" in
-              src/test/*|*/src/test/*) has_test=true ;;
-              .forgejo/*) ;;
-              src/*|*/src/*) test_only=false; break ;;
-              *.md|*.adoc|docs/*|LICENSE|LICENSE.*|NOTICE|NOTICE.*) ;;
-              *) test_only=false; break ;;
-            esac
-          done <<< "$files"
-          if [ "$test_only" = true ] && [ "$has_test" = true ] \
-              && grep -rqs --include=pom.xml -e '<goal>test-jar</goal>' .; then
-            test_only=false
-          fi
-          echo "test-only=$test_only" >> "$GITHUB_OUTPUT"
-          echo "test-only: $test_only"
+        uses: https://codefloe.com/Vidocq/ci/docs-only-changes@main
+        with:
+          bot-token: ${{ secrets.VIDOCQ_BOT_TOKEN }}
 
       - name: Reuse the validation of an unchanged code tree
         # Vidocq/ci#57: when a run of this repository already validated the same code (HEAD's tree without the
