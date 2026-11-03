@@ -54,9 +54,12 @@ class AccessLogTrustedProxyTest {
         List<String> lines = new ArrayList<>();
         Handler h = Filter.accessLog(lines::add).apply(_ -> Response.ok("ok"));
 
-        h.handle(req(peer("127.0.0.1"), "/", Headers.builder()
-                .add("X-Forwarded-For", "203.0.113.9, 10.0.0.1")
-                .build()));
+        h.handle(req(
+                peer("127.0.0.1"),
+                "/",
+                Headers.builder()
+                        .add("X-Forwarded-For", "203.0.113.9, 10.0.0.1")
+                        .build()));
 
         assertEquals(1, lines.size());
         assertTrue(lines.getFirst().startsWith("203.0.113.9 - "), lines.getFirst());
@@ -67,10 +70,13 @@ class AccessLogTrustedProxyTest {
         List<String> lines = new ArrayList<>();
         Handler h = Filter.accessLog(lines::add).apply(_ -> Response.ok("ok"));
 
-        h.handle(req(peer("203.0.113.50"), "/", Headers.builder()
-                .add("X-Forwarded-For", "198.51.100.7")
-                .add("X-Real-IP", "198.51.100.8")
-                .build()));
+        h.handle(req(
+                peer("203.0.113.50"),
+                "/",
+                Headers.builder()
+                        .add("X-Forwarded-For", "198.51.100.7")
+                        .add("X-Real-IP", "198.51.100.8")
+                        .build()));
 
         assertEquals(1, lines.size());
         assertTrue(lines.getFirst().startsWith("203.0.113.50 - "), lines.getFirst());
@@ -83,9 +89,10 @@ class AccessLogTrustedProxyTest {
         List<String> lines = new ArrayList<>();
         Handler h = Filter.accessLog(lines::add, List.of("10.0.0.0/8")).apply(_ -> Response.ok("ok"));
 
-        h.handle(req(peer("10.1.2.3"), "/", Headers.builder()
-                .add("X-Forwarded-For", "203.0.113.9")
-                .build()));
+        h.handle(req(
+                peer("10.1.2.3"),
+                "/",
+                Headers.builder().add("X-Forwarded-For", "203.0.113.9").build()));
 
         assertEquals(1, lines.size());
         assertTrue(lines.getFirst().startsWith("203.0.113.9 - "), lines.getFirst());
@@ -96,9 +103,10 @@ class AccessLogTrustedProxyTest {
         List<String> lines = new ArrayList<>();
         Handler h = Filter.accessLog(lines::add, List.of("10.0.0.0/8")).apply(_ -> Response.ok("ok"));
 
-        h.handle(req(peer("192.0.2.10"), "/", Headers.builder()
-                .add("X-Forwarded-For", "203.0.113.9")
-                .build()));
+        h.handle(req(
+                peer("192.0.2.10"),
+                "/",
+                Headers.builder().add("X-Forwarded-For", "203.0.113.9").build()));
 
         assertEquals(1, lines.size());
         assertTrue(lines.getFirst().startsWith("192.0.2.10 - "), lines.getFirst());
@@ -108,13 +116,15 @@ class AccessLogTrustedProxyTest {
     void forwardedUserIsHonoredFromATrustedPeerOnly() throws Exception {
         List<String> lines = new ArrayList<>();
         Handler trusted = Filter.accessLog(lines::add).apply(_ -> Response.ok("ok"));
-        trusted.handle(req(peer("127.0.0.1"), "/", Headers.builder()
-                .add("X-Forwarded-User", "yann@example.com")
-                .build()));
+        trusted.handle(req(
+                peer("127.0.0.1"),
+                "/",
+                Headers.builder().add("X-Forwarded-User", "yann@example.com").build()));
         Handler untrusted = Filter.accessLog(lines::add).apply(_ -> Response.ok("ok"));
-        untrusted.handle(req(peer("203.0.113.50"), "/", Headers.builder()
-                .add("Gap-Auth", "mallory@example.com")
-                .build()));
+        untrusted.handle(req(
+                peer("203.0.113.50"),
+                "/",
+                Headers.builder().add("Gap-Auth", "mallory@example.com").build()));
 
         assertEquals(2, lines.size());
         assertTrue(lines.get(0).startsWith("127.0.0.1 - yann@example.com "), lines.get(0));

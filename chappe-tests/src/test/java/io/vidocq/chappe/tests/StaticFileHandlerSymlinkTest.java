@@ -32,7 +32,6 @@ import io.vidocq.chappe.api.Headers;
 import io.vidocq.chappe.api.HttpMethod;
 import io.vidocq.chappe.api.HttpVersion;
 import io.vidocq.chappe.api.Request;
-import io.vidocq.chappe.api.Response;
 import io.vidocq.chappe.api.StaticFileHandler;
 import io.vidocq.chappe.api.StatusCode;
 

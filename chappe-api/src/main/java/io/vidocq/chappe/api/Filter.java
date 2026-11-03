@@ -319,8 +319,10 @@ public interface Filter {
         for (var cidr : trustedCidrs) {
             if (cidr.matches(addr)) return true;
         }
-        return addr.isLoopbackAddress() || addr.isAnyLocalAddress()
-                || addr.isSiteLocalAddress() || addr.isLinkLocalAddress();
+        return addr.isLoopbackAddress()
+                || addr.isAnyLocalAddress()
+                || addr.isSiteLocalAddress()
+                || addr.isLinkLocalAddress();
     }
 
     private static String clientIp(Request req, List<Cidr> trustedCidrs) {

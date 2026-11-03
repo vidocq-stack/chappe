@@ -51,26 +51,27 @@ class Http11SmugglingTest {
     }
 
     @ParameterizedTest(name = "{0}")
-    @ValueSource(strings = {
-        // TE present but chunked is not the final coding → 400 (RFC 9112 §6.3)
-        "POST /echo HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: gzip\r\nContent-Length: 5\r\n\r\nhello",
-        "POST /echo HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked, gzip\r\nContent-Length: 0\r\n\r\n",
-        "POST /echo HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: identity\r\nContent-Length: 5\r\n\r\nhello",
-        // two TE headers whose combined final coding is not chunked → 400
-        "POST /echo HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: gzip\r\nContent-Length: 0\r\n\r\n",
-        // TE + CL together is a smuggling signal → reject, never silently prefer one
-        "POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: 6\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
-        // duplicate CL with different values → 400
-        "POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: 5\r\nContent-Length: 10\r\n\r\nhello",
-        // a single CL header listing different values → 400
-        "POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: 5, 10\r\n\r\nhello",
-        // non-canonical CL forms that proxies parse differently → 400
-        "POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: +5\r\n\r\nhello",
-        "POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: 007\r\n\r\nhello",
-        "POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: 5x\r\n\r\nhello",
-        // chunked requires HTTP/1.1
-        "POST /echo HTTP/1.0\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
-    })
+    @ValueSource(
+            strings = {
+                // TE present but chunked is not the final coding → 400 (RFC 9112 §6.3)
+                "POST /echo HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: gzip\r\nContent-Length: 5\r\n\r\nhello",
+                "POST /echo HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked, gzip\r\nContent-Length: 0\r\n\r\n",
+                "POST /echo HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: identity\r\nContent-Length: 5\r\n\r\nhello",
+                // two TE headers whose combined final coding is not chunked → 400
+                "POST /echo HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: gzip\r\nContent-Length: 0\r\n\r\n",
+                // TE + CL together is a smuggling signal → reject, never silently prefer one
+                "POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: 6\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+                // duplicate CL with different values → 400
+                "POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: 5\r\nContent-Length: 10\r\n\r\nhello",
+                // a single CL header listing different values → 400
+                "POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: 5, 10\r\n\r\nhello",
+                // non-canonical CL forms that proxies parse differently → 400
+                "POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: +5\r\n\r\nhello",
+                "POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: 007\r\n\r\nhello",
+                "POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: 5x\r\n\r\nhello",
+                // chunked requires HTTP/1.1
+                "POST /echo HTTP/1.0\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+            })
     void ambiguousFramingIsRejectedWith400(String rawRequest) {
         String response = RawHttp.sendAndReceive(port, rawRequest);
 
@@ -82,8 +83,7 @@ class Http11SmugglingTest {
         // RFC 9112 §6.3: a single CL with a list of identical values may be treated as one value
         String body = "hello";
         String response = RawHttp.sendAndReceive(
-                port,
-                "POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: 5, 5\r\n\r\n" + body);
+                port, "POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: 5, 5\r\n\r\n" + body);
 
         assertEquals(200, RawHttp.extractStatusCode(response));
         assertEquals(body, RawHttp.extractBody(response));
