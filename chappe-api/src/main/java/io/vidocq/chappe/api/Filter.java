@@ -21,9 +21,13 @@ package io.vidocq.chappe.api;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.net.InetAddress;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.function.BooleanSupplier;
@@ -221,11 +225,16 @@ public interface Filter {
      * {@code io.vidocq.chappe.access} to a {@code ConsoleHandler} on {@link System#out}.
      * <ul>
      *   <li>The client IP is read from {@code X-Forwarded-For} (first hop) or
-     *       {@code X-Real-IP}, otherwise {@code Request.remoteAddress()}.</li>
-     *   <li>The user is read from {@code X-Forwarded-User}, {@code Gap-Auth}
-     *       (oauth2-proxy) or {@code Authorization}, otherwise {@code "-"}.</li>
+     *       {@code X-Real-IP}, but only when the direct peer is a trusted proxy: a loopback,
+     *       private or link-local address, or a CIDR given to
+     *       {@link #accessLog(Consumer, Collection)}. A client talking to chappe directly cannot
+     *       forge its IP with those headers.</li>
+     *   <li>The user is read from {@code X-Forwarded-User} or {@code Gap-Auth}
+     *       (oauth2-proxy), under the same trusted-proxy condition, otherwise {@code "-"}.</li>
      *   <li>The body size is the one declared by {@code Response.body().contentLength()}
      *       (may be {@code -1} for streamed/chunked bodies, indicated as {@code "-"}).</li>
+     *   <li>Quotes, backslashes and control characters in the logged values are escaped, so one
+     *       request can never forge extra fields in a log line.</li>
      * </ul>
      */
     static Filter accessLog() {
@@ -234,7 +243,28 @@ public interface Filter {
 
     /** Variant of {@link #accessLog()} with a custom sink. */
     static Filter accessLog(Consumer<String> sink) {
+        return accessLog(sink, List.of());
+    }
+
+    /**
+     * Variant of {@link #accessLog(Consumer)} with an explicit list of trusted proxies in CIDR
+     * notation (e.g. {@code "10.0.0.0/8"}, {@code "192.168.1.7"}). The forwarding headers
+     * {@code X-Forwarded-For}, {@code X-Real-IP}, {@code X-Forwarded-User} and {@code Gap-Auth}
+     * are honored only when the direct peer matches one of these CIDRs (or is a loopback/private/
+     * link-local address, the default of {@link #accessLog(Consumer)}); any other client gets its
+     * socket address in the log, so it cannot spoof its IP or user.
+     *
+     * @param sink              log line sink
+     * @param trustedProxyCidrs trusted proxy networks in CIDR notation; empty keeps the default
+     *                          loopback/private/link-local heuristic
+     */
+    static Filter accessLog(Consumer<String> sink, Collection<String> trustedProxyCidrs) {
         Objects.requireNonNull(sink, "sink");
+        Objects.requireNonNull(trustedProxyCidrs, "trustedProxyCidrs");
+        List<Cidr> cidrs = new ArrayList<>();
+        for (var c : trustedProxyCidrs) {
+            cidrs.add(Cidr.parse(c));
+        }
         return next -> request -> {
             long startNanos = System.nanoTime();
             boolean answered = false;
@@ -243,45 +273,77 @@ public interface Filter {
                 int status = response.status().code();
                 answered = true;
                 long size = response.body().contentLength();
-                logLine(sink, request, status, size, startNanos);
+                logLine(sink, request, status, size, startNanos, cidrs);
                 return response;
             } finally {
                 // A failure is logged as a 500 and goes on unchanged, checked or not (CHAPPE-049).
                 if (!answered) {
-                    logLine(sink, request, 500, -1, startNanos);
+                    logLine(sink, request, 500, -1, startNanos, cidrs);
                 }
             }
         };
     }
 
-    private static void logLine(Consumer<String> sink, Request req, int status, long size, long startNanos) {
+    private static void logLine(
+            Consumer<String> sink, Request req, int status, long size, long startNanos, List<Cidr> trustedCidrs) {
         long durMs = (System.nanoTime() - startNanos) / 1_000_000L;
         String ts = ZonedDateTime.now(ZoneOffset.UTC).format(ACCESS_LOG_DATE);
-        String ip = clientIp(req);
-        String user = clientUser(req);
+        String ip = clientIp(req, trustedCidrs);
+        String user = clientUser(req, trustedCidrs);
         String sizeStr = size < 0 ? "-" : Long.toString(size);
-        sink.accept(ip + " - " + user + " [" + ts + "] \""
-                + req.method() + " " + req.path() + " " + req.version().wireFormat() + "\" "
+        sink.accept(logSafe(ip) + " - " + logSafe(user) + " [" + ts + "] \""
+                + logSafe(req.method().toString()) + " " + logSafe(req.path()) + " "
+                + logSafe(req.version().wireFormat()) + "\" "
                 + status + " " + sizeStr + " " + durMs + "ms");
     }
 
-    private static String clientIp(Request req) {
-        String xff = req.header("X-Forwarded-For").orElse(null);
-        if (xff != null && !xff.isEmpty()) {
-            int comma = xff.indexOf(',');
-            return (comma < 0 ? xff : xff.substring(0, comma)).trim();
+    /** Escapes a value interpolated into the log line: quotes, backslashes and control chars. */
+    private static String logSafe(String s) {
+        if (s == null) return "-";
+        var sb = new StringBuilder(s.length() + 8);
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '"') sb.append("\\\"");
+            else if (c == '\\') sb.append("\\\\");
+            else if (c < 0x20 || c == 0x7F) sb.append(String.format("\\u%04x", (int) c));
+            else sb.append(c);
         }
-        String xri = req.header("X-Real-IP").orElse(null);
-        if (xri != null && !xri.isEmpty()) return xri.trim();
-        var ra = req.remoteAddress();
-        return ra != null ? ra.getAddress().getHostAddress() : "-";
+        return sb.toString();
     }
 
-    private static String clientUser(Request req) {
-        String u = req.header("X-Forwarded-User").orElse(null);
-        if (u != null && !u.isEmpty()) return u;
-        u = req.header("Gap-Auth").orElse(null);
-        if (u != null && !u.isEmpty()) return u;
+    /** Whether the direct peer of this request is a trusted proxy for the forwarding headers. */
+    private static boolean trustsForwardingHeaders(Request req, List<Cidr> trustedCidrs) {
+        var ra = req.remoteAddress();
+        if (ra == null || ra.getAddress() == null) return false;
+        InetAddress addr = ra.getAddress();
+        for (var cidr : trustedCidrs) {
+            if (cidr.matches(addr)) return true;
+        }
+        return addr.isLoopbackAddress() || addr.isAnyLocalAddress()
+                || addr.isSiteLocalAddress() || addr.isLinkLocalAddress();
+    }
+
+    private static String clientIp(Request req, List<Cidr> trustedCidrs) {
+        if (trustsForwardingHeaders(req, trustedCidrs)) {
+            String xff = req.header("X-Forwarded-For").orElse(null);
+            if (xff != null && !xff.isEmpty()) {
+                int comma = xff.indexOf(',');
+                return (comma < 0 ? xff : xff.substring(0, comma)).trim();
+            }
+            String xri = req.header("X-Real-IP").orElse(null);
+            if (xri != null && !xri.isEmpty()) return xri.trim();
+        }
+        var ra = req.remoteAddress();
+        return ra != null && ra.getAddress() != null ? ra.getAddress().getHostAddress() : "-";
+    }
+
+    private static String clientUser(Request req, List<Cidr> trustedCidrs) {
+        if (trustsForwardingHeaders(req, trustedCidrs)) {
+            String u = req.header("X-Forwarded-User").orElse(null);
+            if (u != null && !u.isEmpty()) return u;
+            u = req.header("Gap-Auth").orElse(null);
+            if (u != null && !u.isEmpty()) return u;
+        }
         return "-";
     }
 

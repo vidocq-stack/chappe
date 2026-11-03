@@ -349,6 +349,7 @@ public final class StaticFileHandler implements Handler {
         @Override
         public ResolvedResource resolve(String relative, String indexFile) {
             try {
+                Path rootReal = root.toRealPath();
                 Path file = root.resolve(relative).normalize();
                 if (!file.startsWith(root)) return null;
 
@@ -356,6 +357,9 @@ public final class StaticFileHandler implements Handler {
                     file = file.resolve(indexFile);
                 }
                 if (!Files.isRegularFile(file)) return null;
+                // The lexical check above does not follow symlinks: a link inside the root must not
+                // expose a file outside of it, so compare canonical paths (security audit F-08).
+                if (!file.toRealPath().startsWith(rootReal)) return null;
 
                 Instant lastMod = Files.getLastModifiedTime(file).toInstant().truncatedTo(ChronoUnit.SECONDS);
                 long size = Files.size(file);

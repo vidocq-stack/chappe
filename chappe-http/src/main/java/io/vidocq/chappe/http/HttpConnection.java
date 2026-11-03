@@ -26,6 +26,9 @@ import java.nio.channels.ReadableByteChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.channels.WritableByteChannel;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 
 import io.vidocq.chappe.api.*;
 import io.vidocq.chappe.http.ws.WebSocketConnection;
@@ -613,29 +616,44 @@ public final class HttpConnection {
 
     /**
      * Sets up the request body.
+     *
+     * <p>Framing must never be ambiguous (RFC 9112 §6.3, anti request-smuggling): a request with
+     * both {@code Transfer-Encoding} and {@code Content-Length}, a {@code Transfer-Encoding}
+     * whose final coding is not {@code chunked}, or conflicting/non-canonical
+     * {@code Content-Length} values is rejected with 400 and the connection is closed, so a front
+     * proxy and chappe can never disagree on where the body ends.</p>
+     *
      * @return the body InputStream, or null if there is no body
-     * @throws BadBodyException if Content-Length is invalid or exceeds the limit
+     * @throws BadBodyException if the framing is invalid or the body exceeds the limit
      */
     private RequestBodyInputStream setupBody() throws BadBodyException {
         var headers = request.headers();
-        var transferEncoding = headers.firstOrNull("Transfer-Encoding");
-        var contentLengthStr = headers.firstOrNull("Content-Length");
+        var transferEncodings = headers.all("Transfer-Encoding");
+        var contentLengths = headers.all("Content-Length");
 
-        // Transfer-Encoding: chunked wins over Content-Length (RFC 9112 §6.3)
-        if ("chunked".equalsIgnoreCase(transferEncoding)) {
+        if (!transferEncodings.isEmpty()) {
+            if (!contentLengths.isEmpty()) {
+                throw new BadBodyException("Transfer-Encoding and Content-Length are mutually exclusive");
+            }
+            if (request.version() != HttpVersion.HTTP_1_1) {
+                throw new BadBodyException("Transfer-Encoding requires HTTP/1.1");
+            }
+            var codings = transferCodings(transferEncodings);
+            if (codings.isEmpty() || !"chunked".equals(codings.get(codings.size() - 1))) {
+                throw new BadBodyException("the final Transfer-Encoding coding must be 'chunked'");
+            }
+            for (int i = 0; i < codings.size() - 1; i++) {
+                // RFC 9112 §6.3: an unsupported transfer coding → 501, not a silent ignore.
+                if (!"identity".equals(codings.get(i))) {
+                    throw new BadBodyException(
+                            StatusCode.NOT_IMPLEMENTED, "unsupported transfer coding: " + codings.get(i));
+                }
+            }
             return HttpBodyReader.chunked(readBuffer, bodyChannel, request::setTrailers, config.maxRequestSize());
         }
 
-        if (contentLengthStr != null) {
-            long cl;
-            try {
-                cl = Long.parseLong(contentLengthStr);
-            } catch (NumberFormatException _) {
-                throw new BadBodyException("Invalid Content-Length: " + contentLengthStr);
-            }
-            if (cl < 0) {
-                throw new BadBodyException("Negative Content-Length: " + cl);
-            }
+        if (!contentLengths.isEmpty()) {
+            long cl = parseContentLength(contentLengths);
             if (cl == 0) return null;
             if (cl > config.maxRequestSize()) {
                 // RFC 9110 §15.5.14: the body is refused for its size, not for its framing.
@@ -647,6 +665,59 @@ public final class HttpConnection {
         }
 
         return null;
+    }
+
+    /** Splits the Transfer-Encoding header values into their codings, lower-cased and trimmed. */
+    private static List<String> transferCodings(List<String> transferEncodings) {
+        var codings = new ArrayList<String>();
+        for (var value : transferEncodings) {
+            for (var token : value.split(",")) {
+                var coding = token.trim().toLowerCase(Locale.ROOT);
+                if (!coding.isEmpty()) codings.add(coding);
+            }
+        }
+        return codings;
+    }
+
+    /**
+     * Parses the Content-Length header values (RFC 9112 §6.3): several values are acceptable only
+     * when they are all identical, and each must be canonical — digits only, no sign, no leading
+     * zero — so every intermediary parses the same length.
+     */
+    private static long parseContentLength(List<String> contentLengths) throws BadBodyException {
+        long cl = -1;
+        boolean seen = false;
+        for (var value : contentLengths) {
+            for (var token : value.split(",")) {
+                var t = token.trim();
+                if (!isCanonicalNonNegativeLong(t)) {
+                    throw new BadBodyException("Invalid Content-Length: " + t);
+                }
+                long v;
+                try {
+                    v = Long.parseLong(t);
+                } catch (NumberFormatException _) {
+                    throw new BadBodyException("Content-Length out of range: " + t);
+                }
+                if (!seen) {
+                    cl = v;
+                    seen = true;
+                } else if (cl != v) {
+                    throw new BadBodyException("Conflicting Content-Length values");
+                }
+            }
+        }
+        return cl;
+    }
+
+    /** Canonical decimal form of a non-negative long: digits only, no leading zero unless "0". */
+    private static boolean isCanonicalNonNegativeLong(String t) {
+        if (t.isEmpty() || t.length() > 19) return false;
+        for (int i = 0; i < t.length(); i++) {
+            char c = t.charAt(i);
+            if (c < '0' || c > '9') return false;
+        }
+        return t.equals("0") || t.charAt(0) != '0';
     }
 
     private static final class BadBodyException extends Exception {
