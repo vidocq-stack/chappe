@@ -104,14 +104,15 @@ class Http11SmugglingTest {
     void smuggledSecondRequestIsNeverAnswered() {
         // Classic CL.TE payload: the "body" of the first request is a whole second request.
         // The server must answer 400 to the first request and close — never parse the smuggled GET.
-        String response = RawHttp.sendAndReceive(
-                port,
-                "POST /echo HTTP/1.1\r\n"
-                        + "Host: localhost\r\n"
-                        + "Content-Length: 44\r\n"
-                        + "Transfer-Encoding: chunked\r\n"
-                        + "\r\n"
-                        + "0\r\n\r\nGET /nobody HTTP/1.1\r\nHost: localhost\r\n\r\n");
+        String payload = """
+                POST /echo HTTP/1.1\r\n\
+                Host: localhost\r\n\
+                Content-Length: 44\r\n\
+                Transfer-Encoding: chunked\r\n\
+                \r\n\
+                0\r\n\r\nGET /nobody HTTP/1.1\r\nHost: localhost\r\n\r\n\
+                """;
+        String response = RawHttp.sendAndReceive(port, payload);
 
         assertEquals(400, RawHttp.extractStatusCode(response));
         assertFalse(response.contains("no-body-expected"), "the smuggled request must not be answered");

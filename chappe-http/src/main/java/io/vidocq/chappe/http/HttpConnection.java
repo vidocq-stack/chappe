@@ -635,21 +635,7 @@ public final class HttpConnection {
             if (!contentLengths.isEmpty()) {
                 throw new BadBodyException("Transfer-Encoding and Content-Length are mutually exclusive");
             }
-            if (request.version() != HttpVersion.HTTP_1_1) {
-                throw new BadBodyException("Transfer-Encoding requires HTTP/1.1");
-            }
-            var codings = transferCodings(transferEncodings);
-            if (codings.isEmpty() || !"chunked".equals(codings.get(codings.size() - 1))) {
-                throw new BadBodyException("the final Transfer-Encoding coding must be 'chunked'");
-            }
-            for (int i = 0; i < codings.size() - 1; i++) {
-                // RFC 9112 §6.3: an unsupported transfer coding → 501, not a silent ignore.
-                if (!"identity".equals(codings.get(i))) {
-                    throw new BadBodyException(
-                            StatusCode.NOT_IMPLEMENTED, "unsupported transfer coding: " + codings.get(i));
-                }
-            }
-            return HttpBodyReader.chunked(readBuffer, bodyChannel, request::setTrailers, config.maxRequestSize());
+            return chunkedRequestBody(transferEncodings);
         }
 
         if (!contentLengths.isEmpty()) {
@@ -667,11 +653,50 @@ public final class HttpConnection {
         return null;
     }
 
+    /**
+     * Validates the Transfer-Encoding codings (RFC 9112 §6.3) and returns the chunked body reader.
+     *
+     * @throws BadBodyException if the request is not HTTP/1.1, the final coding is not
+     *         {@code chunked}, or a preceding coding is unsupported
+     */
+    private RequestBodyInputStream chunkedRequestBody(List<String> transferEncodings) throws BadBodyException {
+        if (request.version() != HttpVersion.HTTP_1_1) {
+            throw new BadBodyException("Transfer-Encoding requires HTTP/1.1");
+        }
+        var codings = transferCodings(transferEncodings);
+        if (codings.isEmpty() || !"chunked".equals(codings.get(codings.size() - 1))) {
+            throw new BadBodyException("the final Transfer-Encoding coding must be 'chunked'");
+        }
+        for (int i = 0; i < codings.size() - 1; i++) {
+            // RFC 9112 §6.3: an unsupported transfer coding → 501, not a silent ignore.
+            if (!"identity".equals(codings.get(i))) {
+                throw new BadBodyException(
+                        StatusCode.NOT_IMPLEMENTED, "unsupported transfer coding: " + codings.get(i));
+            }
+        }
+        return HttpBodyReader.chunked(readBuffer, bodyChannel, request::setTrailers, config.maxRequestSize());
+    }
+
+    /**
+     * Splits a comma-separated list header value without regex (a literal ',' split keeps the
+     * empty elements; the callers decide to ignore or reject them, RFC 9110 §5.6.1).
+     */
+    private static List<String> splitListItems(String value) {
+        var items = new ArrayList<String>();
+        int start = 0;
+        for (int i = value.indexOf(','); i >= 0; i = value.indexOf(',', start)) {
+            items.add(value.substring(start, i));
+            start = i + 1;
+        }
+        items.add(value.substring(start));
+        return items;
+    }
+
     /** Splits the Transfer-Encoding header values into their codings, lower-cased and trimmed. */
     private static List<String> transferCodings(List<String> transferEncodings) {
         var codings = new ArrayList<String>();
         for (var value : transferEncodings) {
-            for (var token : value.split(",")) {
+            for (var token : splitListItems(value)) {
                 var coding = token.trim().toLowerCase(Locale.ROOT);
                 if (!coding.isEmpty()) codings.add(coding);
             }
@@ -688,7 +713,7 @@ public final class HttpConnection {
         long cl = -1;
         boolean seen = false;
         for (var value : contentLengths) {
-            for (var token : value.split(",")) {
+            for (var token : splitListItems(value)) {
                 var t = token.trim();
                 if (!isCanonicalNonNegativeLong(t)) {
                     throw new BadBodyException("Invalid Content-Length: " + t);
