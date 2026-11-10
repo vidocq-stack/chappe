@@ -126,7 +126,7 @@ Once the server is listening on 8080, confirm it sustains a minimal load:
 wrk -t4 -c100 -d10s http://localhost:8080/
 ----
 
-For reference numbers compared against Jetty, Helidon, and JDK HttpServer, see link:{repo-chappe}/blob/main/BENCHMARKS.md[BENCHMARKS.md].
+For measured figures, with their hardware and exact commands, see link:{repo-chappe}/blob/main/BENCH.md[BENCH.md].
 
 == Diagram: starting a server
 

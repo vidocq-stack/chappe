@@ -6,7 +6,7 @@
 
 ## Project
 
-High-performance HTTP server in pure Java 25 (zero dependencies outside the JDK), designed to serve
+HTTP server in pure Java 25 (zero dependencies outside the JDK), designed to serve
 as the foundation for the future JAX-RS and Servlet projects of the Vidocq ecosystem.
 
 ### Implemented protocols

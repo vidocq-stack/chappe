@@ -1,5 +1,7 @@
 # Chappe — Performance Report
 
+> **Earlier runs, kept as history.** The figures below were measured at the dates and on the setups given in each section, and they include runs of other servers taken as test references. Chappe makes no ranking claim from them; the current measured figures are in [BENCH.md](BENCH.md).
+
 ## TL;DR
 
 On Linux x86_64 (12 cores, host network, Docker), with a `wrk2`
