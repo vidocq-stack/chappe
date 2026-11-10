@@ -5,7 +5,7 @@
 <h1 align="center">Chappe</h1>
 
 <p align="center">
-  <strong>High-performance HTTP server in pure Java 25 — zero dependencies, virtual threads</strong>
+  <strong>HTTP server in pure Java 25 — zero dependencies, virtual threads</strong>
 </p>
 
 <p align="center">
@@ -373,16 +373,7 @@ Out of scope for v1 (to be implemented in extensions or later):
 
 ## Performance
 
-Benchmarks on macOS, Java 25, ultra-light NIO client ([details](BENCHMARKS.md)):
-
-| Server | 1 thread | 4 threads | 16 threads |
-|:--------|----------:|----------:|-----------:|
-| **Jetty 12** | 41 040 | **115 100** | **127 600** |
-| **Chappe 0.1** | 36 324 | **96 328** | 91 019 |
-| **Helidon SE 4** | 34 861 | 94 620 | 90 798 |
-| **JDK HttpServer** | 31 883 | 85 410 | 105 533 |
-
-**p99 latency = 57 µs** on raw socket keep-alive (JMH run 2026-05-20, 317k samples). Validated with no regression after ErrorProne + Spotless cleanup — details in [BENCHMARKS.md](BENCHMARKS.md#2026-05-20--validation-jmh-post-cleanup-errorprone--spotless--systemlogger).
+Chappe's goal is a transport that holds under load and over time; no ranking against other servers is claimed. Measured figures, with their hardware, exact commands and raw results, are recorded in [BENCH.md](BENCH.md); earlier in-process and shootout runs are kept in [BENCHMARKS.md](BENCHMARKS.md).
 
 ## Architecture
 

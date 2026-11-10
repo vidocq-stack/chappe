@@ -2,7 +2,7 @@
 :description: From Netty, Undertow, Jetty, JDK HttpServer.
 
 [.lead]
-This page collects the API mappings and the typical pitfalls when migrating an existing HTTP service to Chappe. For comparative performance numbers, see link:{repo-chappe}/blob/main/BENCHMARKS.md[BENCHMARKS.md].
+This page collects the API mappings and the typical pitfalls when migrating an existing HTTP service to Chappe. For measured figures, see link:{repo-chappe}/blob/main/BENCH.md[BENCH.md].
 
 [CAUTION]
 ====

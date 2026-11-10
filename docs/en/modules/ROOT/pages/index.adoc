@@ -6,7 +6,7 @@ image::chappe-logo.png[Chappe,300,role=module-logo]
 
 
 [.lead]
-Chappe is a high-performance HTTP server written in **pure Java 25** with no runtime dependency outside the JDK. It implements HTTP/1.1 (RFC 9110/9112), HTTP/2 (RFC 9113) and — eventually — HTTP/3 (RFC 9114). It is the **transport layer** of the Vidocq ecosystem: Foy (Servlet) and Cassini (REST) mount on top.
+Chappe is an HTTP server written in **pure Java 25** with no runtime dependency outside the JDK. It implements HTTP/1.1 (RFC 9110/9112), HTTP/2 (RFC 9113) and — eventually — HTTP/3 (RFC 9114). It is the **transport layer** of the Vidocq ecosystem: Foy (Servlet) and Cassini (REST) mount on top.
 
 == Origin of the name
 
@@ -69,7 +69,7 @@ Chappe also runs **without any extension**: that is what its `chappe serve` CLI 
 
 == Performance
 
-Quick read (TL;DR, canonical table, JFR profile, native vs JVM): xref:performance.adoc[Performance page]. The full log of all runs (closed-loop in-process and open-loop wrk2), detailed methodology and history of optimizations live in link:{repo-chappe}/blob/main/BENCHMARKS.md[BENCHMARKS.md].
+No ranking against other servers is claimed: see the xref:performance.adoc[Performance page]. Measured figures live in link:{repo-chappe}/blob/main/BENCH.md[BENCH.md]; earlier runs and methodology are in link:{repo-chappe}/blob/main/BENCHMARKS.md[BENCHMARKS.md].
 
 == Quick links
 
