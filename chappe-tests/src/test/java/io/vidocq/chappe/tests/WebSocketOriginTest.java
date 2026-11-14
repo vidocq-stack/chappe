@@ -70,6 +70,40 @@ class WebSocketOriginTest {
     }
 
     @Test
+    void theWarningNamesTheSettingTheOriginsWereConfiguredBy() throws Exception {
+        int port = start(Router.builder()
+                .webSocket("/named", HANDLER)
+                .webSocketOrigins(
+                        WebSocketOrigins.parse("http://localhost:5173").configuredBy("app.ws.origins"))
+                .build());
+
+        assertEquals(403, status(port, "/named", Map.of("Origin", "http://named.example")));
+        assertTrue(
+                warningFor("http://named.example").endsWith("not allowed by app.ws.origins"),
+                "records=" + CapturingLoggerFinder.RECORDS);
+    }
+
+    @Test
+    void theWarningNamesTheRouterBuilderMethodByDefault() throws Exception {
+        int port = start(Router.builder().webSocket("/defaulted", HANDLER).build());
+
+        assertEquals(403, status(port, "/defaulted", Map.of("Origin", "http://defaulted.example")));
+        assertTrue(
+                warningFor("http://defaulted.example").endsWith("not allowed by Router.Builder.webSocketOrigins"),
+                "records=" + CapturingLoggerFinder.RECORDS);
+    }
+
+    private static String warningFor(String origin) {
+        return CapturingLoggerFinder.RECORDS.stream()
+                .filter(r -> ROUTER_LOGGER.equals(r.logger())
+                        && r.level() == System.Logger.Level.WARNING
+                        && r.message().contains(origin))
+                .map(r -> r.message())
+                .findFirst()
+                .orElse("");
+    }
+
+    @Test
     void theSameOriginGets101() throws Exception {
         int port = start(Router.builder().webSocket("/ws", HANDLER).build());
 

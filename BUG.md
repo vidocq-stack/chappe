@@ -5,6 +5,28 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-059 — the WebSocket origin refusal WARNING names a Java API instead of the configured setting
+
+- **Date**: 2026-11-14
+- **Status**: FIXED on `fix/websocket-origin-setting-name`
+- **Module**: `chappe-api` (`WebSocketOrigins`, `DefaultRouterBuilder`)
+- **Symptom**: a handshake from a foreign origin is refused with `403` and a `WARNING` ending in
+  `not allowed by Router.Builder.webSocketOrigins`. A Vidocq user, who sets `vidocq.websocket.allowed-origins`,
+  or an embedder that reads origins from its own configuration, is sent to a Java API they never call.
+- **Minimal repro**:
+  ```
+  Router.builder().webSocket("/ws", handler)
+        .webSocketOrigins(WebSocketOrigins.parse(config.get("app.ws.origins"))).build();
+  // handshake with Origin: http://evil.example
+  -> WARNING ... not allowed by Router.Builder.webSocketOrigins   (the key to change is app.ws.origins)
+  ```
+- **Cause**: the message text was fixed in `DefaultRouterBuilder`; the policy did not know where it came from.
+- **Fix**: `WebSocketOrigins.configuredBy(String)` returns the same policy carrying the name of its setting, and
+  the `WARNING` ends with `not allowed by <setting>`. The default name is unchanged, so existing callers see the
+  same message. `WebSocketOriginsTest`, `WebSocketOriginTest.theWarningNamesTheSettingTheOriginsWereConfiguredBy`.
+
+---
+
 ## CHAPPE-058 — a WebSocket data frame can follow the Close frame
 
 - **Date**: 2026-11-14

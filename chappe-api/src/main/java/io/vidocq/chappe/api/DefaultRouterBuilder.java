@@ -213,9 +213,10 @@ final class DefaultRouterBuilder implements Router.Builder {
                 LOG.log(
                         System.Logger.Level.WARNING,
                         "WebSocket handshake from origin {0} refused on {1}: not the server''s origin"
-                                + " and not allowed by Router.Builder.webSocketOrigins",
+                                + " and not allowed by {2}",
                         HeaderFields.printable(origin),
-                        HeaderFields.printable(request.path()));
+                        HeaderFields.printable(request.path()),
+                        origins.setting());
                 return Response.builder()
                         .status(StatusCode.FORBIDDEN)
                         .body("WebSocket origin not allowed")

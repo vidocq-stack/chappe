@@ -22,6 +22,7 @@ package io.vidocq.chappe.api;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -59,9 +60,12 @@ public final class WebSocketOrigins {
 
     private static final int MAX_PORT = 65_535;
 
-    private static final WebSocketOrigins SAME_ORIGIN = new WebSocketOrigins(false, List.of());
+    /** The setting the refusal WARNING names when the caller did not say which one configured the policy. */
+    private static final String DEFAULT_SETTING = "Router.Builder.webSocketOrigins";
 
-    private static final WebSocketOrigins ANY = new WebSocketOrigins(true, List.of());
+    private static final WebSocketOrigins SAME_ORIGIN = new WebSocketOrigins(false, List.of(), DEFAULT_SETTING);
+
+    private static final WebSocketOrigins ANY = new WebSocketOrigins(true, List.of(), DEFAULT_SETTING);
 
     /** An origin with a lower-case scheme and host, and its port: the scheme's default when it has none. */
     private record Origin(String scheme, String host, int port) {
@@ -74,10 +78,12 @@ public final class WebSocketOrigins {
 
     private final boolean anyOrigin;
     private final List<Origin> listed;
+    private final String setting;
 
-    private WebSocketOrigins(boolean anyOrigin, List<Origin> listed) {
+    private WebSocketOrigins(boolean anyOrigin, List<Origin> listed, String setting) {
         this.anyOrigin = anyOrigin;
         this.listed = listed;
+        this.setting = setting;
     }
 
     /** The default: the server's own origin only, and handshakes without {@code Origin}. */
@@ -116,7 +122,7 @@ public final class WebSocketOrigins {
         if (star) {
             return ANY;
         }
-        return origins.isEmpty() ? SAME_ORIGIN : new WebSocketOrigins(false, List.copyOf(origins));
+        return origins.isEmpty() ? SAME_ORIGIN : new WebSocketOrigins(false, List.copyOf(origins), DEFAULT_SETTING);
     }
 
     /**
@@ -139,6 +145,33 @@ public final class WebSocketOrigins {
     /** Whether this policy allows every origin: {@link #any()}, or a {@link #parse parsed} list holding {@code *}. */
     public boolean allowsAny() {
         return anyOrigin;
+    }
+
+    /**
+     * A policy that allows exactly what this one allows, and whose refusal {@code WARNING} names
+     * {@code setting} as the place to allow an origin. By default the warning names
+     * {@code Router.Builder.webSocketOrigins}, a Java API that a caller who reads its origins from
+     * configuration never calls: name the configuration key instead.
+     * <pre>{@code
+     * WebSocketOrigins.parse(config.get("app.ws.origins")).configuredBy("app.ws.origins")
+     * }</pre>
+     * This instance is not changed.
+     *
+     * @param setting the name of the setting the origins come from; stripped
+     * @throws NullPointerException if {@code setting} is {@code null}
+     * @throws IllegalArgumentException if {@code setting} is blank
+     */
+    public WebSocketOrigins configuredBy(String setting) {
+        String name = Objects.requireNonNull(setting, "setting").strip();
+        if (name.isEmpty()) {
+            throw new IllegalArgumentException("The setting name must not be blank");
+        }
+        return new WebSocketOrigins(anyOrigin, listed, name);
+    }
+
+    /** The name of the setting this policy was configured by, for the refusal warning. */
+    String setting() {
+        return setting;
     }
 
     @Override

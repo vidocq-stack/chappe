@@ -19,6 +19,7 @@
  */
 package io.vidocq.chappe.api;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -102,5 +103,69 @@ class WebSocketOriginsTest {
         var origins = WebSocketOrigins.parse("HTTPS://Admin.Example.COM");
 
         assertTrue(origins.allows("https://admin.example.com", "a:8080"));
+    }
+
+    @Test
+    void theDefaultSettingNameIsTheRouterBuilderMethod() {
+        assertEquals(
+                "Router.Builder.webSocketOrigins", WebSocketOrigins.sameOrigin().setting());
+        assertEquals("Router.Builder.webSocketOrigins", WebSocketOrigins.any().setting());
+        assertEquals(
+                "Router.Builder.webSocketOrigins",
+                WebSocketOrigins.parse(LISTED).setting());
+    }
+
+    @Test
+    void configuredByNamesTheSetting() {
+        assertEquals(
+                "app.ws.origins",
+                WebSocketOrigins.parse(LISTED).configuredBy("app.ws.origins").setting());
+    }
+
+    @Test
+    void configuredByStripsTheName() {
+        assertEquals(
+                "app.ws.origins",
+                WebSocketOrigins.any().configuredBy("  app.ws.origins ").setting());
+    }
+
+    @Test
+    void configuredByKeepsThePolicy() {
+        var sameOrigin = WebSocketOrigins.sameOrigin().configuredBy("s");
+        assertTrue(sameOrigin.allows("http://a:8080", "a:8080"));
+        assertFalse(sameOrigin.allows("http://evil.example", "a:8080"));
+        assertFalse(sameOrigin.allowsAny());
+
+        var any = WebSocketOrigins.parse("*").configuredBy("s");
+        assertTrue(any.allows("http://evil.example", "a:8080"));
+        assertTrue(any.allowsAny());
+
+        var listed = WebSocketOrigins.parse(LISTED).configuredBy("s");
+        assertTrue(listed.allows("http://localhost:5173", "a:8080"));
+        assertTrue(listed.allows("https://admin.example.com", "a:8080"));
+        assertFalse(listed.allows("http://evil.example", "a:8080"));
+        assertFalse(listed.allowsAny());
+    }
+
+    @Test
+    void configuredByDoesNotChangeTheInstanceItIsCalledOn() {
+        var origins = WebSocketOrigins.parse(LISTED);
+
+        var named = origins.configuredBy("app.ws.origins");
+
+        assertEquals("Router.Builder.webSocketOrigins", origins.setting());
+        assertEquals("app.ws.origins", named.setting());
+    }
+
+    @Test
+    void configuredByRefusesNull() {
+        var origins = WebSocketOrigins.any();
+        assertThrows(NullPointerException.class, () -> origins.configuredBy(null));
+    }
+
+    @Test
+    void configuredByRefusesABlankName() {
+        var origins = WebSocketOrigins.any();
+        assertThrows(IllegalArgumentException.class, () -> origins.configuredBy(" "));
     }
 }
