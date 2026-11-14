@@ -5,6 +5,35 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-055 — a WebSocket write to a peer that stopped reading blocks without limit
+
+- **Date**: 2026-11-14
+- **Status**: FIXED on `feat/websocket`
+- **Module**: `chappe-http` (`ws/WebSocketConnection`, `ws/WebSocketFrameWriter`, `HttpConnection.runWebSocket`)
+- **Symptom**: a WebSocket frame write to a peer that stopped reading blocks without limit while holding
+  `writeLock`, so `close()` and the auto-PONG block behind it; the `101 Switching Protocols` write is unbounded
+  too. `ServerConfig.writeTimeout` bounds every HTTP/1.1 and HTTP/2 response write, but no WebSocket write.
+- **Minimal repro**:
+  ```
+  server: Server.builder().port(0).writeTimeout(Duration.ofSeconds(1)), a WebSocket route whose onOpen
+          loops ws.sendBinary(64 KiB) until it throws
+  client: a raw socket with a 4096-byte receive buffer that completes the handshake and never reads
+  -> sendBinary blocks forever instead of failing after 1 s; ws.close(1001, "") from another thread blocks
+     behind it
+  ```
+- **Cause**: `HttpConnection.runWebSocket` hands the raw `writeChannel` to `WebSocketHandshake.writeResponse` and
+  to `WebSocketConnection`; `WebSocketFrameWriter.flush` loops `channel.write(buf)` with no deadline, and
+  `WebSocketConnection.writeLocked` holds `writeLock` across it.
+- **Fix**: `runWebSocket` wraps `writeChannel` once in `TimedWriteChannel`, which sends each write through the
+  connection's `ConnectionWatchdog.write` bounded by `writeTimeout` (no bound when it is zero or negative), and
+  hands it to the `101` write and to `WebSocketConnection`. At the deadline the watchdog closes the connection:
+  the stalled write fails, `writeLock` is released, a `close()` waiting for it fails at once on the closed
+  connection, and the read loop reports `1006` to `onClose`.
+  `WebSocketTimeoutsTest.aPeerThatStopsReadingIsCutByWriteTimeout`,
+  `WebSocketTimeoutsTest.closeDoesNotBlockBehindAStalledWrite`.
+
+---
+
 ## CHAPPE-054 — an `Error` thrown by a handler ends the connection without a response
 
 - **Date**: 2026-11-14

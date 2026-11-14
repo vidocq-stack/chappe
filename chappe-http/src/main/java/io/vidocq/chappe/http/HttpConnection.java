@@ -342,15 +342,19 @@ public final class HttpConnection {
         return true;
     }
 
-    /** Step 6a: writes the handshake response and runs the WebSocket session on this thread. */
+    /**
+     * Step 6a: writes the handshake response and runs the WebSocket session on this thread. Every
+     * write of the session, the {@code 101} included, is bounded by {@code writeTimeout} (CHAPPE-055).
+     */
     private void runWebSocket(WebSocketUpgrade upgrade) throws IOException {
         var key = request.headers().firstOrNull("Sec-WebSocket-Key");
-        WebSocketHandshake.writeResponse(writeChannel, key, upgrade.subprotocol(), config.exposeBuildInfo());
+        var timedWriteChannel = TimedWriteChannel.of(writeChannel, watchdog, config.writeTimeout());
+        WebSocketHandshake.writeResponse(timedWriteChannel, key, upgrade.subprotocol(), config.exposeBuildInfo());
         // Prefer the matched handshake request (carries route pathParams) over the raw one.
         var handshakeReq = upgrade.handshakeRequest() != null ? upgrade.handshakeRequest() : request;
         var wsConn = new WebSocketConnection(
                 readChannel,
-                writeChannel,
+                timedWriteChannel,
                 closeable,
                 readBuffer,
                 upgrade.handler(),
