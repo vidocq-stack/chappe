@@ -5,6 +5,28 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-057 — native WebSocket routes accept a `Sec-WebSocket-Key` that does not decode to 16 bytes
+
+- **Date**: 2026-11-14
+- **Status**: FIXED on `feat/websocket`
+- **Module**: `chappe-api` (`DefaultRouterBuilder.webSocket`)
+- **Symptom**: a handshake on a `Router.Builder.webSocket` route whose `Sec-WebSocket-Key` is not the base64
+  encoding of 16 bytes (`abc`, or the base64 of 15 bytes) gets `101 Switching Protocols`. RFC 6455 §4.2.1 says
+  the key, decoded, is 16 bytes long, and a handshake that breaks it gets `400 Bad Request`.
+- **Minimal repro**:
+  ```
+  server: Router.builder().webSocket("/ws", new WebSocketHandler() {})
+  client: GET /ws HTTP/1.1, Upgrade: websocket, Connection: Upgrade, Sec-WebSocket-Version: 13,
+          Sec-WebSocket-Key: abc
+  -> 101 Switching Protocols instead of 400
+  ```
+- **Cause**: the route checks only that the key is present and not blank.
+- **Fix**: after the version check, the route base64-decodes the key and answers `400` unless it gives 16
+  bytes; the origin check (`Router.Builder.webSocketOrigins`) comes after it.
+  `WebSocketOriginTest.aKeyThatIsNot16BytesGets400`.
+
+---
+
 ## CHAPPE-056 — after a server-initiated Close, the read loop waits for the peer's Close without limit
 
 - **Date**: 2026-11-14

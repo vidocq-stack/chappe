@@ -105,11 +105,30 @@ public interface Router extends Handler {
         /**
          * Registers a WebSocket endpoint (RFC 6455).
          * <p>
-         * On an HTTP/1.1 {@code GET} request with the correct handshake headers,
-         * the connection is upgraded and {@code handler} receives the session events.
-         * Otherwise a {@code 400 Bad Request} is returned.
+         * On an HTTP/1.1 {@code GET} request with the correct handshake headers, from an origin
+         * the {@linkplain #webSocketOrigins origin policy} allows, the connection is upgraded and
+         * {@code handler} receives the session events. Otherwise the handshake is refused:
+         * <ul>
+         *   <li>{@code 400 Bad Request} when it is malformed: not HTTP/1.1, no {@code Upgrade: websocket},
+         *       no {@code upgrade} token in {@code Connection}, or a {@code Sec-WebSocket-Key} that does
+         *       not decode to 16 bytes (RFC 6455 §4.2.1);</li>
+         *   <li>{@code 426 Upgrade Required} with {@code Sec-WebSocket-Version: 13} for another version;</li>
+         *   <li>{@code 403 Forbidden} for an origin the policy refuses, logged at {@code WARNING}.</li>
+         * </ul>
          */
         Builder webSocket(String pattern, WebSocketHandler handler);
+
+        /**
+         * Sets the origins allowed to open the WebSocket routes of the router this builder builds,
+         * against cross-site WebSocket hijacking; {@link WebSocketOrigins#sameOrigin()} by default.
+         * <p>
+         * The policy in force when {@link #build()} runs applies to every WebSocket route of the
+         * router, whether it was registered before or after this call, in a {@linkplain #group group}
+         * or not, and the built router keeps it whatever the builder does next. The router's policy
+         * is the one of the builder that builds it: called on the builder a {@code group} hands out,
+         * this method changes nothing.
+         */
+        Builder webSocketOrigins(WebSocketOrigins origins);
 
         /**
          * Registers a gRPC endpoint (HTTP/2 transport + core gRPC framing).

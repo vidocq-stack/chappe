@@ -26,6 +26,7 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.AbstractMap;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.EnumSet;
@@ -34,8 +35,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Consumer;
+
+import io.vidocq.chappe.api.internal.HeaderFields;
 
 /**
  * Default implementation of {@link Router.Builder}.
@@ -65,11 +69,14 @@ final class DefaultRouterBuilder implements Router.Builder {
 
     private static final Map<String, String> NO_MATCH = new NoMatch();
 
+    private static final System.Logger LOG = System.getLogger(DefaultRouterBuilder.class.getName());
+
     private final List<Route> routes = new ArrayList<>();
     private final List<Mount> mounts = new ArrayList<>();
     private final List<Filter> filters = new ArrayList<>();
     private final String prefix;
     private Handler notFoundHandler = _ -> Response.of(StatusCode.NOT_FOUND);
+    private WebSocketOrigins webSocketOrigins = WebSocketOrigins.sameOrigin();
 
     DefaultRouterBuilder() {
         this("");
@@ -151,21 +158,34 @@ final class DefaultRouterBuilder implements Router.Builder {
 
     @Override
     public Router.Builder webSocket(String pattern, WebSocketHandler handler) {
-        return route(HttpMethod.GET, pattern, request -> {
-            // RFC 6455 §4.2.1: validate server-side handshake headers.
+        // build() binds the route to the origin policy in force then.
+        return route(HttpMethod.GET, pattern, new WebSocketRoute(handler, WebSocketOrigins.sameOrigin()));
+    }
+
+    @Override
+    public Router.Builder webSocketOrigins(WebSocketOrigins origins) {
+        this.webSocketOrigins = Objects.requireNonNull(origins, "origins");
+        return this;
+    }
+
+    /**
+     * The handler of a {@link #webSocket} route: checks the handshake (RFC 6455 §4.2.1) and its
+     * origin, then upgrades. {@link #build()} binds it to the builder's origin policy.
+     */
+    private record WebSocketRoute(WebSocketHandler handler, WebSocketOrigins origins) implements Handler {
+
+        /** The length of the nonce a {@code Sec-WebSocket-Key} encodes in base64. */
+        private static final int KEY_BYTES = 16;
+
+        @Override
+        public Response handle(Request request) {
             if (request.version() != HttpVersion.HTTP_1_1) {
-                return Response.builder()
-                        .status(StatusCode.BAD_REQUEST)
-                        .body("WebSocket requires HTTP/1.1")
-                        .build();
+                return badRequest("WebSocket requires HTTP/1.1");
             }
             var headers = request.headers();
             if (!hasTokenIgnoreCase(headers.firstOrNull("Connection"), "upgrade")
                     || !"websocket".equalsIgnoreCase(headers.firstOrNull("Upgrade"))) {
-                return Response.builder()
-                        .status(StatusCode.BAD_REQUEST)
-                        .body("Missing Upgrade: websocket / Connection: Upgrade")
-                        .build();
+                return badRequest("Missing Upgrade: websocket / Connection: Upgrade");
             }
             if (!"13".equals(headers.firstOrNull("Sec-WebSocket-Version"))) {
                 return Response.builder()
@@ -175,14 +195,42 @@ final class DefaultRouterBuilder implements Router.Builder {
             }
             var key = headers.firstOrNull("Sec-WebSocket-Key");
             if (key == null || key.isBlank()) {
+                return badRequest("Missing Sec-WebSocket-Key");
+            }
+            if (!isNonce(key)) {
+                return badRequest("Sec-WebSocket-Key must be the base64 encoding of 16 bytes");
+            }
+            var origin = headers.firstOrNull("Origin");
+            if (!origins.allows(origin, headers.firstOrNull("Host"))) {
+                LOG.log(
+                        System.Logger.Level.WARNING,
+                        "WebSocket handshake from origin {0} refused on {1}: not the server''s origin"
+                                + " and not allowed by Router.Builder.webSocketOrigins",
+                        HeaderFields.printable(origin),
+                        HeaderFields.printable(request.path()));
                 return Response.builder()
-                        .status(StatusCode.BAD_REQUEST)
-                        .body("Missing Sec-WebSocket-Key")
+                        .status(StatusCode.FORBIDDEN)
+                        .body("WebSocket origin not allowed")
                         .build();
             }
             // Carry the matched request (with route pathParams) so onOpen sees {param} captures.
             return new WebSocketUpgrade(handler, null, request);
-        });
+        }
+
+        private static boolean isNonce(String key) {
+            try {
+                return Base64.getDecoder().decode(key).length == KEY_BYTES;
+            } catch (IllegalArgumentException _) {
+                return false; // not base64
+            }
+        }
+
+        private static Response badRequest(String reason) {
+            return Response.builder()
+                    .status(StatusCode.BAD_REQUEST)
+                    .body(reason)
+                    .build();
+        }
     }
 
     private static boolean hasTokenIgnoreCase(String headerValue, String token) {
@@ -296,7 +344,9 @@ final class DefaultRouterBuilder implements Router.Builder {
 
     @Override
     public Router build() {
-        var snapshot = List.copyOf(routes);
+        var origins = webSocketOrigins;
+        var snapshot =
+                routes.stream().map(r -> withWebSocketOrigins(r, origins)).toList();
         var mountSnapshot = List.copyOf(mounts);
         var globalFilters = List.copyOf(filters);
         var fallback = notFoundHandler;
@@ -317,6 +367,13 @@ final class DefaultRouterBuilder implements Router.Builder {
         }
         return new CompiledRouter(
                 Map.copyOf(staticByPath), List.copyOf(dynamicRoutes), mountSnapshot, globalFilters, fallback);
+    }
+
+    /** {@code route} with its WebSocket handshake bound to {@code origins}; any other route unchanged. */
+    private static Route withWebSocketOrigins(Route route, WebSocketOrigins origins) {
+        return route.handler() instanceof WebSocketRoute ws
+                ? new Route(route.method(), route.pattern(), new WebSocketRoute(ws.handler(), origins), route.filters())
+                : route;
     }
 
     /**

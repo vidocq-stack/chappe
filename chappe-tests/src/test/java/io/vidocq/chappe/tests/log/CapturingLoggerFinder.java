@@ -19,6 +19,7 @@
  */
 package io.vidocq.chappe.tests.log;
 
+import java.text.MessageFormat;
 import java.util.ResourceBundle;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -53,9 +54,11 @@ public final class CapturingLoggerFinder extends System.LoggerFinder {
             return true;
         }
 
+        /** Records the message formatted with its parameters, as the JDK's default logger writes it. */
         @Override
         public void log(Level level, ResourceBundle bundle, String msg, Object... params) {
-            RECORDS.add(new Entry(name, level, msg, null));
+            String message = params == null || params.length == 0 ? msg : MessageFormat.format(msg, params);
+            RECORDS.add(new Entry(name, level, message, null));
         }
 
         @Override
