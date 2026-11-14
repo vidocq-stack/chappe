@@ -301,14 +301,24 @@ public final class WebSocketConnection implements WebSocket {
     @Override
     public void sendText(String message) throws IOException {
         checkOpen();
-        var payload = StandardCharsets.UTF_8.encode(message);
-        writeLocked(() -> WebSocketFrameWriter.writeFrame(writeChannel, WebSocketFrame.OP_TEXT, payload));
+        sendData(WebSocketFrame.OP_TEXT, StandardCharsets.UTF_8.encode(message));
     }
 
     @Override
     public void sendBinary(ByteBuffer payload) throws IOException {
         checkOpen();
-        writeLocked(() -> WebSocketFrameWriter.writeFrame(writeChannel, WebSocketFrame.OP_BINARY, payload));
+        sendData(WebSocketFrame.OP_BINARY, payload);
+    }
+
+    /**
+     * Writes a data frame, unless the Close frame was sent while this call waited for {@code writeLock}:
+     * no data frame follows the Close frame (RFC 6455 §5.5.1).
+     */
+    private void sendData(int opcode, ByteBuffer payload) throws IOException {
+        writeLocked(() -> {
+            if (closeSent) throw new IOException("WebSocket closed");
+            WebSocketFrameWriter.writeFrame(writeChannel, opcode, payload);
+        });
     }
 
     @Override

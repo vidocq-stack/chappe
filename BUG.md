@@ -5,6 +5,28 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-058 — a WebSocket data frame can follow the Close frame
+
+- **Date**: 2026-11-14
+- **Status**: FIXED on `feat/websocket`
+- **Module**: `chappe-http` (`ws/WebSocketConnection`)
+- **Symptom**: a `sendText` or `sendBinary` that races a `close()` from another thread can write its data frame
+  after the Close frame. RFC 6455 §5.5.1 forbids any data frame after the Close frame. Pre-existing; Foy's
+  timer-driven closes (idle and send timeouts) racing its async sender make it reachable.
+- **Minimal repro**:
+  ```
+  thread 1: ws.close(1000, "bye")   // holds writeLock while the Close frame is written, closeSent still false
+  thread 2: ws.sendText("late")     // passes checkOpen(), then waits for writeLock
+  -> the wire holds the Close frame, then the text frame; sendText returns normally
+  ```
+- **Cause**: `checkOpen()` runs outside `writeLock`, so a send that passed it before `close()` took the lock
+  writes its frame once `close()` releases it.
+- **Fix**: `sendText` and `sendBinary` write through `sendData`, which checks `closeSent` again inside the
+  `writeLocked` task and throws `IOException("WebSocket closed")`.
+  `WebSocketCloseRaceTest.aDataSendRacingACloseNeverWritesAfterTheCloseFrame`.
+
+---
+
 ## CHAPPE-057 — native WebSocket routes accept a `Sec-WebSocket-Key` that does not decode to 16 bytes
 
 - **Date**: 2026-11-14
