@@ -96,7 +96,7 @@ public final class WebSocketConnection implements WebSocket {
     }
 
     /**
-     * @param onCloseSent runs once, from the thread that sent the Close frame, right after it: the
+     * @param onCloseSent runs once (only the call that sent the frame runs it), from that thread, right after it: the
      *     caller bounds the wait for the peer's Close with it (CHAPPE-056)
      */
     public WebSocketConnection(
@@ -331,11 +331,26 @@ public final class WebSocketConnection implements WebSocket {
 
     @Override
     public void close(int code, String reason) throws IOException {
-        if (closeSent) return;
+        if (sendCloseFrame(code, reason)) onCloseSent.run();
+    }
+
+    /**
+     * Sends the Close frame unless one was sent already; the check, the write and {@code closeSent}
+     * are one step under {@code writeLock}, so two threads never send two frames.
+     *
+     * @return {@code true} when this call sent the frame
+     */
+    private boolean sendCloseFrame(int code, String reason) throws IOException {
+        if (closeSent) return false;
         var payload = buildClosePayload(code, reason);
-        writeLocked(() -> WebSocketFrameWriter.writeFrame(writeChannel, WebSocketFrame.OP_CLOSE, payload));
-        closeSent = true;
-        onCloseSent.run();
+        var sent = new boolean[1];
+        writeLocked(() -> {
+            if (closeSent) return;
+            WebSocketFrameWriter.writeFrame(writeChannel, WebSocketFrame.OP_CLOSE, payload);
+            closeSent = true;
+            sent[0] = true;
+        });
+        return sent[0];
     }
 
     @Override
@@ -392,11 +407,8 @@ public final class WebSocketConnection implements WebSocket {
     }
 
     private void sendCloseSilent(int code, String reason) {
-        if (closeSent) return;
         try {
-            writeLocked(() -> WebSocketFrameWriter.writeFrame(
-                    writeChannel, WebSocketFrame.OP_CLOSE, buildClosePayload(code, reason)));
-            closeSent = true;
+            sendCloseFrame(code, reason);
         } catch (IOException _) {
             // Ignore — TCP is already broken.
         }

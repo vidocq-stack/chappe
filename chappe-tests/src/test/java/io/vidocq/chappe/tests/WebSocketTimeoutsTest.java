@@ -29,6 +29,7 @@ import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -137,6 +138,47 @@ class WebSocketTimeoutsTest {
             // the peer never answers with its own Close
             assertEquals(CloseCodes.ABNORMAL_CLOSURE, closeCode.get(5, SECONDS));
             assertTrue(peer.awaitEof(Duration.ofSeconds(5)), "the connection must be closed");
+        }
+    }
+
+    @Test
+    void concurrentClosesSendOneCloseFrameAndThrowNothing() throws Exception {
+        int threads = 16;
+        var failures = new ConcurrentLinkedQueue<Throwable>();
+        var done = new CountDownLatch(threads);
+        int port = start(new WebSocketHandler() {
+            @Override
+            public void onOpen(WebSocket ws, Request handshake) {
+                var go = new CountDownLatch(1);
+                for (int i = 0; i < threads; i++) {
+                    Thread.ofVirtual().start(() -> {
+                        try {
+                            go.await();
+                            ws.close(CloseCodes.NORMAL_CLOSURE, "bye");
+                        } catch (Throwable t) {
+                            failures.add(t);
+                        } finally {
+                            done.countDown();
+                        }
+                    });
+                }
+                go.countDown();
+            }
+        });
+
+        try (var peer = RawWebSocket.open(port, "/flood", Map.of(), RECEIVE_BUFFER)) {
+            assertEquals(101, peer.status());
+            assertTrue(done.await(5, SECONDS), "every close() must return");
+            int closeFrames = 0;
+            try {
+                while (true) {
+                    if (peer.readFrame().opcode() == 0x8) closeFrames++;
+                }
+            } catch (IOException _) {
+                // the connection ended after readTimeout: all frames were read
+            }
+            assertEquals(1, closeFrames, "exactly one Close frame");
+            assertTrue(failures.isEmpty(), "close() threw: " + failures);
         }
     }
 
