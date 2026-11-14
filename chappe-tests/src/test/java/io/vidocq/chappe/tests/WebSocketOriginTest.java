@@ -57,13 +57,15 @@ class WebSocketOriginTest {
 
     @Test
     void anotherOriginGets403AndAWarning() throws Exception {
-        int port = start(Router.builder().webSocket("/ws", HANDLER).build());
+        int port = start(Router.builder().webSocket("/warned", HANDLER).build());
 
-        assertEquals(403, status(port, "/ws", Map.of("Origin", "http://evil.example")));
+        // An origin and a path no other test uses: the captured records are shared by every test.
+        assertEquals(403, status(port, "/warned", Map.of("Origin", "http://warned.example")));
         boolean warned = CapturingLoggerFinder.RECORDS.stream()
                 .anyMatch(r -> ROUTER_LOGGER.equals(r.logger())
                         && r.level() == System.Logger.Level.WARNING
-                        && r.message().contains("http://evil.example"));
+                        && r.message().contains("http://warned.example")
+                        && r.message().contains("/warned"));
         assertTrue(warned, "a refused origin must be logged at WARNING; records=" + CapturingLoggerFinder.RECORDS);
     }
 

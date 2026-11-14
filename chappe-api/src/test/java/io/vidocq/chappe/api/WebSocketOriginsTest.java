@@ -89,4 +89,18 @@ class WebSocketOriginsTest {
 
         assertTrue(e.getMessage().contains(entry), e.getMessage());
     }
+
+    /** Every entry is checked, a {@code *} does not skip the others, and a trailing slash is refused. */
+    @ParameterizedTest
+    @ValueSource(strings = {"*, ftp://x", "https://x/"})
+    void aBadListThrows(String list) {
+        assertThrows(IllegalArgumentException.class, () -> WebSocketOrigins.parse(list));
+    }
+
+    @Test
+    void aListedOriginIsLowerCased() {
+        var origins = WebSocketOrigins.parse("HTTPS://Admin.Example.COM");
+
+        assertTrue(origins.allows("https://admin.example.com", "a:8080"));
+    }
 }
