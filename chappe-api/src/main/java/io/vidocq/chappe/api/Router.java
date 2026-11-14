@@ -124,9 +124,10 @@ public interface Router extends Handler {
          * <p>
          * The policy in force when {@link #build()} runs applies to every WebSocket route of the
          * router, whether it was registered before or after this call, in a {@linkplain #group group}
-         * or not, and the built router keeps it whatever the builder does next. The router's policy
-         * is the one of the builder that builds it: called on the builder a {@code group} hands out,
-         * this method changes nothing.
+         * or not, and the built router keeps it whatever the builder does next.
+         *
+         * @throws IllegalStateException if called on the builder a {@code group} hands out: the
+         *         origins are set on the root builder, the one whose {@link #build()} runs
          */
         Builder webSocketOrigins(WebSocketOrigins origins);
 

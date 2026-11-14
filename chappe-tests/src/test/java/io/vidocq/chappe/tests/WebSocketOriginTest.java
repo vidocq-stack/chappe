@@ -20,12 +20,14 @@
 package io.vidocq.chappe.tests;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.function.Consumer;
 
 import io.vidocq.chappe.api.Router;
 import io.vidocq.chappe.api.Server;
@@ -101,6 +103,17 @@ class WebSocketOriginTest {
 
         assertEquals(101, status(port, "/chat/ws", Map.of("Origin", "http://localhost:5173")));
         assertEquals(403, status(port, "/chat/ws", Map.of("Origin", "http://evil.example")));
+    }
+
+    @Test
+    void aGroupBuilderRefusesWebSocketOrigins() {
+        var builder = Router.builder();
+        var origins = WebSocketOrigins.any();
+        Consumer<Router.Builder> group = chat -> chat.webSocketOrigins(origins);
+
+        var e = assertThrows(IllegalStateException.class, () -> builder.group("/chat", group));
+
+        assertTrue(e.getMessage().contains("root Router.Builder"), e.getMessage());
     }
 
     @Test

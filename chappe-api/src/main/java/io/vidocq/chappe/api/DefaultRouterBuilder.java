@@ -75,15 +75,19 @@ final class DefaultRouterBuilder implements Router.Builder {
     private final List<Mount> mounts = new ArrayList<>();
     private final List<Filter> filters = new ArrayList<>();
     private final String prefix;
+    /** {@code false} for the builder a {@link #group} hands out, whose routes the parent builds. */
+    private final boolean root;
+
     private Handler notFoundHandler = _ -> Response.of(StatusCode.NOT_FOUND);
     private WebSocketOrigins webSocketOrigins = WebSocketOrigins.sameOrigin();
 
     DefaultRouterBuilder() {
-        this("");
+        this("", true);
     }
 
-    private DefaultRouterBuilder(String prefix) {
+    private DefaultRouterBuilder(String prefix, boolean root) {
         this.prefix = prefix;
+        this.root = root;
     }
 
     @Override
@@ -129,7 +133,7 @@ final class DefaultRouterBuilder implements Router.Builder {
 
     @Override
     public Router.Builder group(String groupPrefix, Consumer<Router.Builder> configurator) {
-        var child = new DefaultRouterBuilder(prefix + groupPrefix);
+        var child = new DefaultRouterBuilder(prefix + groupPrefix, false);
         // Parent filters are inherited by the child group
         child.filters.addAll(this.filters);
         configurator.accept(child);
@@ -164,6 +168,10 @@ final class DefaultRouterBuilder implements Router.Builder {
 
     @Override
     public Router.Builder webSocketOrigins(WebSocketOrigins origins) {
+        if (!root) {
+            throw new IllegalStateException("WebSocket origins are set on the root Router.Builder, the one whose"
+                    + " build() runs, not on the builder of a group");
+        }
         this.webSocketOrigins = Objects.requireNonNull(origins, "origins");
         return this;
     }
