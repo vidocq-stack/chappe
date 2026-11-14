@@ -105,10 +105,10 @@ public final class HeaderFields {
             String name = entry.name();
             String value = entry.value();
             if (name == null || !isToken(name)) {
-                throw new IllegalArgumentException("Invalid upgrade header name: " + name);
+                throw new IllegalArgumentException("Invalid upgrade header name: " + printable(name));
             }
             if (value == null || !isFieldValue(value)) {
-                throw new IllegalArgumentException("Invalid value for upgrade header " + name);
+                throw new IllegalArgumentException("Invalid value for upgrade header " + printable(name));
             }
             if (droppedLowerCaseNames.contains(name.toLowerCase(Locale.ROOT))) {
                 continue;

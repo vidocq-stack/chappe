@@ -20,7 +20,9 @@
 package io.vidocq.chappe.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -74,6 +76,16 @@ class WebSocketUpgradeTest {
         var headers = Headers.of("X-Evil", "a\r\nInjected: 1");
 
         assertThrows(IllegalArgumentException.class, () -> new WebSocketUpgrade(HANDLER, null, null, headers));
+    }
+
+    @Test
+    void aBadNameIsEscapedInTheMessage() {
+        var headers = Headers.of("X-Evil\r\nInjected", "v");
+
+        var e = assertThrows(IllegalArgumentException.class, () -> new WebSocketUpgrade(HANDLER, null, null, headers));
+
+        assertFalse(e.getMessage().contains("\r") || e.getMessage().contains("\n"), "raw CR or LF in the message");
+        assertTrue(e.getMessage().contains("X-Evil\\u000D\\u000AInjected"), e.getMessage());
     }
 
     private static List<String> lines(Headers headers) {
