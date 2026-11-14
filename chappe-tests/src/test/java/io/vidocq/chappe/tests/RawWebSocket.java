@@ -225,7 +225,8 @@ final class RawWebSocket implements Closeable {
     }
 
     /**
-     * Discards what the server sends until it closes the connection.
+     * Discards what the server sends until it closes the connection. A server that keeps sending
+     * does not hold it past {@code timeout}.
      *
      * @return {@code true} when the connection ended (EOF or reset) within {@code timeout}
      */
@@ -233,11 +234,14 @@ final class RawWebSocket implements Closeable {
         long deadline = System.nanoTime() + timeout.toNanos();
         var discard = new byte[8192];
         try {
-            while (true) {
-                long left = Math.max(1, (deadline - System.nanoTime()) / 1_000_000);
-                socket.setSoTimeout((int) Math.min(left, Integer.MAX_VALUE));
+            long left = deadline - System.nanoTime();
+            while (left > 0) {
+                long leftMillis = Math.max(1, left / 1_000_000);
+                socket.setSoTimeout((int) Math.min(leftMillis, Integer.MAX_VALUE));
                 if (in.read(discard) == -1) return true;
+                left = deadline - System.nanoTime();
             }
+            return false;
         } catch (SocketTimeoutException _) {
             return false;
         } catch (SocketException _) {
