@@ -27,6 +27,7 @@ import java.nio.channels.Channels;
 import java.nio.charset.StandardCharsets;
 
 import io.vidocq.chappe.api.BuildInfo;
+import io.vidocq.chappe.api.Headers;
 
 import org.junit.jupiter.api.Test;
 
@@ -59,6 +60,29 @@ class WebSocketHandshakeTest {
                 Sec-WebSocket-Protocol: chat\r
                 \r
                 """.formatted(BuildInfo.serverHeader(), BuildInfo.serverHeader()), written("chat", true));
+    }
+
+    @Test
+    void extraHeadersAreWrittenBeforeTheBlankLine() throws IOException {
+        var extra = Headers.builder()
+                .add("Set-Cookie", "JSESSIONID=x")
+                .add("X-Trace", "1")
+                .build();
+        var wire = new ByteArrayOutputStream();
+
+        WebSocketHandshake.writeResponse(Channels.newChannel(wire), KEY, "chat", extra, false);
+
+        assertEquals("""
+                HTTP/1.1 101 Switching Protocols\r
+                Upgrade: websocket\r
+                Connection: Upgrade\r
+                Server: Chappe\r
+                Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r
+                Sec-WebSocket-Protocol: chat\r
+                Set-Cookie: JSESSIONID=x\r
+                X-Trace: 1\r
+                \r
+                """, wire.toString(StandardCharsets.US_ASCII));
     }
 
     private static String written(String subprotocol, boolean exposeBuildInfo) throws IOException {

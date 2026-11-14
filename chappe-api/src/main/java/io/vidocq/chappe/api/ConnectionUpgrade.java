@@ -20,6 +20,7 @@
 package io.vidocq.chappe.api;
 
 import java.util.Objects;
+import java.util.Set;
 
 import io.vidocq.chappe.api.internal.HeaderFields;
 
@@ -60,6 +61,8 @@ import io.vidocq.chappe.api.internal.HeaderFields;
  */
 public record ConnectionUpgrade(StatusCode status, Headers headers, UpgradeHandler handler) implements Response {
 
+    private static final Set<String> DROPPED_HEADERS = Set.of("content-length", "transfer-encoding");
+
     /**
      * Validates the status and the headers, and keeps a copy of the headers without the framing ones.
      *
@@ -75,22 +78,7 @@ public record ConnectionUpgrade(StatusCode status, Headers headers, UpgradeHandl
         if (status.reason() == null || !HeaderFields.isFieldValue(status.reason())) {
             throw new IllegalArgumentException("Invalid upgrade reason phrase for status " + status.code());
         }
-        var copy = Headers.builder();
-        for (var entry : headers) {
-            String name = entry.name();
-            String value = entry.value();
-            if (name == null || !HeaderFields.isToken(name)) {
-                throw new IllegalArgumentException("Invalid upgrade header name: " + name);
-            }
-            if (value == null || !HeaderFields.isFieldValue(value)) {
-                throw new IllegalArgumentException("Invalid value for upgrade header " + name);
-            }
-            if (name.equalsIgnoreCase("Content-Length") || name.equalsIgnoreCase("Transfer-Encoding")) {
-                continue;
-            }
-            copy.add(name, value);
-        }
-        headers = copy.build();
+        headers = HeaderFields.validatedUpgradeHeaders(headers, DROPPED_HEADERS);
     }
 
     @Override

@@ -20,6 +20,7 @@
 package io.vidocq.chappe.api;
 
 import java.util.Objects;
+import java.util.Set;
 
 import io.vidocq.chappe.api.internal.HeaderFields;
 
@@ -30,14 +31,35 @@ import io.vidocq.chappe.api.internal.HeaderFields;
  * Built by {@link Router.Builder#webSocket(String, WebSocketHandler)} and recognized
  * by {@code chappe-http} via {@code instanceof}. A normal application does not need
  * to instantiate it directly.
+ * <p>
+ * The optional {@link #headers() headers} are written on the {@code 101} after the ones Chappe
+ * sets itself (a session cookie, a header an application sets during the handshake). A header
+ * Chappe writes itself, or that frames the message, is dropped from them.
  */
 public final class WebSocketUpgrade implements Response {
 
     private final WebSocketHandler handler;
     private final String subprotocol;
     private final Request handshakeRequest;
+    private final Headers headers;
 
-    public WebSocketUpgrade(WebSocketHandler handler, String subprotocol, Request handshakeRequest) {
+    /** The headers Chappe writes itself on the {@code 101}, or that cannot frame a message that has no body. */
+    private static final Set<String> DROPPED_HEADERS = Set.of(
+            "upgrade",
+            "connection",
+            "server",
+            "x-chappe-build",
+            "sec-websocket-accept",
+            "sec-websocket-protocol",
+            "sec-websocket-extensions",
+            "content-length",
+            "transfer-encoding");
+
+    /**
+     * @param headers extra headers for the {@code 101}; validated, and the ones Chappe writes itself are dropped
+     * @throws IllegalArgumentException if a header name or value is invalid, or the subprotocol is not a token
+     */
+    public WebSocketUpgrade(WebSocketHandler handler, String subprotocol, Request handshakeRequest, Headers headers) {
         this.handler = Objects.requireNonNull(handler, "handler");
         // Written as the Sec-WebSocket-Protocol header: an RFC 6455 §4.3 token (CHAPPE-008).
         if (subprotocol != null && !subprotocol.isEmpty() && !HeaderFields.isToken(subprotocol)) {
@@ -46,6 +68,12 @@ public final class WebSocketUpgrade implements Response {
         }
         this.subprotocol = subprotocol;
         this.handshakeRequest = handshakeRequest;
+        this.headers =
+                HeaderFields.validatedUpgradeHeaders(Objects.requireNonNull(headers, "headers"), DROPPED_HEADERS);
+    }
+
+    public WebSocketUpgrade(WebSocketHandler handler, String subprotocol, Request handshakeRequest) {
+        this(handler, subprotocol, handshakeRequest, Headers.empty());
     }
 
     public WebSocketUpgrade(WebSocketHandler handler, String subprotocol) {
@@ -82,7 +110,7 @@ public final class WebSocketUpgrade implements Response {
 
     @Override
     public Headers headers() {
-        return Headers.empty();
+        return headers;
     }
 
     @Override

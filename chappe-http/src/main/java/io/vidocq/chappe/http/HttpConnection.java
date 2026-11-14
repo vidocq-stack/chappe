@@ -349,7 +349,8 @@ public final class HttpConnection {
     private void runWebSocket(WebSocketUpgrade upgrade) throws IOException {
         var key = request.headers().firstOrNull("Sec-WebSocket-Key");
         var timedWriteChannel = TimedWriteChannel.of(writeChannel, watchdog, config.writeTimeout());
-        WebSocketHandshake.writeResponse(timedWriteChannel, key, upgrade.subprotocol(), config.exposeBuildInfo());
+        WebSocketHandshake.writeResponse(
+                timedWriteChannel, key, upgrade.subprotocol(), upgrade.headers(), config.exposeBuildInfo());
         // Prefer the matched handshake request (carries route pathParams) over the raw one.
         var handshakeReq = upgrade.handshakeRequest() != null ? upgrade.handshakeRequest() : request;
         var wsConn = new WebSocketConnection(

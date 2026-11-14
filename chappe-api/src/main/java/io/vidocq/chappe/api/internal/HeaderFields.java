@@ -19,6 +19,11 @@
  */
 package io.vidocq.chappe.api.internal;
 
+import java.util.Locale;
+import java.util.Set;
+
+import io.vidocq.chappe.api.Headers;
+
 /**
  * The one syntax rule for the header and trailer fields chappe writes (CHAPPE-008).
  * <ul>
@@ -85,6 +90,32 @@ public final class HeaderFields {
             throw new IllegalArgumentException("Invalid value for " + kind + " " + name
                     + " (null, a control char such as CR, LF or NUL, or a char above U+00FF)");
         }
+    }
+
+    /**
+     * The headers of an upgrade response, validated and copied in order, without the fields the
+     * transport writes itself.
+     *
+     * @param droppedLowerCaseNames the lower-case names to leave out; they are validated like the others
+     * @throws IllegalArgumentException if a name is not a token or a value not a field value
+     */
+    public static Headers validatedUpgradeHeaders(Headers headers, Set<String> droppedLowerCaseNames) {
+        var copy = Headers.builder();
+        for (var entry : headers) {
+            String name = entry.name();
+            String value = entry.value();
+            if (name == null || !isToken(name)) {
+                throw new IllegalArgumentException("Invalid upgrade header name: " + name);
+            }
+            if (value == null || !isFieldValue(value)) {
+                throw new IllegalArgumentException("Invalid value for upgrade header " + name);
+            }
+            if (droppedLowerCaseNames.contains(name.toLowerCase(Locale.ROOT))) {
+                continue;
+            }
+            copy.add(name, value);
+        }
+        return copy.build();
     }
 
     /** {@code s} with every char outside printable ASCII escaped as {@code \}{@code uXXXX}. */

@@ -28,6 +28,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
 
 import io.vidocq.chappe.api.BuildInfo;
+import io.vidocq.chappe.api.Headers;
 
 /**
  * WebSocket handshake — RFC 6455 §4.2.2.
@@ -80,6 +81,20 @@ public final class WebSocketHandshake {
     public static void writeResponse(
             WritableByteChannel channel, String secWebSocketKey, String subprotocol, boolean exposeBuildInfo)
             throws IOException {
+        writeResponse(channel, secWebSocketKey, subprotocol, Headers.empty(), exposeBuildInfo);
+    }
+
+    /**
+     * Writes the {@code 101 Switching Protocols} response with {@code extraHeaders} after the headers of the
+     * handshake itself, which the caller has validated (see {@code WebSocketUpgrade#headers()}).
+     */
+    public static void writeResponse(
+            WritableByteChannel channel,
+            String secWebSocketKey,
+            String subprotocol,
+            Headers extraHeaders,
+            boolean exposeBuildInfo)
+            throws IOException {
         byte[] prologue = exposeBuildInfo ? PROLOGUE_BUILD : PROLOGUE_DISCREET;
         var accept = computeAccept(secWebSocketKey);
         var sb = new StringBuilder(accept.length() + 64);
@@ -87,8 +102,12 @@ public final class WebSocketHandshake {
         if (subprotocol != null && !subprotocol.isEmpty()) {
             sb.append("Sec-WebSocket-Protocol: ").append(subprotocol).append("\r\n");
         }
+        for (var header : extraHeaders) {
+            sb.append(header.name()).append(": ").append(header.value()).append("\r\n");
+        }
         sb.append("\r\n");
-        var tail = sb.toString().getBytes(StandardCharsets.US_ASCII);
+        // Field values are one byte per char (HeaderFields.isFieldValue).
+        var tail = sb.toString().getBytes(StandardCharsets.ISO_8859_1);
 
         var buf = ByteBuffer.allocate(prologue.length + tail.length);
         buf.put(prologue).put(tail).flip();

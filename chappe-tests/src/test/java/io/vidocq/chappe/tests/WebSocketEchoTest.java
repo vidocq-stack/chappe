@@ -28,14 +28,17 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import io.vidocq.chappe.api.CloseCodes;
+import io.vidocq.chappe.api.Headers;
 import io.vidocq.chappe.api.Router;
 import io.vidocq.chappe.api.Server;
 import io.vidocq.chappe.api.WebSocketHandler;
+import io.vidocq.chappe.api.WebSocketUpgrade;
 import io.vidocq.chappe.tests.log.CapturingLoggerFinder;
 
 import org.junit.jupiter.api.AfterEach;
@@ -96,6 +99,11 @@ class WebSocketEchoTest {
                         ws.sendText("pin=" + h.pathParams().get("pin"));
                     }
                 })
+                // The extra headers of the upgrade reach the 101 (Foy sends the session cookie there).
+                .get(
+                        "/with-headers",
+                        request -> new WebSocketUpgrade(
+                                new WebSocketHandler() {}, null, request, Headers.of("X-Trace", "1")))
                 .build();
 
         server = Server.builder().port(0).handler(router).build();
@@ -106,6 +114,14 @@ class WebSocketEchoTest {
     @AfterEach
     void tearDown() {
         if (server != null) server.stop();
+    }
+
+    @Test
+    void theUpgradeHeadersReachThe101() throws Exception {
+        try (var peer = RawWebSocket.open(server.port(), "/with-headers", Map.of(), 0)) {
+            assertEquals(101, peer.status());
+            assertEquals("1", peer.header("X-Trace"));
+        }
     }
 
     @Test
