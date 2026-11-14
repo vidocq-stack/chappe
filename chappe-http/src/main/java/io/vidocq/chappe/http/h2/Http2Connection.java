@@ -725,12 +725,19 @@ public final class Http2Connection {
     // Dispatch and response
     // -------------------------------------------------------------------------
 
-    /** Runs the handler with {@link RequestContext#CURRENT} bound; a failure is a 500. */
+    /**
+     * Runs the handler with {@link RequestContext#CURRENT} bound; a failure of the application is a 500, logged,
+     * be it an exception, a class that does not link, a failed assertion or a recursion too deep (CHAPPE-054).
+     */
     private Response invokeHandler(HttpRequestImpl request) {
         try {
             var ctx = new RequestContext(request);
             return ScopedValue.where(RequestContext.CURRENT, ctx).call(() -> handler.handle(request));
-        } catch (Exception _) {
+        } catch (Exception | LinkageError | AssertionError | StackOverflowError e) {
+            LOG.log(
+                    System.Logger.Level.WARNING,
+                    "The handler of " + request.method() + " " + request.path() + " failed, answered 500",
+                    e);
             return Response.of(StatusCode.INTERNAL_SERVER_ERROR);
         }
     }

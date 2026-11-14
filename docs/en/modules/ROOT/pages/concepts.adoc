@@ -22,6 +22,11 @@ Three interfaces hold the entire public API.
 | Functional interface: `Response handle(Request req)`. Everything is a handler — a router, a static file handler, a composed filter, a lambda.
 |===
 
+[#handler-failure]
+=== A handler that fails [.tag-new]#NEW#
+
+A failure that escapes the handler is answered `500 Internal Server Error`, over HTTP/1.1 as over HTTP/2, and logged at `WARNING` with its stack trace (`The handler of GET /books failed, answered 500`). A gRPC call ends `INTERNAL`. That holds for an exception and for the errors an application causes: a class that does not link (`NoSuchMethodError`, `NoClassDefFoundError`), a failed `assert`, a `StackOverflowError`. The connection lives on and serves the next request. Only an error of the virtual machine itself, such as an `OutOfMemoryError`, goes on to the thread of the connection. A `RequestBodyTooLargeException` is answered `413` instead (xref:reference.adoc#request-body-limits[request body limits]).
+
 == Request and Response
 
 Both types are **immutable** at the API surface. `Response` is built through a builder; `Request` is provided by the engine.

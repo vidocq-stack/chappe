@@ -260,19 +260,29 @@ public final class HttpConnection {
         }
     }
 
-    /** Step 5: calls the handler with {@link RequestContext#CURRENT} bound; never throws. */
+    /**
+     * Step 5: calls the handler with {@link RequestContext#CURRENT} bound; never throws. A failure of the
+     * application is answered and logged: an exception, but also a class that does not link, a failed
+     * assertion or a recursion too deep, which would otherwise end the connection without a response
+     * (CHAPPE-054). Only an error of the virtual machine itself, such as running out of memory, goes on.
+     */
     private Response dispatch(RequestBodyInputStream bodyStream) {
         try {
             return ScopedValue.where(RequestContext.CURRENT, context).call(() -> handler.handle(request));
-        } catch (Exception e) {
+        } catch (Exception | LinkageError | AssertionError | StackOverflowError e) {
             // Nothing is written yet: a cap failure that escapes the handler, as is or wrapped,
             // is answered 413 as over HTTP/2, and the connection closes after it (step 7).
-            return bodyTooLarge(e, bodyStream)
-                    ? Response.of(StatusCode.PAYLOAD_TOO_LARGE)
-                    : Response.builder()
-                            .status(StatusCode.INTERNAL_SERVER_ERROR)
-                            .body("Internal Server Error")
-                            .build();
+            if (bodyTooLarge(e, bodyStream)) {
+                return Response.of(StatusCode.PAYLOAD_TOO_LARGE);
+            }
+            LOG.log(
+                    System.Logger.Level.WARNING,
+                    "The handler of " + request.method() + " " + request.path() + " failed, answered 500",
+                    e);
+            return Response.builder()
+                    .status(StatusCode.INTERNAL_SERVER_ERROR)
+                    .body("Internal Server Error")
+                    .build();
         } finally {
             // The probe shares the parse buffer: it must be fully stopped
             // before the loop resumes channel reads (next request parse,

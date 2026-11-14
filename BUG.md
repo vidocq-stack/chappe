@@ -5,6 +5,26 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-054 — an `Error` thrown by a handler ends the connection without a response
+
+- **Date**: 2026-11-14
+- **Status**: FIXED on `fix/handler-error-500`
+- **Module**: `chappe-http` (`HttpConnection.dispatch`, `Http2Connection.invokeHandler`, `grpc/GrpcCallRunner`),
+  `chappe-api` (`DefaultRouterBuilder`, gRPC-Web)
+- **Symptom**: a Vidocq application whose bean class was not processed by `vidocq:generate` throws
+  `NoSuchMethodError: 'void ...BookResource.<init>(io.vidocq.vauban.api.ProxyLink)'` in its REST handler. `GET /books`
+  closes the connection without a response (`UND_ERR_SOCKET` on a Node client) instead of a `500`; the error is
+  printed as `Exception in thread ""` on the standard error, no line in the log. Other routes keep answering.
+  Reported by the Vidocq tutorial verification session.
+- **Minimal repro**: a route `_ -> { throw new NoSuchMethodError("x"); }`, then `GET` it over HTTP/1.1 or HTTP/2:
+  _HTTP/1.1 header parser received no bytes_ (`HandlerFailureTest`).
+- **Cause**: the dispatch caught `Exception` only. An `Error` went past it and ended the virtual thread of the
+  connection (HTTP/1.1) or of the stream (HTTP/2, gRPC), and the uncaught-exception handler printed it. A failed
+  exception was answered `500` but never logged.
+- **Fix**: the dispatch catches `Exception | LinkageError | AssertionError | StackOverflowError`, answers `500` and
+  logs it at `WARNING` with its stack trace; a gRPC call ends `INTERNAL`, as on an exception. An error of the virtual machine itself
+  (`OutOfMemoryError`, `InternalError`) still goes on. `HandlerFailureTest`, `Http2GrpcTransportTest`.
+
 ## CHAPPE-053 — a YAML block list whose first item is a bare dash is rejected
 
 - **Date**: 2026-10-23

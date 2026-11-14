@@ -268,7 +268,8 @@ final class DefaultRouterBuilder implements Router.Builder {
             if (!call.isCompleted()) {
                 call.complete(GrpcStatus.OK, "");
             }
-        } catch (Exception e) {
+        } catch (Exception | LinkageError | AssertionError | StackOverflowError e) {
+            // A class that does not link fails the call as an exception does, never leaves it open (CHAPPE-054).
             if (!call.isCompleted()) {
                 try {
                     call.complete(GrpcStatus.INTERNAL, String.valueOf(e.getMessage()));

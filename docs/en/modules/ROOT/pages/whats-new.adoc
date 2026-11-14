@@ -4,4 +4,4 @@
 [.lead]
 New in the `{project-version}` development line — everything listed here landed **after the {release-version} release** and is not part of it. Every entry links to the section that documents it, and those sections carry the [.tag-new]#NEW# badge. Each brick of the suite keeps its own page of this kind; xref:home::whats-new.adoc[the ecosystem index] gathers them. When the next release train ships, this page is frozen with it and restarts empty on the dev line.
 
-_Nothing documented yet for this cycle. Add entries here (and place [.tag-new]#NEW# badges on the relevant pages) as features land on main._
+* xref:concepts.adoc#handler-failure[A handler that throws an error is answered] [.tag-new]#NEW# — a `NoSuchMethodError`, an `AssertionError` or a `StackOverflowError` thrown by a handler is answered `500` (a gRPC call ends `INTERNAL`), as an exception is; the connection used to end without a response, the error printed on the standard error of its thread. Every failure that escapes an HTTP handler is now logged at `WARNING` (CHAPPE-054).

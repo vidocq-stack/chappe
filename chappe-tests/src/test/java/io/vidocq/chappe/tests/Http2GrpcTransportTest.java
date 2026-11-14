@@ -268,6 +268,43 @@ class Http2GrpcTransportTest {
     }
 
     // ------------------------------------------------------------------
+    // 5b. A handler that throws ends the call INTERNAL, an exception as a class
+    //     that does not link: the call is never left open (CHAPPE-054)
+    // ------------------------------------------------------------------
+    @Test
+    void handlerThrowingAnExceptionEndsTheCallInternal() throws Exception {
+        assertHandlerFailureEndsTheCallInternal(new IllegalStateException("grpc-exception"));
+    }
+
+    @Test
+    void handlerThrowingALinkageErrorEndsTheCallInternal() throws Exception {
+        assertHandlerFailureEndsTheCallInternal(new NoSuchMethodError("grpc-linkage"));
+    }
+
+    private void assertHandlerFailureEndsTheCallInternal(Throwable failure) throws Exception {
+        startServer("/fail", call -> {
+            call.receive();
+            switch (failure) {
+                case RuntimeException e -> throw e;
+                case Error e -> throw e;
+                default -> throw new AssertionError(failure);
+            }
+        });
+
+        try (var socket = new Socket()) {
+            connectAndHandshake(socket);
+            var in = new DataInputStream(socket.getInputStream());
+            var out = new DataOutputStream(socket.getOutputStream());
+
+            sendGrpcRequest(out, 1, "/fail", true, GrpcFrameWriter.encode(new byte[] {0}));
+            var seq = readUntilEndStream(in, 1);
+
+            assertEquals("13", seq.trailers().get("grpc-status"));
+            assertEquals(failure.getMessage(), seq.trailers().get("grpc-message"));
+        }
+    }
+
+    // ------------------------------------------------------------------
     // 6. Trailers-Only: immediate error, a single HEADERS frame with END_STREAM
     // ------------------------------------------------------------------
     @Test
