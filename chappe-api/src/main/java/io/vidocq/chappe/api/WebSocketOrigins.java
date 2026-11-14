@@ -157,14 +157,19 @@ public final class WebSocketOrigins {
      * }</pre>
      * This instance is not changed.
      *
-     * @param setting the name of the setting the origins come from; stripped
+     * @param setting the name of the setting the origins come from; stripped. It is a
+     *        developer-supplied identifier written to the log as is, so it holds no ISO control
+     *        character (line break, tab, DEL...)
      * @throws NullPointerException if {@code setting} is {@code null}
-     * @throws IllegalArgumentException if {@code setting} is blank
+     * @throws IllegalArgumentException if {@code setting} is blank or holds an ISO control character
      */
     public WebSocketOrigins configuredBy(String setting) {
         String name = Objects.requireNonNull(setting, "setting").strip();
         if (name.isEmpty()) {
             throw new IllegalArgumentException("The setting name must not be blank");
+        }
+        if (name.chars().anyMatch(Character::isISOControl)) {
+            throw new IllegalArgumentException("The setting name must not hold a control character");
         }
         return new WebSocketOrigins(anyOrigin, listed, name);
     }

@@ -168,4 +168,11 @@ class WebSocketOriginsTest {
         var origins = WebSocketOrigins.any();
         assertThrows(IllegalArgumentException.class, () -> origins.configuredBy(" "));
     }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"app.ws\norigins", "app.ws\rorigins", "app.ws\torigins", "app.ws\u007Forigins"})
+    void configuredByRefusesAControlCharacter(String setting) {
+        var origins = WebSocketOrigins.any();
+        assertThrows(IllegalArgumentException.class, () -> origins.configuredBy(setting));
+    }
 }

@@ -98,7 +98,7 @@ class WebSocketOriginTest {
                 .filter(r -> ROUTER_LOGGER.equals(r.logger())
                         && r.level() == System.Logger.Level.WARNING
                         && r.message().contains(origin))
-                .map(r -> r.message())
+                .map(CapturingLoggerFinder.Entry::message)
                 .findFirst()
                 .orElse("");
     }
