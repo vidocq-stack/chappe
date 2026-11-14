@@ -72,13 +72,22 @@ class WebSocketTimeoutsTest {
 
     private static final Duration WRITE_TIMEOUT = Duration.ofSeconds(1);
 
-    /** The frame of the slow-reader test: the paced peer takes several times {@link #WRITE_TIMEOUT} to read it. */
-    private static final int LARGE_FRAME_SIZE = 4 * 1024 * 1024;
+    /**
+     * The frame of the slow-reader test: 24 MiB. Linux loopback buffers a good part of any frame
+     * (send-buffer autotuning, {@code tcp_wmem} up to about 4 MiB, plus the receive buffer), so the
+     * send returns early for a frame those buffers can absorb. At the paced rate below, what 4 to
+     * 6 MiB of kernel buffering leaves unabsorbed still takes about 3 s to drain, well past
+     * {@link #WRITE_TIMEOUT}.
+     */
+    private static final int LARGE_FRAME_SIZE = 24 * 1024 * 1024;
 
     /** The slow peer reads this much at a time... */
-    private static final int SLOW_CHUNK = 16 * 1024;
+    private static final int SLOW_CHUNK = 64 * 1024;
 
-    /** ...then pauses this long: about 1.6 MB/s, and no pause comes near {@link #WRITE_TIMEOUT}. */
+    /**
+     * ...then pauses this long: about 6.4 MB/s, so the frame takes about 3.9 s, and no pause comes
+     * near {@link #WRITE_TIMEOUT}.
+     */
     private static final Duration SLOW_PAUSE = Duration.ofMillis(10);
 
     /** The slow peer's receive buffer: small, so the server's writes wait on the peer's pace. */
