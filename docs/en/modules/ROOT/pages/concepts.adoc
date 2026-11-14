@@ -86,7 +86,7 @@ Every response field follows one rule, so that no field can be injected into the
 
 Where the rule is checked:
 
-* `Response.builder()` (`header`, `headers`, `trailer`, `trailers`), `Filter.addHeader*`, `ConnectionUpgrade`, the `WebSocketUpgrade` subprotocol and `GrpcCall.addHeader` / `addTrailer` throw `IllegalArgumentException` at once. The message names the field and never echoes its value.
+* `Response.builder()` (`header`, `headers`, `trailer`, `trailers`), `Filter.addHeader*`, `ConnectionUpgrade`, the `WebSocketUpgrade` subprotocol and headers, and `GrpcCall.addHeader` / `addTrailer` throw `IllegalArgumentException` at once. The message names the field and never echoes its value.
 * A response built without the builder (a custom `Response` or `Headers`) is checked again by the transport before anything is written. Over HTTP/1.1 an invalid header, or an invalid custom reason phrase, answers `500` and closes the connection. Over HTTP/2 an invalid header answers `500`, and the HPACK dynamic table is left untouched. An invalid trailer is dropped, over both protocols.
 
 Encode any other text before setting it, for example with RFC 8187 (`filename*=UTF-8''…`) or percent-encoding.
