@@ -32,9 +32,9 @@ import io.vidocq.chappe.api.internal.HeaderFields;
  * by {@code chappe-http} via {@code instanceof}. A normal application does not need
  * to instantiate it directly.
  * <p>
- * The optional {@link #headers() headers} are written on the {@code 101} after the ones Chappe
- * sets itself (a session cookie, a header an application sets during the handshake). A header
- * Chappe writes itself, or that frames the message, is dropped from them.
+ * The optional {@link #headers() headers} (a session cookie, a header an application sets during
+ * the handshake) are written on the {@code 101} after the ones Chappe sets itself. A header Chappe
+ * writes itself, or that frames the message, is dropped from them.
  */
 public final class WebSocketUpgrade implements Response {
 

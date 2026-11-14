@@ -95,8 +95,9 @@ public final class WebSocketConnection implements WebSocket {
     }
 
     /**
-     * @param onCloseSent runs once (only the call that sent the frame runs it), from that thread, right after it: the
-     *     caller bounds the wait for the peer's Close with it (CHAPPE-056)
+     * @param onCloseSent runs at most once, after a {@code close()} call that sent the Close frame, on that call's
+     *     thread; a Close the connection sends itself (the echo of the peer's Close, a protocol error) does not run
+     *     it. The caller bounds the wait for the peer's Close with it (CHAPPE-056)
      */
     public WebSocketConnection(
             ReadableByteChannel readChannel,

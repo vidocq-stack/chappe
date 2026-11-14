@@ -45,7 +45,10 @@ import java.util.concurrent.locks.LockSupport;
  * The connection's one watchdog thread, started at the first armed wait, sleeps to the nearest
  * deadline and parks while nothing is armed; it never starts another thread. On a connection
  * only its own thread reads, and only one thread writes at a time, so one deadline per side is
- * enough: arming a side that already holds a live deadline is a programming error.
+ * enough: arming a side that already holds a live deadline is a programming error. One exception
+ * on the read side: a WebSocket session's close hook arms it once, from whichever thread sent the
+ * Close frame (CHAPPE-056). That is safe because the session's read loop reads the raw channel and
+ * never arms it; a change that arms it there, an idle bound for one, must not collide with the hook.
  *
  * <p>A wait that completes and the watchdog that fires race on the slot: exactly one of them
  * wins, so a wait that ends at the deadline either returns on an open connection or fails on a
