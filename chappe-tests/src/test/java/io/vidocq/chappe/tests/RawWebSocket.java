@@ -66,8 +66,29 @@ final class RawWebSocket implements Closeable {
 
     private static final SecureRandom RANDOM = new SecureRandom();
 
-    /** One server frame: its opcode and its unmasked payload. */
-    record Frame(int opcode, byte[] payload) {
+    /**
+     * One server frame: its opcode and its unmasked payload. A class, not a record: a record's array component
+     * would compare by reference (Error Prone ArrayRecordComponent).
+     */
+    static final class Frame {
+
+        private final int opcode;
+        private final byte[] payload;
+
+        Frame(int opcode, byte[] payload) {
+            this.opcode = opcode;
+            this.payload = payload;
+        }
+
+        /** The frame's opcode. */
+        int opcode() {
+            return opcode;
+        }
+
+        /** The frame's unmasked payload, not copied. */
+        byte[] payload() {
+            return payload;
+        }
 
         /** The status code of a Close frame, {@link CloseCodes#NO_STATUS_RCVD} when its payload has none. */
         int closeCode() {
@@ -77,7 +98,7 @@ final class RawWebSocket implements Closeable {
 
         @Override
         public boolean equals(Object o) {
-            return o instanceof Frame(int op, byte[] bytes) && op == opcode && Arrays.equals(bytes, payload);
+            return o instanceof Frame other && other.opcode == opcode && Arrays.equals(other.payload, payload);
         }
 
         @Override
@@ -136,7 +157,7 @@ final class RawWebSocket implements Closeable {
             socket.getOutputStream().write(handshake(port, path, extraHeaders).getBytes(StandardCharsets.ISO_8859_1));
             socket.getOutputStream().flush();
             var in = new DataInputStream(socket.getInputStream());
-            String[] head = readHead(in).split("\r\n");
+            String[] head = readHead(in).split("\r\n", -1);
             int status = Integer.parseInt(head[0].split(" ", 3)[1]);
             var headers = new LinkedHashMap<String, String>();
             for (int i = 1; i < head.length; i++) {

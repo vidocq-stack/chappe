@@ -105,7 +105,7 @@ public final class WebSocketOrigins {
         }
         boolean star = false;
         var origins = new ArrayList<Origin>();
-        for (String raw : list.split(",")) {
+        for (String raw : list.split(",", -1)) {
             String entry = raw.trim();
             if ("*".equals(entry)) {
                 star = true;
