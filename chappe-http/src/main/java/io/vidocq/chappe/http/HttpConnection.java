@@ -359,8 +359,19 @@ public final class HttpConnection {
                 readBuffer,
                 upgrade.handler(),
                 handshakeReq,
-                upgrade.subprotocol());
+                upgrade.subprotocol(),
+                this::boundCloseHandshake);
         wsConn.run();
+    }
+
+    /**
+     * After the server sent its Close frame, the peer has {@code readTimeout} to answer with its own:
+     * past it the watchdog closes the connection and the read loop reports 1006 (CHAPPE-056). Runs at
+     * most once, as the Close frame is sent once.
+     */
+    private void boundCloseHandshake() {
+        long timeout = ConnectionWatchdog.nanos(config.readTimeout());
+        if (timeout > 0) watchdog.armRead(timeout);
     }
 
     /**

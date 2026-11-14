@@ -112,11 +112,40 @@ class WebSocketTimeoutsTest {
         }
     }
 
+    @Test
+    void aServerCloseWithoutThePeersCloseEndsAfterReadTimeout() throws Exception {
+        var closeCode = new CompletableFuture<Integer>();
+        int port = start(new WebSocketHandler() {
+            @Override
+            public void onOpen(WebSocket ws, Request handshake) {
+                try {
+                    ws.close(CloseCodes.NORMAL_CLOSURE, "bye");
+                } catch (IOException e) {
+                    closeCode.completeExceptionally(e);
+                }
+            }
+
+            @Override
+            public void onClose(WebSocket ws, int code, String reason) {
+                closeCode.complete(code);
+            }
+        });
+
+        try (var peer = RawWebSocket.open(port, "/flood", Map.of(), RECEIVE_BUFFER)) {
+            assertEquals(101, peer.status());
+            assertEquals(CloseCodes.NORMAL_CLOSURE, peer.readFrame().closeCode());
+            // the peer never answers with its own Close
+            assertEquals(CloseCodes.ABNORMAL_CLOSURE, closeCode.get(5, SECONDS));
+            assertTrue(peer.awaitEof(Duration.ofSeconds(5)), "the connection must be closed");
+        }
+    }
+
     private int start(WebSocketHandler handler) {
         var router = Router.builder().webSocket("/flood", handler).build();
         server = Server.builder()
                 .port(0)
                 .writeTimeout(Duration.ofSeconds(1))
+                .readTimeout(Duration.ofSeconds(1))
                 .handler(router)
                 .build();
         server.start();

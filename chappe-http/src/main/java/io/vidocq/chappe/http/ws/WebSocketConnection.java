@@ -71,6 +71,8 @@ public final class WebSocketConnection implements WebSocket {
     private final Map<String, Object> attributes = new LinkedHashMap<>();
     private final WebSocketFrameReader reader = new WebSocketFrameReader(DEFAULT_MAX_PAYLOAD);
 
+    private final Runnable onCloseSent;
+
     private volatile boolean open = true;
     private volatile boolean closeSent;
     private volatile boolean closeReceived;
@@ -90,6 +92,23 @@ public final class WebSocketConnection implements WebSocket {
             WebSocketHandler handler,
             Request handshake,
             String subprotocol) {
+        this(readChannel, writeChannel, closeable, readBuffer, handler, handshake, subprotocol, () -> {});
+    }
+
+    /**
+     * @param onCloseSent runs once, from the thread that sent the Close frame, right after it: the
+     *     caller bounds the wait for the peer's Close with it (CHAPPE-056)
+     */
+    public WebSocketConnection(
+            ReadableByteChannel readChannel,
+            WritableByteChannel writeChannel,
+            Closeable closeable,
+            ByteBuffer readBuffer,
+            WebSocketHandler handler,
+            Request handshake,
+            String subprotocol,
+            Runnable onCloseSent) {
+        this.onCloseSent = onCloseSent;
         this.readChannel = readChannel;
         this.writeChannel = writeChannel;
         this.closeable = closeable;
@@ -316,6 +335,7 @@ public final class WebSocketConnection implements WebSocket {
         var payload = buildClosePayload(code, reason);
         writeLocked(() -> WebSocketFrameWriter.writeFrame(writeChannel, WebSocketFrame.OP_CLOSE, payload));
         closeSent = true;
+        onCloseSent.run();
     }
 
     @Override

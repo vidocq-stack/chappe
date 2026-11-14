@@ -5,6 +5,30 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-056 — after a server-initiated Close, the read loop waits for the peer's Close without limit
+
+- **Date**: 2026-11-14
+- **Status**: FIXED on `feat/websocket`
+- **Module**: `chappe-http` (`ws/WebSocketConnection`, `HttpConnection.runWebSocket`)
+- **Symptom**: once the server sent a Close frame, a peer that never answers with its own Close keeps the
+  connection, its thread and its `WebSocketConnection` alive for ever: nothing bounds the wait, the read loop
+  blocks on the raw channel and `ServerConfig.readTimeout` is not armed during a WebSocket.
+- **Minimal repro**:
+  ```
+  server: Server.builder().port(0).readTimeout(Duration.ofSeconds(1)), a WebSocket route whose onOpen calls
+          ws.close(1000, "bye")
+  client: a raw socket that completes the handshake, reads the Close frame and never answers
+  -> onClose never fires and the connection never closes, instead of 1006 and an EOF after 1 s
+  ```
+- **Cause**: `WebSocketConnection.readLoop` ends on the peer's Close, EOF or an I/O error only, and
+  `HttpConnection.runWebSocket` arms no read deadline.
+- **Fix**: `WebSocketConnection` takes an `onCloseSent` hook, run right after `closeSent = true`;
+  `runWebSocket` passes one that arms the watchdog's read slot for `readTimeout` from then (nothing when
+  `readTimeout` is zero or negative). At the deadline the watchdog closes the connection and the read loop
+  reports `1006`. `WebSocketTimeoutsTest.aServerCloseWithoutThePeersCloseEndsAfterReadTimeout`.
+
+---
+
 ## CHAPPE-055 — a WebSocket write to a peer that stopped reading blocks without limit
 
 - **Date**: 2026-11-14
