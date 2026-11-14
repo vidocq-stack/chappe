@@ -72,11 +72,11 @@ public final class WebSocketOrigins {
         }
     }
 
-    private final boolean any;
+    private final boolean anyOrigin;
     private final List<Origin> listed;
 
-    private WebSocketOrigins(boolean any, List<Origin> listed) {
-        this.any = any;
+    private WebSocketOrigins(boolean anyOrigin, List<Origin> listed) {
+        this.anyOrigin = anyOrigin;
         this.listed = listed;
     }
 
@@ -126,7 +126,7 @@ public final class WebSocketOrigins {
      * @param host the handshake's {@code Host} header, {@code null} when it has none
      */
     public boolean allows(String origin, String host) {
-        if (origin == null || any) {
+        if (origin == null || anyOrigin) {
             return true;
         }
         Origin parsed = parseOrigin(origin);
@@ -138,12 +138,12 @@ public final class WebSocketOrigins {
 
     /** Whether this policy allows every origin: {@link #any()}, or a {@link #parse parsed} list holding {@code *}. */
     public boolean allowsAny() {
-        return any;
+        return anyOrigin;
     }
 
     @Override
     public String toString() {
-        if (any) {
+        if (anyOrigin) {
             return "WebSocketOrigins[*]";
         }
         var text = new StringBuilder("WebSocketOrigins[same origin");

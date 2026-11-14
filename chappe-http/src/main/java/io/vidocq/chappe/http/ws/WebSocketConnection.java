@@ -91,28 +91,31 @@ public final class WebSocketConnection implements WebSocket {
             WebSocketHandler handler,
             Request handshake,
             String subprotocol) {
-        this(readChannel, writeChannel, closeable, readBuffer, handler, handshake, subprotocol, () -> {});
+        this(
+                new WebSocketChannels(readChannel, writeChannel, closeable, readBuffer),
+                handler,
+                handshake,
+                subprotocol,
+                () -> {});
     }
 
     /**
+     * @param channels the I/O the connection runs on
      * @param onCloseSent runs at most once, after a {@code close()} call that sent the Close frame, on that call's
      *     thread; a Close the connection sends itself (the echo of the peer's Close, a protocol error) does not run
      *     it. The caller bounds the wait for the peer's Close with it (CHAPPE-056)
      */
     public WebSocketConnection(
-            ReadableByteChannel readChannel,
-            WritableByteChannel writeChannel,
-            Closeable closeable,
-            ByteBuffer readBuffer,
+            WebSocketChannels channels,
             WebSocketHandler handler,
             Request handshake,
             String subprotocol,
             Runnable onCloseSent) {
         this.onCloseSent = onCloseSent;
-        this.readChannel = readChannel;
-        this.writeChannel = writeChannel;
-        this.closeable = closeable;
-        this.readBuffer = readBuffer;
+        this.readChannel = channels.readChannel();
+        this.writeChannel = channels.writeChannel();
+        this.closeable = channels.closeable();
+        this.readBuffer = channels.readBuffer();
         this.handler = handler;
         this.handshake = handshake;
         this.subprotocol = subprotocol;

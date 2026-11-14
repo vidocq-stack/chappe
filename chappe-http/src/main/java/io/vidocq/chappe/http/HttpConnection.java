@@ -31,6 +31,7 @@ import java.util.List;
 import java.util.Locale;
 
 import io.vidocq.chappe.api.*;
+import io.vidocq.chappe.http.ws.WebSocketChannels;
 import io.vidocq.chappe.http.ws.WebSocketConnection;
 import io.vidocq.chappe.http.ws.WebSocketHandshake;
 
@@ -354,10 +355,7 @@ public final class HttpConnection {
         // Prefer the matched handshake request (carries route pathParams) over the raw one.
         var handshakeReq = upgrade.handshakeRequest() != null ? upgrade.handshakeRequest() : request;
         var wsConn = new WebSocketConnection(
-                readChannel,
-                timedWriteChannel,
-                closeable,
-                readBuffer,
+                new WebSocketChannels(readChannel, timedWriteChannel, closeable, readBuffer),
                 upgrade.handler(),
                 handshakeReq,
                 upgrade.subprotocol(),
