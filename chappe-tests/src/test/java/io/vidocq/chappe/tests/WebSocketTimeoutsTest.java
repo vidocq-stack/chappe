@@ -21,17 +21,21 @@ package io.vidocq.chappe.tests;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.SECONDS;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.security.KeyStore;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicLong;
+
+import javax.net.ssl.SSLContext;
 
 import io.vidocq.chappe.api.CloseCodes;
 import io.vidocq.chappe.api.Request;
@@ -41,12 +45,16 @@ import io.vidocq.chappe.api.WebSocket;
 import io.vidocq.chappe.api.WebSocketHandler;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * WebSocket writes are bounded by {@code writeTimeout} (CHAPPE-055): a peer that stops reading
  * fills the socket buffers, and the write that can no longer progress is cut instead of blocking
- * the session, and everything waiting for its write lock, forever.
+ * the session, and everything waiting for its write lock, forever. The bound is per 16 KiB slice of
+ * progress, not per frame: over TLS too, a large frame to a peer that keeps reading is never cut.
  */
 class WebSocketTimeoutsTest {
 
@@ -62,34 +70,107 @@ class WebSocketTimeoutsTest {
     /** The value of {@code inFlightSince} while no send is in flight. */
     private static final long NOT_SENDING = Long.MIN_VALUE;
 
+    private static final Duration WRITE_TIMEOUT = Duration.ofSeconds(1);
+
+    /** The frame of the slow-reader test: the paced peer takes several times {@link #WRITE_TIMEOUT} to read it. */
+    private static final int LARGE_FRAME_SIZE = 4 * 1024 * 1024;
+
+    /** The slow peer reads this much at a time... */
+    private static final int SLOW_CHUNK = 16 * 1024;
+
+    /** ...then pauses this long: about 1.6 MB/s, and no pause comes near {@link #WRITE_TIMEOUT}. */
+    private static final Duration SLOW_PAUSE = Duration.ofMillis(10);
+
+    /** The slow peer's receive buffer: small, so the server's writes wait on the peer's pace. */
+    private static final int SLOW_RECEIVE_BUFFER = 64 * 1024;
+
+    private static SSLContext serverContext;
+    private static SSLContext clientContext;
+
     private Server server;
+
+    @BeforeAll
+    static void tls() throws Exception {
+        KeyStore serverKeys = TlsFixtures.selfSigned("server", "CN=localhost", "ip:127.0.0.1");
+        KeyStore trustServer = TlsFixtures.trustStore(TlsFixtures.certificate(serverKeys, "server"));
+        serverContext = TlsFixtures.context(serverKeys, trustServer);
+        clientContext = TlsFixtures.context(null, trustServer);
+    }
 
     @AfterEach
     void tearDown() {
         if (server != null) server.stop();
     }
 
-    @Test
-    void aPeerThatStopsReadingIsCutByWriteTimeout() throws Exception {
+    @ParameterizedTest(name = "tls={0}")
+    @ValueSource(booleans = {false, true})
+    void aPeerThatStopsReadingIsCutByWriteTimeout(boolean tls) throws Exception {
         var sendFailed = new CountDownLatch(1);
         var closeCode = new CompletableFuture<Integer>();
-        int port = start(new WebSocketHandler() {
-            @Override
-            public void onOpen(WebSocket ws, Request handshake) {
-                floodUntilCut(ws, new AtomicLong(NOT_SENDING));
-                sendFailed.countDown();
-            }
+        int port = start(
+                new WebSocketHandler() {
+                    @Override
+                    public void onOpen(WebSocket ws, Request handshake) {
+                        floodUntilCut(ws, new AtomicLong(NOT_SENDING));
+                        sendFailed.countDown();
+                    }
 
-            @Override
-            public void onClose(WebSocket ws, int code, String reason) {
-                closeCode.complete(code);
-            }
-        });
+                    @Override
+                    public void onClose(WebSocket ws, int code, String reason) {
+                        closeCode.complete(code);
+                    }
+                },
+                tls ? serverContext : null);
 
-        try (var peer = RawWebSocket.open(port, "/flood", Map.of(), RECEIVE_BUFFER)) {
+        try (var peer = RawWebSocket.open(tls ? clientContext : null, port, "/flood", Map.of(), RECEIVE_BUFFER)) {
             assertEquals(101, peer.status());
             assertTrue(sendFailed.await(10, SECONDS), "the stalled send must fail after writeTimeout");
             assertEquals(CloseCodes.ABNORMAL_CLOSURE, closeCode.get(10, SECONDS));
+        }
+    }
+
+    /**
+     * Over TLS, {@code SslHandler} writes the whole buffer it is handed before it returns. A frame
+     * handed whole to one bounded write would be cut after {@code writeTimeout} although the peer
+     * never stops reading; written 16 KiB per bounded write, it arrives whole.
+     */
+    @Test
+    void aSlowButSteadyPeerGetsALargeFrameWholeOverTls() throws Exception {
+        var frame = new byte[LARGE_FRAME_SIZE];
+        for (int i = 0; i < frame.length; i++) frame[i] = (byte) (i * 31);
+        var sendNanos = new CompletableFuture<Long>();
+        var closeCode = new CompletableFuture<Integer>();
+        int port = start(
+                new WebSocketHandler() {
+                    @Override
+                    public void onOpen(WebSocket ws, Request handshake) {
+                        long start = System.nanoTime();
+                        try {
+                            ws.sendBinary(ByteBuffer.wrap(frame));
+                            sendNanos.complete(System.nanoTime() - start);
+                        } catch (IOException e) {
+                            sendNanos.completeExceptionally(e);
+                        }
+                    }
+
+                    @Override
+                    public void onClose(WebSocket ws, int code, String reason) {
+                        closeCode.complete(code);
+                    }
+                },
+                serverContext);
+
+        try (var peer = RawWebSocket.open(clientContext, port, "/flood", Map.of(), SLOW_RECEIVE_BUFFER)) {
+            assertEquals(101, peer.status());
+            var received = assertDoesNotThrow(
+                    () -> peer.readFrameSlowly(SLOW_CHUNK, SLOW_PAUSE), "a peer that keeps reading gets the frame");
+            assertEquals(new RawWebSocket.Frame(0x2, frame), received);
+            long sendMillis = Duration.ofNanos(sendNanos.get(5, SECONDS)).toMillis();
+            assertTrue(
+                    sendMillis > WRITE_TIMEOUT.toMillis(),
+                    "the send must outlast writeTimeout, or nothing was tested: " + sendMillis + " ms");
+            peer.sendMasked(0x8, new byte[] {0x03, (byte) 0xE8}); // Close 1000
+            assertEquals(CloseCodes.NORMAL_CLOSURE, closeCode.get(5, SECONDS), "no 1006: the frame was not cut");
         }
     }
 
@@ -183,13 +264,19 @@ class WebSocketTimeoutsTest {
     }
 
     private int start(WebSocketHandler handler) {
+        return start(handler, null);
+    }
+
+    /** Starts the server, over TLS when {@code tls} is not {@code null}. */
+    private int start(WebSocketHandler handler, SSLContext tls) {
         var router = Router.builder().webSocket("/flood", handler).build();
-        server = Server.builder()
+        var builder = Server.builder()
                 .port(0)
-                .writeTimeout(Duration.ofSeconds(1))
+                .writeTimeout(WRITE_TIMEOUT)
                 .readTimeout(Duration.ofSeconds(1))
-                .handler(router)
-                .build();
+                .handler(router);
+        if (tls != null) builder.tls(tls);
+        server = builder.build();
         server.start();
         return server.port();
     }

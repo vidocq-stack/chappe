@@ -37,12 +37,17 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+
+import javax.net.ssl.SSLContext;
 
 import io.vidocq.chappe.api.CloseCodes;
 
 /**
- * A WebSocket client on a plain socket, for the tests that need what a real client hides: a peer
- * that stops reading, a handshake with chosen headers, a refused handshake's status, raw frames.
+ * A WebSocket client on a plain or TLS socket, for the tests that need what a real client hides: a
+ * peer that stops reading or reads slowly, a handshake with chosen headers, a refused handshake's
+ * status, raw frames.
  *
  * <p>{@link #open} sends the handshake and reads the response head, whatever its status: a refused
  * handshake (400, 403, 426) is read like an accepted one. The default request headers are {@code
@@ -108,11 +113,25 @@ final class RawWebSocket implements Closeable {
      */
     static RawWebSocket open(int port, String path, Map<String, String> extraHeaders, int receiveBufferSize)
             throws IOException {
+        return open(null, port, path, extraHeaders, receiveBufferSize);
+    }
+
+    /**
+     * {@link #open(int, String, Map, int)} over TLS when {@code tls} is not {@code null}: the socket
+     * completes a TLS handshake with the client side of {@code tls} before the WebSocket handshake.
+     */
+    static RawWebSocket open(
+            SSLContext tls, int port, String path, Map<String, String> extraHeaders, int receiveBufferSize)
+            throws IOException {
         var socket = new Socket();
         try {
             if (receiveBufferSize > 0) socket.setReceiveBufferSize(receiveBufferSize);
             socket.setTcpNoDelay(true);
-            socket.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), port));
+            var loopback = InetAddress.getLoopbackAddress();
+            socket.connect(new InetSocketAddress(loopback, port));
+            if (tls != null) {
+                socket = tls.getSocketFactory().createSocket(socket, loopback.getHostAddress(), port, true);
+            }
             socket.setSoTimeout(READ_TIMEOUT_MILLIS);
             socket.getOutputStream().write(handshake(port, path, extraHeaders).getBytes(StandardCharsets.ISO_8859_1));
             socket.getOutputStream().flush();
@@ -212,16 +231,36 @@ final class RawWebSocket implements Closeable {
     /** Reads the next server frame; fails on EOF or when none arrives within the read timeout. */
     Frame readFrame() throws IOException {
         int b0 = in.readUnsignedByte();
-        int b1 = in.readUnsignedByte();
-        int len7 = b1 & 0x7F;
+        var payload = new byte[readPayloadLength()];
+        in.readFully(payload);
+        return new Frame(b0 & 0x0F, payload);
+    }
+
+    /**
+     * Reads the next server frame as a slow but steady peer: its payload {@code chunk} bytes at a
+     * time, with a pause of {@code pause} after each chunk, so the server's writes keep waiting on
+     * this reader without ever stalling for long.
+     */
+    Frame readFrameSlowly(int chunk, Duration pause) throws IOException, InterruptedException {
+        int b0 = in.readUnsignedByte();
+        var payload = new byte[readPayloadLength()];
+        var never = new CountDownLatch(1); // never counted down: each wait on it is a pause
+        for (int offset = 0; offset < payload.length; offset += chunk) {
+            in.readFully(payload, offset, Math.min(chunk, payload.length - offset));
+            never.await(pause.toNanos(), TimeUnit.NANOSECONDS);
+        }
+        return new Frame(b0 & 0x0F, payload);
+    }
+
+    /** Reads the second byte of a frame header and the extended length, if any: the payload length. */
+    private int readPayloadLength() throws IOException {
+        int len7 = in.readUnsignedByte() & 0x7F;
         long length;
         if (len7 < 126) length = len7;
         else if (len7 == 126) length = in.readUnsignedShort();
         else length = in.readLong();
         if (length < 0 || length > Integer.MAX_VALUE) throw new IOException("Frame too large for a test: " + length);
-        var payload = new byte[(int) length];
-        in.readFully(payload);
-        return new Frame(b0 & 0x0F, payload);
+        return (int) length;
     }
 
     /**

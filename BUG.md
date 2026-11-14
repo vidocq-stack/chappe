@@ -72,11 +72,14 @@ cause hypothesis, and status.
   `WebSocketConnection.writeLocked` holds `writeLock` across it.
 - **Fix**: `runWebSocket` wraps `writeChannel` once in `TimedWriteChannel`, which sends each write through the
   connection's `ConnectionWatchdog.write` bounded by `writeTimeout` (no bound when it is zero or negative), and
-  hands it to the `101` write and to `WebSocketConnection`. At the deadline the watchdog closes the connection:
-  the stalled write fails, `writeLock` is released, a `close()` waiting for it fails at once on the closed
-  connection, and the read loop reports `1006` to `onClose`.
-  `WebSocketTimeoutsTest.aPeerThatStopsReadingIsCutByWriteTimeout`,
-  `WebSocketTimeoutsTest.closeDoesNotBlockBehindAStalledWrite`.
+  hands it to the `101` write and to `WebSocketConnection`. The bound is per slice of progress: each write hands
+  the channel at most 16 KiB, and the frame writer loops until the frame is out. A bound on a whole frame would
+  cut a large frame over TLS, where `SslHandler.write` returns only once all it was given is on the wire, although
+  the peer keeps reading. At the deadline the watchdog closes the connection: the stalled write fails,
+  `writeLock` is released, a `close()` waiting for it fails at once on the closed connection, and the read loop
+  reports `1006` to `onClose`. `WebSocketTimeoutsTest.aPeerThatStopsReadingIsCutByWriteTimeout` (plaintext and
+  TLS), `WebSocketTimeoutsTest.closeDoesNotBlockBehindAStalledWrite`,
+  `WebSocketTimeoutsTest.aSlowButSteadyPeerGetsALargeFrameWholeOverTls`.
 
 ---
 
