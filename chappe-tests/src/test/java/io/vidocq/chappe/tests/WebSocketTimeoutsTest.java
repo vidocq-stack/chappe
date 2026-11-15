@@ -33,7 +33,6 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.atomic.AtomicLong;
 
 import javax.net.ssl.SSLContext;
 
@@ -58,17 +57,11 @@ import org.junit.jupiter.params.provider.ValueSource;
  */
 class WebSocketTimeoutsTest {
 
-    /** One frame of the flood: a few of them fill the 4 KiB receive buffer and the server's send buffer. */
-    private static final int FRAME_SIZE = 64 * 1024;
-
     /** A receive buffer the peer never drains. */
     private static final int RECEIVE_BUFFER = 4096;
 
     /** How long a send must stay blocked to count as stalled: well inside the 1 s write timeout. */
-    private static final long STALL_NANOS = Duration.ofMillis(300).toNanos();
-
-    /** The value of {@code inFlightSince} while no send is in flight. */
-    private static final long NOT_SENDING = Long.MIN_VALUE;
+    private static final Duration STALL = Duration.ofMillis(300);
 
     private static final Duration WRITE_TIMEOUT = Duration.ofSeconds(1);
 
@@ -120,7 +113,7 @@ class WebSocketTimeoutsTest {
                 new WebSocketHandler() {
                     @Override
                     public void onOpen(WebSocket ws, Request handshake) {
-                        floodUntilCut(ws, new AtomicLong(NOT_SENDING));
+                        new WebSocketFlood().untilCut(ws);
                         sendFailed.countDown();
                     }
 
@@ -185,14 +178,14 @@ class WebSocketTimeoutsTest {
 
     @Test
     void closeDoesNotBlockBehindAStalledWrite() throws Exception {
-        var inFlightSince = new AtomicLong(NOT_SENDING);
+        var flood = new WebSocketFlood();
         var sendFailed = new CountDownLatch(1);
         var closeReturned = new CountDownLatch(1);
         int port = start(new WebSocketHandler() {
             @Override
             public void onOpen(WebSocket ws, Request handshake) {
-                Thread.ofVirtual().start(() -> closeOnceStalled(ws, inFlightSince, sendFailed, closeReturned));
-                floodUntilCut(ws, inFlightSince);
+                Thread.ofVirtual().start(() -> closeOnceStalled(ws, flood, sendFailed, closeReturned));
+                flood.untilCut(ws);
                 sendFailed.countDown();
             }
         });
@@ -290,32 +283,17 @@ class WebSocketTimeoutsTest {
         return server.port();
     }
 
-    /** Sends 64 KiB frames until a send fails; {@code inFlightSince} holds the start of the send in flight. */
-    private static void floodUntilCut(WebSocket ws, AtomicLong inFlightSince) {
-        var frame = new byte[FRAME_SIZE];
-        boolean sending = true;
-        while (sending) {
-            inFlightSince.set(System.nanoTime());
-            try {
-                ws.sendBinary(ByteBuffer.wrap(frame));
-            } catch (IOException _) {
-                sending = false;
-            }
-            inFlightSince.set(NOT_SENDING);
-        }
-    }
-
     /**
-     * Waits until a send has been blocked for {@link #STALL_NANOS}, then closes the session from
+     * Waits until a send has been blocked for {@link #STALL}, then closes the session from
      * this other thread. A blocked write gives no signal of its own: the wait polls, on a latch.
      * {@code close()} returning or throwing both count: the timed write may cut the connection
      * under close's own write.
      */
     private static void closeOnceStalled(
-            WebSocket ws, AtomicLong inFlightSince, CountDownLatch sendFailed, CountDownLatch closeReturned) {
+            WebSocket ws, WebSocketFlood flood, CountDownLatch sendFailed, CountDownLatch closeReturned) {
         try {
             boolean failed = false;
-            while (!failed && !stalled(inFlightSince.get())) {
+            while (!failed && !flood.stalled(STALL)) {
                 failed = sendFailed.await(10, MILLISECONDS);
             }
             ws.close(CloseCodes.GOING_AWAY, "");
@@ -326,9 +304,5 @@ class WebSocketTimeoutsTest {
             return;
         }
         closeReturned.countDown();
-    }
-
-    private static boolean stalled(long since) {
-        return since != NOT_SENDING && System.nanoTime() - since > STALL_NANOS;
     }
 }

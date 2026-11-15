@@ -32,9 +32,13 @@ import java.nio.channels.WritableByteChannel;
  * @param closeable what closes the underlying connection
  * @param readBuffer the buffer the frames are read through, already holding any bytes the HTTP parser read past
  *     the handshake
+ * @param abortCloseable what closes the underlying connection at once, sending nothing and waiting for no write:
+ *     {@code closeable} itself over plaintext, the socket under the {@code SslHandler} over TLS, without its
+ *     close_notify (CHAPPE-060)
  */
 public record WebSocketChannels(
         ReadableByteChannel readChannel,
         WritableByteChannel writeChannel,
         Closeable closeable,
-        ByteBuffer readBuffer) {}
+        ByteBuffer readBuffer,
+        Closeable abortCloseable) {}

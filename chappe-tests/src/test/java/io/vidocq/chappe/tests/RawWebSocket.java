@@ -22,6 +22,7 @@ package io.vidocq.chappe.tests;
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.DataInputStream;
+import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetAddress;
@@ -32,9 +33,11 @@ import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
@@ -282,6 +285,29 @@ final class RawWebSocket implements Closeable {
         else length = in.readLong();
         if (length < 0 || length > Integer.MAX_VALUE) throw new IOException("Frame too large for a test: " + length);
         return (int) length;
+    }
+
+    /**
+     * Reads the server's frames until the connection ends: an EOF, between two frames or inside one the
+     * close cut short, or a reset. Fails when none of them comes within the read timeout.
+     *
+     * @return the opcodes of the whole frames read, in order
+     */
+    List<Integer> readOpcodesUntilEof() throws IOException {
+        var opcodes = new ArrayList<Integer>();
+        for (Frame frame = frameOrNull(); frame != null; frame = frameOrNull()) {
+            opcodes.add(frame.opcode());
+        }
+        return opcodes;
+    }
+
+    /** The next server frame, {@code null} when the connection ended first (EOF or reset). */
+    private Frame frameOrNull() throws IOException {
+        try {
+            return readFrame();
+        } catch (EOFException | SocketException _) {
+            return null;
+        }
     }
 
     /**

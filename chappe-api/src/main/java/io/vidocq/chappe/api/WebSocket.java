@@ -60,6 +60,23 @@ public interface WebSocket {
         close(CloseCodes.NORMAL_CLOSURE, "");
     }
 
+    /**
+     * Closes the TCP connection at once, without a Close frame and without waiting for the lock that
+     * serialises the writes; over TLS, without a {@code close_notify} either. A send or a
+     * {@link #close(int, String)} blocked in another thread on a peer that does not read fails with an
+     * {@link IOException}.
+     * <p>
+     * The handler's {@link WebSocketHandler#onClose onClose} then reports {@link CloseCodes#ABNORMAL_CLOSURE}
+     * (1006), unless the connection had already ended (the peer's Close frame received). The I/O failure the
+     * abort causes on the connection's own read is not reported to {@link WebSocketHandler#onError onError}.
+     * Idempotent, never throws, safe from any thread.
+     * <p>
+     * For a connection that must end now: a peer that does not read, a shutdown past its grace. A session
+     * that may end normally ends with {@link #close(int, String)}; {@code abort()} is for when that close
+     * cannot complete in time.
+     */
+    void abort();
+
     /** {@code true} as long as the connection has neither received nor sent a Close frame. */
     boolean isOpen();
 

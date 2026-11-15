@@ -639,6 +639,15 @@ public final class SslHandler implements ReadableByteChannel, WritableByteChanne
     }
 
     /**
+     * Closes the socket at once: no close_notify, and no wait for {@code writeLock}, which a writer stalled on a
+     * peer that does not read may hold. A read or a write blocked on the socket fails with an {@link IOException}.
+     * For a connection that must end now (CHAPPE-060); a {@link #close()} after it sends nothing.
+     */
+    public void abort() throws IOException {
+        channel.close();
+    }
+
+    /**
      * Sends close_notify (best-effort) and closes the socket.
      * <p>
      * close_notify needs {@code writeLock}. If another thread holds it for longer than

@@ -5,6 +5,38 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-060 — a WebSocket cannot be cut while a send is blocked on a peer that does not read
+
+- **Date**: 2026-11-15
+- **Status**: FIXED on `fix/websocket-parked-items`
+- **Module**: `chappe-api` (`WebSocket`), `chappe-http` (`ws/WebSocketConnection`, `ws/WebSocketChannels`,
+  `SslHandler`, `HttpConnection`)
+- **Symptom**: a peer that stops reading fills the socket buffers, and a send to it blocks while it holds the
+  connection's write lock. `close()` needs that lock, so it blocks too, and nothing in the API ends the
+  connection: it stays open, with the threads parked on it, until the peer reads, `writeTimeout` (30 s by
+  default) cuts the write, or the TCP connection dies. Foy closes a WebSocket at undeploy with a 1001 Close on a
+  virtual thread of its own, waits 2 s for it, then goes on: past that point the connection outlives the
+  application.
+- **Minimal repro**:
+  ```
+  handler.onOpen: send 64 KiB frames in a loop       // the client completed the handshake and reads nothing
+  -> a send blocks once the socket buffers are full
+  another thread: ws.close(1001, "")                 // blocks on the write lock the send holds
+  -> nothing ends the connection: no API cuts it
+  ```
+- **Cause**: the API had no way to cut a connection; `close` writes the Close frame under the write lock, which
+  the blocked send holds for as long as the peer does not read. Over TLS, closing the connection's `SslHandler`
+  is not at once either: `SslHandler.close()` waits up to 100 ms for its own write lock, which the blocked send
+  holds as well, and when that lock is free it writes a close_notify bounded only by `writeTimeout`.
+- **Fix**: `WebSocket.abort()` marks the connection closed and closes the socket without taking the write lock,
+  without a Close frame and, over TLS, without a close_notify (`SslHandler.abort()`, which `HttpConnection` hands
+  to the session as `WebSocketChannels.abortCloseable`). The blocked send fails with an `IOException`, the read
+  loop ends, and `onClose` reports 1006 once, unless the peer's Close had already arrived; the read the abort
+  cuts is not reported to `onError`. `WebSocketAbortTest` (plaintext and TLS),
+  `TlsCloseBoundTest.abortDoesNotWaitForTheCloseNotify`.
+
+---
+
 ## CHAPPE-059 — the WebSocket origin refusal WARNING names a Java API instead of the configured setting
 
 - **Date**: 2026-11-14

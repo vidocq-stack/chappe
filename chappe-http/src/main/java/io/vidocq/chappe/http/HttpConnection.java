@@ -354,8 +354,10 @@ public final class HttpConnection {
                 timedWriteChannel, key, upgrade.subprotocol(), upgrade.headers(), config.exposeBuildInfo());
         // Prefer the matched handshake request (carries route pathParams) over the raw one.
         var handshakeReq = upgrade.handshakeRequest() != null ? upgrade.handshakeRequest() : request;
+        // An abort sends nothing: over TLS it closes the socket under the SslHandler, no close_notify (CHAPPE-060).
+        Closeable abortCloseable = closeable instanceof SslHandler ssl ? ssl::abort : closeable;
         var wsConn = new WebSocketConnection(
-                new WebSocketChannels(readChannel, timedWriteChannel, closeable, readBuffer),
+                new WebSocketChannels(readChannel, timedWriteChannel, closeable, readBuffer, abortCloseable),
                 upgrade.handler(),
                 handshakeReq,
                 upgrade.subprotocol(),

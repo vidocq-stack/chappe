@@ -59,6 +59,7 @@ public final class WebSocketConnection implements WebSocket {
     private final ReadableByteChannel readChannel;
     private final WritableByteChannel writeChannel;
     private final Closeable closeable;
+    private final Closeable abortCloseable;
     private final ByteBuffer readBuffer;
     private final WebSocketHandler handler;
     private final Request handshake;
@@ -75,6 +76,7 @@ public final class WebSocketConnection implements WebSocket {
     private volatile boolean open = true;
     private volatile boolean closeSent;
     private volatile boolean closeReceived;
+    private volatile boolean aborted;
     private int receivedCloseCode = CloseCodes.NO_STATUS_RCVD;
     private String receivedCloseReason = "";
 
@@ -92,7 +94,7 @@ public final class WebSocketConnection implements WebSocket {
             Request handshake,
             String subprotocol) {
         this(
-                new WebSocketChannels(readChannel, writeChannel, closeable, readBuffer),
+                new WebSocketChannels(readChannel, writeChannel, closeable, readBuffer, closeable),
                 handler,
                 handshake,
                 subprotocol,
@@ -115,6 +117,7 @@ public final class WebSocketConnection implements WebSocket {
         this.readChannel = channels.readChannel();
         this.writeChannel = channels.writeChannel();
         this.closeable = channels.closeable();
+        this.abortCloseable = channels.abortCloseable();
         this.readBuffer = channels.readBuffer();
         this.handler = handler;
         this.handshake = handshake;
@@ -142,7 +145,8 @@ public final class WebSocketConnection implements WebSocket {
             safeError(pe);
             sendCloseSilent(pe.closeCode(), pe.getMessage());
         } catch (IOException ioe) {
-            safeError(ioe);
+            // The read an abort cut is the abort itself, not an error of the session (CHAPPE-060).
+            if (!aborted) safeError(ioe);
             receivedCloseCode = CloseCodes.ABNORMAL_CLOSURE;
         } catch (Throwable t) {
             // Intentional boundary: an Error from the application's handler must still close the
@@ -150,6 +154,9 @@ public final class WebSocketConnection implements WebSocket {
             safeError(t);
             sendCloseSilent(CloseCodes.INTERNAL_ERROR, "handler error");
         } finally {
+            // An abort ends the session abnormally, unless the peer's Close frame had already arrived; the
+            // loop may also have stopped on the abort without a read failing (a handler call that returned).
+            if (aborted && !closeReceived) receivedCloseCode = CloseCodes.ABNORMAL_CLOSURE;
             notifyClose();
             forceClose();
         }
@@ -366,6 +373,18 @@ public final class WebSocketConnection implements WebSocket {
         return sent[0];
     }
 
+    /**
+     * Marks the connection closed and closes it with {@code abortCloseable}, without {@link #writeLock}, which a
+     * send blocked on a peer that does not read holds: that send fails with an {@link IOException}, and so does
+     * the read loop's read; {@link #run} then reports 1006 to {@code onClose}, once (CHAPPE-060).
+     */
+    @Override
+    public void abort() {
+        aborted = true;
+        open = false;
+        closeQuietly(abortCloseable);
+    }
+
     @Override
     public boolean isOpen() {
         return open && !closeSent && !closeReceived;
@@ -434,10 +453,14 @@ public final class WebSocketConnection implements WebSocket {
 
     private void forceClose() {
         open = false;
+        closeQuietly(closeable);
+    }
+
+    private static void closeQuietly(Closeable connection) {
         try {
-            closeable.close();
+            connection.close();
         } catch (IOException _) {
-            // Ignore
+            // Ignore: the connection is gone either way
         }
     }
 

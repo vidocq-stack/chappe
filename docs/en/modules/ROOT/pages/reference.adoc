@@ -187,6 +187,34 @@ Router.builder()
 
 `new WebSocketUpgrade(handler, subprotocol, handshakeRequest, headers)` takes a `Headers` that Chappe writes on the `101 Switching Protocols` response, and `WebSocketUpgrade.headers()` returns it (it was always empty). Chappe writes some names itself and drops them from `headers`: `Upgrade`, `Connection`, `Server`, `X-Chappe-Build`, `Sec-WebSocket-Accept`, `Sec-WebSocket-Protocol`, `Sec-WebSocket-Extensions`, `Content-Length` and `Transfer-Encoding`. An invalid name or value throws `IllegalArgumentException`, see xref:concepts.adoc#header-validation[Concepts — header and trailer validation].
 
+[#websocket-abort]
+==== Cutting a WebSocket connection: `abort()` [.tag-new]#NEW#
+
+`WebSocket.close(code, reason)` ends a session with the closing handshake: it writes a Close frame, then the connection waits for the peer's. The Close frame goes out under the lock that serialises the connection's writes, so while a send is blocked on a peer that does not read, `close()` blocks behind it until the peer reads or `writeTimeout` cuts the write.
+
+`WebSocket.abort()` ends the connection at once (CHAPPE-060):
+
+* it closes the TCP connection without a Close frame and without waiting for that lock; over TLS, without a `close_notify` either;
+* a send or a `close()` blocked in another thread fails with an `IOException`;
+* the handler's `onClose` then reports `1006`, unless the peer's Close frame had already arrived. The read the abort cuts is not reported to `onError`;
+* it is idempotent, never throws, and may be called from any thread.
+
+Use it for a connection that must end now: a peer that does not read, a shutdown past its grace. Close first, on a thread of its own since the close may block, and abort when it does not complete in time:
+
+[source,java]
+----
+Thread closing = Thread.ofVirtual().start(() -> {
+    try {
+        ws.close(CloseCodes.GOING_AWAY, "");
+    } catch (IOException _) {
+        // the connection is gone already
+    }
+});
+if (!closing.join(Duration.ofSeconds(2))) {
+    ws.abort(); // the Close frame is stuck behind a send the peer does not read
+}
+----
+
 === `Filter`
 
 [source,java]

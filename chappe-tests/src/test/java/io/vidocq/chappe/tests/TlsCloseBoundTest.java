@@ -39,6 +39,7 @@ import javax.net.ssl.SSLSocket;
 import io.vidocq.chappe.http.SslHandler;
 
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -48,6 +49,7 @@ import org.junit.jupiter.params.provider.MethodSource;
  * means "no bound" for data writes ({@code null}, zero or negative). Before, such a value made the
  * close_notify write plain: a peer that stopped reading, with the send buffer full, pinned the
  * closing thread (and the connection's buffers) until {@code stop()} force-closed the socket.
+ * {@link SslHandler#abort()} does not wait for it at all.
  */
 class TlsCloseBoundTest {
 
@@ -73,6 +75,37 @@ class TlsCloseBoundTest {
     @ParameterizedTest
     @MethodSource("unboundedWriteTimeouts")
     void aPeerThatStopsReadingCannotPinTheClose(Duration writeTimeout) throws Exception {
+        long elapsedMs = closeWhileStalled(writeTimeout, SslHandler::close);
+        assertTrue(
+                elapsedMs >= CLOSE_BUDGET_MS - 500,
+                "the close_notify write must have blocked until the close budget (" + elapsedMs + " ms)");
+    }
+
+    /**
+     * {@link SslHandler#abort()} closes the socket at once, without the close_notify {@code close()} would wait
+     * for: a minute here, the write timeout (CHAPPE-060).
+     */
+    @Test
+    void abortDoesNotWaitForTheCloseNotify() throws Exception {
+        long elapsedMs = closeWhileStalled(Duration.ofMinutes(1), SslHandler::abort);
+        assertTrue(elapsedMs < CLOSE_BUDGET_MS, "abort() must close the socket at once (" + elapsedMs + " ms)");
+    }
+
+    /** How a test closes the server side of the connection. */
+    @FunctionalInterface
+    private interface Closing {
+        void close(SslHandler ssl) throws IOException;
+    }
+
+    /**
+     * Opens a loopback TLS connection, completes its handshake, stalls the write side of the server's socket
+     * (the client reads nothing), then runs {@code closing} on the server's {@link SslHandler} in a thread of its
+     * own, and checks that it ends, closes the socket and releases the stalled write.
+     *
+     * @param writeTimeout the server's write timeout, which bounds the close_notify write of {@code close()}
+     * @return how long {@code closing} took, in milliseconds
+     */
+    private static long closeWhileStalled(Duration writeTimeout, Closing closing) throws Exception {
         try (var listener =
                         ServerSocketChannel.open().bind(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0));
                 var client = (SSLSocket) clientContext.getSocketFactory().createSocket()) {
@@ -104,7 +137,7 @@ class TlsCloseBoundTest {
                 long start = System.nanoTime();
                 Thread closer = Thread.ofVirtual().name("closer").start(() -> {
                     try {
-                        ssl.close();
+                        closing.close(ssl);
                     } catch (IOException _) {
                         // the outcome checked is that the thread ends and the socket is closed
                     }
@@ -115,13 +148,11 @@ class TlsCloseBoundTest {
                     server.close(); // release the pinned closer before failing
                     closer.join(Duration.ofSeconds(5));
                 }
-                assertTrue(ended, "close() must not block behind a peer that stopped reading (" + elapsedMs + " ms)");
+                assertTrue(ended, "the close must not block behind a peer that stopped reading (" + elapsedMs + " ms)");
                 assertFalse(server.isOpen(), "the socket must be closed");
                 assertTrue(
                         stalledWriter.join(Duration.ofSeconds(5)), "the closed socket must release the stalled write");
-                assertTrue(
-                        elapsedMs >= CLOSE_BUDGET_MS - 500,
-                        "the close_notify write must have blocked until the close budget (" + elapsedMs + " ms)");
+                return elapsedMs;
             }
         }
     }

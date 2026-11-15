@@ -22,6 +22,7 @@ package io.vidocq.chappe.http.ws;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -36,6 +37,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 
 import io.vidocq.chappe.api.CloseCodes;
+import io.vidocq.chappe.api.WebSocket;
 import io.vidocq.chappe.api.WebSocketHandler;
 import io.vidocq.chappe.http.HttpRequestImpl;
 
@@ -44,7 +46,8 @@ import org.junit.jupiter.api.Test;
 /**
  * RFC 6455 §5.5.1: once the Close frame is sent, no data frame follows it. A send that checked the
  * session open before a concurrent {@code close()} took the write lock must not write its frame
- * after the Close frame once it gets the lock.
+ * after the Close frame once it gets the lock. An abort racing the closing handshake does not hide
+ * how it ended.
  */
 class WebSocketCloseRaceTest {
 
@@ -52,7 +55,7 @@ class WebSocketCloseRaceTest {
 
     @Test
     void aDataSendRacingACloseNeverWritesAfterTheCloseFrame() throws Exception {
-        var channel = new GatedChannel();
+        var channel = new GatedChannel(new byte[0]);
         var ws = new WebSocketConnection(
                 channel,
                 channel,
@@ -88,6 +91,42 @@ class WebSocketCloseRaceTest {
         assertInstanceOf(IOException.class, failure.getCause());
     }
 
+    /**
+     * An abort that comes once the peer's Close frame arrived, while the session still writes its echo, does not
+     * turn the end of the closing handshake into 1006: {@code onClose} reports the peer's code (CHAPPE-060).
+     */
+    @Test
+    void anAbortAfterThePeersCloseKeepsItsCode() throws Exception {
+        var channel = new GatedChannel(maskedClose(CloseCodes.GOING_AWAY));
+        var closeCode = new CompletableFuture<Integer>();
+        var ws = new WebSocketConnection(
+                channel,
+                channel,
+                channel,
+                ByteBuffer.allocate(64).flip(),
+                new WebSocketHandler() {
+                    @Override
+                    public void onClose(WebSocket connection, int code, String reason) {
+                        closeCode.complete(code);
+                    }
+                },
+                new HttpRequestImpl(),
+                null);
+
+        var session = Thread.ofVirtual().start(ws::run);
+        assertTrue(channel.firstWriteBlocked.await(WAIT.toSeconds(), SECONDS), "the echo of the Close must start");
+        ws.abort();
+        channel.release.countDown();
+
+        assertTrue(session.join(WAIT), "the session must end");
+        assertEquals(CloseCodes.GOING_AWAY, closeCode.getNow(null), "onClose reports the peer's code");
+    }
+
+    /** The peer's Close frame carrying {@code code}, masked as a client frame must be, with a zero key. */
+    private static byte[] maskedClose(int code) {
+        return new byte[] {(byte) 0x88, (byte) 0x82, 0, 0, 0, 0, (byte) (code >>> 8), (byte) code};
+    }
+
     private static void closeQuietly(WebSocketConnection ws) {
         try {
             ws.close(CloseCodes.NORMAL_CLOSURE, "bye");
@@ -106,12 +145,20 @@ class WebSocketCloseRaceTest {
         }
     }
 
-    /** A channel whose first write blocks until {@link #release}; it records every byte written, and reads EOF. */
+    /**
+     * A channel whose first write blocks until {@link #release}; it records every byte written, and reads its
+     * input, then EOF.
+     */
     private static final class GatedChannel implements ByteChannel {
 
         final CountDownLatch firstWriteBlocked = new CountDownLatch(1);
         final CountDownLatch release = new CountDownLatch(1);
         private final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        private final ByteBuffer input;
+
+        GatedChannel(byte[] input) {
+            this.input = ByteBuffer.wrap(input);
+        }
 
         @Override
         public int write(ByteBuffer src) throws IOException {
@@ -141,7 +188,11 @@ class WebSocketCloseRaceTest {
 
         @Override
         public int read(ByteBuffer dst) {
-            return -1;
+            if (!input.hasRemaining()) return -1;
+            int n = Math.min(dst.remaining(), input.remaining());
+            dst.put(input.slice(input.position(), n));
+            input.position(input.position() + n);
+            return n;
         }
 
         @Override
