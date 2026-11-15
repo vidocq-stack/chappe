@@ -103,9 +103,9 @@ public final class WebSocketConnection implements WebSocket {
 
     /**
      * @param channels the I/O the connection runs on
-     * @param onCloseSent runs at most once, after a {@code close()} call that sent the Close frame, on that call's
-     *     thread; a Close the connection sends itself (the echo of the peer's Close, a protocol error) does not run
-     *     it. The caller bounds the wait for the peer's Close with it (CHAPPE-056)
+     * @param onCloseSent runs at most once, after a {@code close()} or {@code sendClose()} call that sent the Close
+     *     frame, on that call's thread; a Close the connection sends itself (the echo of the peer's Close, a
+     *     protocol error) does not run it. The caller bounds the wait for the peer's Close with it (CHAPPE-056)
      */
     public WebSocketConnection(
             WebSocketChannels channels,
@@ -254,7 +254,8 @@ public final class WebSocketConnection implements WebSocket {
     private void handleControl(WebSocketFrame frame) throws Exception {
         switch (frame.opcode()) {
             case WebSocketFrame.OP_PING -> {
-                // RFC §5.5.2: reply with PONG using exactly the same payload.
+                // RFC §5.5.2: reply with PONG using exactly the same payload, also once this side's Close went out:
+                // the RFC asks for one until the peer's Close is received, and that Close ends this loop.
                 var pongPayload = frame.payload().duplicate();
                 writeLocked(() -> WebSocketFrameWriter.writeFrame(writeChannel, WebSocketFrame.OP_PONG, pongPayload));
                 handler.onPing(this, frame.payload().duplicate());
@@ -311,24 +312,31 @@ public final class WebSocketConnection implements WebSocket {
     @Override
     public void sendText(String message) throws IOException {
         checkOpen();
-        sendData(WebSocketFrame.OP_TEXT, StandardCharsets.UTF_8.encode(message));
+        sendFrame(WebSocketFrame.OP_TEXT, StandardCharsets.UTF_8.encode(message));
     }
 
     @Override
     public void sendBinary(ByteBuffer payload) throws IOException {
         checkOpen();
-        sendData(WebSocketFrame.OP_BINARY, payload);
+        sendFrame(WebSocketFrame.OP_BINARY, payload);
     }
 
     /**
-     * Writes a data frame, unless the Close frame was sent while this call waited for {@code writeLock}:
-     * no data frame follows the Close frame (RFC 6455 §5.5.1).
+     * Writes a frame of the application, unless the Close frame was sent, or the connection aborted, while this
+     * call waited for {@code writeLock}: no data frame follows the Close frame (RFC 6455 §5.5.1), nor a ping or a
+     * pong of the application. Once the Close frame went out, no write of the application holds {@code writeLock}
+     * past this check; only the automatic Pong of a Ping the peer sent before its Close may (RFC 6455 §5.5.2).
      */
-    private void sendData(int opcode, ByteBuffer payload) throws IOException {
+    private void sendFrame(int opcode, ByteBuffer payload) throws IOException {
         writeLocked(() -> {
-            if (closeSent) throw new IOException("WebSocket closed");
+            if (writesClosed()) throw new IOException("WebSocket closed");
             WebSocketFrameWriter.writeFrame(writeChannel, opcode, payload);
         });
+    }
+
+    /** Whether nothing more may be written: this side's Close frame went out, or the connection was aborted. */
+    private boolean writesClosed() {
+        return closeSent || aborted;
     }
 
     @Override
@@ -337,7 +345,7 @@ public final class WebSocketConnection implements WebSocket {
         if (payload.remaining() > 125) {
             throw new IOException("PING payload must be ≤ 125 bytes");
         }
-        writeLocked(() -> WebSocketFrameWriter.writeFrame(writeChannel, WebSocketFrame.OP_PING, payload));
+        sendFrame(WebSocketFrame.OP_PING, payload);
     }
 
     @Override
@@ -346,40 +354,63 @@ public final class WebSocketConnection implements WebSocket {
         if (payload.remaining() > 125) {
             throw new IOException("PONG payload must be ≤ 125 bytes");
         }
-        writeLocked(() -> WebSocketFrameWriter.writeFrame(writeChannel, WebSocketFrame.OP_PONG, payload));
+        sendFrame(WebSocketFrame.OP_PONG, payload);
+    }
+
+    /** Sends the Close frame as {@link #sendClose(int, String)} does; whether it sent it does not matter here. */
+    @Override
+    public void close(int code, String reason) throws IOException {
+        sendClose(code, reason);
     }
 
     /**
      * Does nothing once the connection was aborted, also when this call was queued on {@link #writeLock} at the
-     * abort, or writing its Close frame when the abort cut that write (CHAPPE-060).
+     * abort, or writing its Close frame when the abort cut that write (CHAPPE-060). Nor does it once the peer's
+     * Close was read: the read thread echoes it, so the caller hears that the peer closed first.
+     *
+     * @return whether this call sent the Close frame
      */
     @Override
-    public void close(int code, String reason) throws IOException {
+    public boolean sendClose(int code, String reason) throws IOException {
+        boolean sent;
         try {
-            if (sendCloseFrame(code, reason)) onCloseSent.run();
+            sent = sendCloseFrame(code, reason, true);
         } catch (IOException e) {
             // The abort cut the Close frame's write: the connection is closed, which is what this call asked for.
             if (!aborted) throw e;
+            return false;
         }
+        if (sent) onCloseSent.run();
+        return sent;
     }
 
     /**
-     * Sends the Close frame unless one was sent already or the connection was aborted; the check, the write and
+     * Sends the Close frame unless one was sent already or the connection was aborted, and, for a close of the
+     * application, unless the peer's Close was read: the read thread echoes that one. The check, the write and
      * {@code closeSent} are one step under {@code writeLock}, so two threads never send two frames.
      *
+     * @param local a close of the application ({@link #sendClose(int, String)}), not one the connection sends itself
      * @return {@code true} when this call sent the frame
      */
-    private boolean sendCloseFrame(int code, String reason) throws IOException {
-        if (closeSent || aborted) return false;
+    private boolean sendCloseFrame(int code, String reason, boolean local) throws IOException {
+        if (closeTaken(local)) return false;
         var payload = buildClosePayload(code, reason);
         var sent = new boolean[1];
         writeLocked(() -> {
-            if (closeSent || aborted) return;
+            if (closeTaken(local)) return;
             WebSocketFrameWriter.writeFrame(writeChannel, WebSocketFrame.OP_CLOSE, payload);
             closeSent = true;
             sent[0] = true;
         });
         return sent[0];
+    }
+
+    /**
+     * Whether a close may no longer send its frame: one went out, the connection was aborted, or, for a close of
+     * the application, the peer's Close arrived.
+     */
+    private boolean closeTaken(boolean local) {
+        return writesClosed() || (local && closeReceived);
     }
 
     /**
@@ -450,7 +481,7 @@ public final class WebSocketConnection implements WebSocket {
 
     private void sendCloseSilent(int code, String reason) {
         try {
-            sendCloseFrame(code, reason);
+            sendCloseFrame(code, reason, false);
         } catch (IOException _) {
             // Ignore — TCP is already broken.
         }

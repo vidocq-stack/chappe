@@ -32,6 +32,10 @@ import java.nio.ByteBuffer;
  * <p>
  * Calls block until the complete frame has been written to the socket —
  * natural on virtual threads. A closed connection raises {@link IOException}.
+ * <p>
+ * Nothing of the application follows this side's Close frame: a send, a ping or a pong that was waiting for an
+ * earlier write when the Close frame went out fails with {@link IOException} without writing. The automatic
+ * Pong still answers a Ping of the peer until the peer's Close arrives (RFC 6455 §5.5.2).
  */
 public interface WebSocket {
 
@@ -41,10 +45,10 @@ public interface WebSocket {
     /** Sends a binary message (BINARY frame, opcode 0x2) as a single unfragmented frame. */
     void sendBinary(ByteBuffer payload) throws IOException;
 
-    /** Sends a PING (opcode 0x9) — payload ≤ 125 bytes. */
+    /** Sends a PING (opcode 0x9) — payload ≤ 125 bytes; fails once this side's Close frame went out. */
     void sendPing(ByteBuffer payload) throws IOException;
 
-    /** Sends a PONG (opcode 0xA) — payload ≤ 125 bytes. */
+    /** Sends a PONG (opcode 0xA) — payload ≤ 125 bytes; fails once this side's Close frame went out. */
     void sendPong(ByteBuffer payload) throws IOException;
 
     /**
@@ -54,6 +58,12 @@ public interface WebSocket {
      * After this call, the connection waits for the peer's Close frame and then closes.
      * <p>
      * Once the connection was {@linkplain #abort() aborted}, this method does nothing and does not throw.
+     * <p>
+     * It sends the Close frame as {@link #sendClose(int, String)} does, without telling whether this call sent it.
+     *
+     * @throws IOException when the Close frame cannot be written to a connection that was not aborted; an
+     *     {@link java.io.InterruptedIOException} when the calling thread is interrupted before it takes the
+     *     connection's write lock, as with {@link #sendClose(int, String)}: nothing is written
      */
     void close(int code, String reason) throws IOException;
 
@@ -61,6 +71,30 @@ public interface WebSocket {
     default void close() throws IOException {
         close(CloseCodes.NORMAL_CLOSURE, "");
     }
+
+    /**
+     * Sends this side's Close frame as {@link #close(int, String)} does, and tells whether this call sent it.
+     * <p>
+     * A connection sends one Close frame. This call sends it unless a Close frame went out before it (an earlier
+     * close of this side, or the echo of the peer's Close) or the peer's Close arrived before it, which the
+     * connection then answers with that echo. Once the connection was {@linkplain #abort() aborted}, this method
+     * does nothing and does not throw, also when the abort cut this call's write. The result tells which side
+     * closed first: {@code true}, this side; {@code false}, a Close that came before, or the abort.
+     * <p>
+     * A call that finds a Close frame already out answers without writing, once it gets past the write in
+     * progress, if any: after the Close frame, only the automatic Pong of a Ping the peer sent before its Close can
+     * be one. The server's {@code writeTimeout} bounds that write, and any other, when it is positive.
+     *
+     * @param code   the close code
+     * @param reason the close reason, at most 123 bytes in UTF-8
+     * @return {@code true} when this call sent the Close frame; {@code false} when a Close frame went out before
+     *     it, the peer's Close arrived before it, or the connection was aborted, before or during this call
+     * @throws IOException when the Close frame cannot be written to a connection that was not aborted; an
+     *     {@link java.io.InterruptedIOException} when the calling thread is interrupted before it takes the
+     *     connection's write lock, while it waits for it or already on entry: this call then wrote nothing, so
+     *     the close did not start, and the thread's interrupt status is set again
+     */
+    boolean sendClose(int code, String reason) throws IOException;
 
     /**
      * Closes the TCP connection at once, without a Close frame and without waiting for the lock that

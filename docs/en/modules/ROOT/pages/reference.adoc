@@ -187,6 +187,28 @@ Router.builder()
 
 `new WebSocketUpgrade(handler, subprotocol, handshakeRequest, headers)` takes a `Headers` that Chappe writes on the `101 Switching Protocols` response, and `WebSocketUpgrade.headers()` returns it (it was always empty). Chappe writes some names itself and drops them from `headers`: `Upgrade`, `Connection`, `Server`, `X-Chappe-Build`, `Sec-WebSocket-Accept`, `Sec-WebSocket-Protocol`, `Sec-WebSocket-Extensions`, `Content-Length` and `Transfer-Encoding`. An invalid name or value throws `IllegalArgumentException`, see xref:concepts.adoc#header-validation[Concepts — header and trailer validation].
 
+[#websocket-close-result]
+==== Which side closed first: `sendClose()` [.tag-new]#NEW#
+
+`WebSocket.sendClose(code, reason)` sends this side's Close frame as `close(code, reason)` does, and returns `true` when this call sent it; `close` returns nothing. A connection sends one Close frame, so `false` says that the closing handshake had already begun when the call came:
+
+* a Close frame went out before it: an earlier `close()` or `sendClose()` of this side, from this thread or another, or the echo of the peer's Close;
+* the peer's Close arrived before it: the connection answers that Close with its echo, the peer's code and no reason, and the call sends nothing, even when it comes before the echo went out;
+* the connection was aborted, before the call or while it wrote its Close frame (see <<websocket-abort,`abort()`>>).
+
+Nothing of the application follows this side's Close frame: a send, a ping or a pong that was waiting for an earlier write when the Close frame went out fails with `IOException` without writing, as a call made afterwards does. The automatic Pong still answers a Ping of the peer until the peer's Close arrives, as RFC 6455 §5.5.2 requires. So once its Close frame went out, a `sendClose()` answers `false` without writing, once it gets past the write in progress, if any: the automatic Pong of a Ping the peer sent before its Close is the only write that can then hold the connection's write lock. `writeTimeout` bounds that write, and any other, when it is positive.
+
+A `close()` or `sendClose()` that cannot write its frame to a connection that was not aborted still throws `IOException`. One interrupted before it takes the connection's write lock, while it waits for it or already on entry, throws `InterruptedIOException` without writing anything, its thread's interrupt status set again: that close did not start, and a later one can still send the Close frame. A layer that reports the reason of the side that closed first, as Jakarta WebSocket 2.2 §2.1.5 asks of `onClose`, keeps its own reason only when its `sendClose()` answered `true`:
+
+[source,java]
+----
+if (ws.sendClose(CloseCodes.GOING_AWAY, "shutting down")) {
+    // this side closed first: its code and reason are the ones of the session's end
+} else {
+    // a Close came first, the peer's or another of this side: onClose tells the peer's code
+}
+----
+
 [#websocket-abort]
 ==== Cutting a WebSocket connection: `abort()` [.tag-new]#NEW#
 
@@ -196,7 +218,7 @@ Router.builder()
 
 * it closes the TCP connection without a Close frame and without waiting for that lock; over TLS, without a `close_notify` either;
 * a send blocked in another thread fails with an `IOException`, and so does a send queued behind it or made afterwards: its data is lost, and the caller must know;
-* a `close()` queued behind the blocked send, cut in its own write, or made afterwards does nothing and does not throw: the connection is closed, which is what it asked for;
+* a `close()` queued behind the blocked send, cut in its own write, or made afterwards does nothing and does not throw: the connection is closed, which is what it asked for. A `sendClose()` returns `false`: it did not send the Close frame;
 * the handler's `onClose` then reports `1006`, unless the peer's Close frame had already arrived. The read the abort cuts is not reported to `onError`;
 * one exception, the rule for a failed `onOpen`, which does not change: an `onOpen` that throws, including the `IOException` of a send the abort cut, gets `onError` and no `onClose`;
 * it is idempotent, never throws, and may be called from any thread.
@@ -512,7 +534,7 @@ Served zero-copy by `StaticFileHandler.preferPrecompressed(true)`.
 | RFC 9112 (HTTP/1.1)       | OK | request parsing, chunked (request and response trailers, §7.1.2), keep-alive, pipelining, lingering close (§9.6, plaintext and TLS)
 | RFC 9113 (HTTP/2)         | OK | framing, flow control, lifecycle, GOAWAY, SETTINGS, CONTINUATION, `RST_STREAM(NO_ERROR)` after an early response (§8.1), frames on reset streams ignored (§5.1), stream window reopened as the body is read (§6.9), `SETTINGS_MAX_HEADER_LIST_SIZE` derived from `maxHeaderSize`, a header list past it answered `431` on its stream, a header block (HEADERS plus CONTINUATION) past 64 KiB or a decoded list past 256 KiB by default ending the connection with `GOAWAY(ENHANCE_YOUR_CALM)` (§10.5, §10.5.1)
 | RFC 7541 (HPACK)          | OK | static table, dynamic table, Huffman encode/decode; the decoder's table bounded by the advertised `SETTINGS_HEADER_TABLE_SIZE` and the encoder's by the peer's (§4.2), a size update past it or after the first field and a length or integer the block cannot hold answered `GOAWAY(COMPRESSION_ERROR)` (§5.1, §5.2, §6.3)
-| RFC 6455 (WebSocket)      | OK | handshake, TEXT/BINARY framing, fragmentation, UTF-8 validation, client masking, close handshake, auto-PONG — over HTTP/1.1
+| RFC 6455 (WebSocket)      | OK | handshake, TEXT/BINARY framing, fragmentation, UTF-8 validation, client masking, close handshake, auto-PONG (until the peer's Close arrives) — over HTTP/1.1
 | gRPC over HTTP/2          | OK | transport framing (5-byte prefix), trailers, unary / server-stream / client-stream / bidi, gRPC-Web via `grpcWeb()`
 | RFC 9114 (HTTP/3)         | planned | QUIC via the JDK, targeting JDK 26+ — see link:{repo-chappe}/blob/main/ROADMAP.md[ROADMAP.md]
 | RFC 8441 (WebSocket H2)   | planned | WebSocket runs over HTTP/1.1 today
