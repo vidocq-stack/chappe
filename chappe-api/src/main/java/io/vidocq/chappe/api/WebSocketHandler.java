@@ -77,7 +77,9 @@ public interface WebSocketHandler {
 
     /**
      * Error while processing the connection (read/write, application callback).
-     * Invoked just before {@link #onClose} with an appropriate code.
+     * Invoked before {@link #onClose}, which then reports an appropriate code, with two exceptions: an
+     * {@link #onOpen} that throws gets {@code onError} and no {@code onClose}, and a failure of {@code onClose}
+     * itself is reported after it. The I/O failure a {@link WebSocket#abort()} causes is not reported here.
      */
     default void onError(WebSocket ws, Throwable error) {}
 }

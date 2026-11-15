@@ -30,10 +30,12 @@ cause hypothesis, and status.
   holds as well, and when that lock is free it writes a close_notify bounded only by `writeTimeout`.
 - **Fix**: `WebSocket.abort()` marks the connection closed and closes the socket without taking the write lock,
   without a Close frame and, over TLS, without a close_notify (`SslHandler.abort()`, which `HttpConnection` hands
-  to the session as `WebSocketChannels.abortCloseable`). The blocked send fails with an `IOException`, the read
-  loop ends, and `onClose` reports 1006 once, unless the peer's Close had already arrived; the read the abort
-  cuts is not reported to `onError`. `WebSocketAbortTest` (plaintext and TLS),
-  `TlsCloseBoundTest.abortDoesNotWaitForTheCloseNotify`.
+  to the session as `WebSocketChannels.abortCloseable`). The blocked send fails with an `IOException`, and so do
+  the sends queued behind it or made afterwards (their data is lost); a `close()` queued, cut in its own write or
+  made afterwards does nothing and does not throw. The read loop ends, and `onClose` reports 1006 once, unless
+  the peer's Close had already arrived; the read the abort cuts is not reported to `onError`. A failed `onOpen`
+  keeps its rule: `onError`, no `onClose`. `WebSocketAbortTest` (plaintext and TLS, the send on the connection's
+  thread or on its own), `WebSocketCloseRaceTest`, `TlsCloseBoundTest.abortDoesNotWaitForTheCloseNotify`.
 
 ---
 

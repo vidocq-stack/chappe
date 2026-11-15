@@ -195,8 +195,10 @@ Router.builder()
 `WebSocket.abort()` ends the connection at once (CHAPPE-060):
 
 * it closes the TCP connection without a Close frame and without waiting for that lock; over TLS, without a `close_notify` either;
-* a send or a `close()` blocked in another thread fails with an `IOException`;
+* a send blocked in another thread fails with an `IOException`, and so does a send queued behind it or made afterwards: its data is lost, and the caller must know;
+* a `close()` queued behind the blocked send, cut in its own write, or made afterwards does nothing and does not throw: the connection is closed, which is what it asked for;
 * the handler's `onClose` then reports `1006`, unless the peer's Close frame had already arrived. The read the abort cuts is not reported to `onError`;
+* one exception, the rule for a failed `onOpen`, which does not change: an `onOpen` that throws, including the `IOException` of a send the abort cut, gets `onError` and no `onClose`;
 * it is idempotent, never throws, and may be called from any thread.
 
 Use it for a connection that must end now: a peer that does not read, a shutdown past its grace. Close first, on a thread of its own since the close may block, and abort when it does not complete in time:

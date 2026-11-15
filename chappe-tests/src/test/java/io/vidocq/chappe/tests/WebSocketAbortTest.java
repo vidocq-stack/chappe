@@ -21,6 +21,7 @@ package io.vidocq.chappe.tests;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.SECONDS;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -39,6 +40,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 
 import javax.net.ssl.SSLContext;
@@ -52,8 +54,8 @@ import io.vidocq.chappe.api.WebSocketHandler;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /**
@@ -98,26 +100,39 @@ class WebSocketAbortTest {
         if (server != null) server.stop();
     }
 
-    @ParameterizedTest(name = "tls={0}")
-    @ValueSource(booleans = {false, true})
-    void abortCutsAConnectionWhoseSendIsBlockedOnAPeerThatDoesNotRead(boolean tls) throws Exception {
-        var session = new Session(new WebSocketFlood());
+    /**
+     * The send blocks either on the connection's own thread, inside {@code onOpen}, or, as an application sends,
+     * on a thread of its own while the connection's thread is parked in its read. A shutdown's {@code close(1001)}
+     * is queued on the write lock the blocked send holds; the abort comes from yet another thread.
+     */
+    @ParameterizedTest(name = "tls={0}, send on a thread of its own={1}")
+    @CsvSource({"false, false", "false, true", "true, false", "true, true"})
+    void abortCutsAConnectionWhoseSendIsBlockedOnAPeerThatDoesNotRead(boolean tls, boolean sendOnItsOwnThread)
+            throws Exception {
+        var session = new Session(new WebSocketFlood(), sendOnItsOwnThread);
         int port = start(session, tls ? serverContext : null);
 
         try (var peer = RawWebSocket.open(tls ? clientContext : null, port, PATH, Map.of(), RECEIVE_BUFFER)) {
             assertEquals(101, peer.status());
             WebSocket ws = session.opened.get(WAIT_SECONDS, SECONDS);
             session.awaitWhileFlooding(() -> session.flood.stalled(STALL), "a send blocked");
-            // A shutdown's close, queued on the write lock the blocked send holds.
-            var closed = new CompletableFuture<Void>();
-            Thread closer = Thread.ofVirtual().start(() -> closeGoingAway(ws, closed));
-            session.awaitWhileFlooding(() -> closer.getState() == Thread.State.WAITING, "close() queued");
+            // Parked in its read, or in the send of onOpen.
+            session.awaitWhileFlooding(session::connectionThreadParked, "the connection's thread parked");
+            var close = Call.start(() -> ws.close(CloseCodes.GOING_AWAY, ""));
+            session.awaitWhileFlooding(close::parked, "close() queued");
+            var send = Call.start(() -> ws.sendText("queued"));
+            session.awaitWhileFlooding(send::parked, "a send queued");
 
             ws.abort();
 
             assertNotNull(session.sendFailure.get(WAIT_SECONDS, SECONDS), "the blocked send fails at once");
-            var closeFailure = assertThrows(ExecutionException.class, () -> closed.get(WAIT_SECONDS, SECONDS));
-            assertInstanceOf(IOException.class, closeFailure.getCause(), "the queued close() fails at once");
+            assertDoesNotThrow(() -> close.outcome().get(WAIT_SECONDS, SECONDS), "the queued close() returns quietly");
+            var queuedSendFailure =
+                    assertThrows(ExecutionException.class, () -> send.outcome().get(WAIT_SECONDS, SECONDS));
+            assertInstanceOf(
+                    IOException.class, queuedSendFailure.getCause(), "the queued send fails: its data is lost");
+            assertDoesNotThrow(() -> ws.close(CloseCodes.GOING_AWAY, ""), "close() after abort() does nothing");
+            assertThrows(IOException.class, () -> ws.sendText("late"), "a send after abort() fails");
             assertFalse(ws.isOpen(), "an aborted connection is not open");
             assertEquals(CloseCodes.ABNORMAL_CLOSURE, session.closeCode.get(WAIT_SECONDS, SECONDS));
             assertFalse(peer.readOpcodesUntilEof().contains(OP_CLOSE), "the peer reads EOF, after no Close frame");
@@ -125,12 +140,13 @@ class WebSocketAbortTest {
         assertEndedOnce(session);
     }
 
-    @Test
-    void abortIsIdempotentAndRacesAClose() throws Exception {
-        var session = new Session(null);
-        int port = start(session, null);
+    @ParameterizedTest(name = "tls={0}")
+    @ValueSource(booleans = {false, true})
+    void abortIsIdempotentAndRacesAClose(boolean tls) throws Exception {
+        var session = new Session(null, false);
+        int port = start(session, tls ? serverContext : null);
 
-        try (var peer = RawWebSocket.open(port, PATH, Map.of(), RECEIVE_BUFFER)) {
+        try (var peer = RawWebSocket.open(tls ? clientContext : null, port, PATH, Map.of(), RECEIVE_BUFFER)) {
             assertEquals(101, peer.status());
             WebSocket ws = session.opened.get(WAIT_SECONDS, SECONDS);
 
@@ -146,12 +162,31 @@ class WebSocketAbortTest {
         assertEndedOnce(session);
     }
 
-    private static void closeGoingAway(WebSocket ws, CompletableFuture<Void> closed) {
-        try {
-            ws.close(CloseCodes.GOING_AWAY, "");
-            closed.complete(null);
-        } catch (IOException e) {
-            closed.completeExceptionally(e);
+    /** A blocking call to the session. */
+    @FunctionalInterface
+    private interface IoCall {
+        void run() throws IOException;
+    }
+
+    /** A call to the session made on a thread of its own: the thread, and how the call ended. */
+    private record Call(Thread thread, CompletableFuture<Void> outcome) {
+
+        static Call start(IoCall call) {
+            var outcome = new CompletableFuture<Void>();
+            var thread = Thread.ofVirtual().start(() -> {
+                try {
+                    call.run();
+                    outcome.complete(null);
+                } catch (IOException e) {
+                    outcome.completeExceptionally(e);
+                }
+            });
+            return new Call(thread, outcome);
+        }
+
+        /** Whether the call is parked: queued on the session's write lock, or blocked in its write. */
+        boolean parked() {
+            return thread.getState() == Thread.State.WAITING;
         }
     }
 
@@ -178,7 +213,10 @@ class WebSocketAbortTest {
         return server.port();
     }
 
-    /** A handler that records what the connection reports; with a flood, its {@code onOpen} floods the peer. */
+    /**
+     * A handler that records what the connection reports. With a flood, its {@code onOpen} floods the peer, itself
+     * or on a thread of its own.
+     */
     private static final class Session implements WebSocketHandler {
 
         final CompletableFuture<WebSocket> opened = new CompletableFuture<>();
@@ -187,19 +225,35 @@ class WebSocketAbortTest {
         final AtomicInteger closes = new AtomicInteger();
         final Queue<Throwable> errors = new ConcurrentLinkedQueue<>();
         final WebSocketFlood flood;
+        private final boolean floodOnItsOwnThread;
         private final CountDownLatch floodEnded = new CountDownLatch(1);
+        private final AtomicReference<Thread> connectionThread = new AtomicReference<>();
 
-        Session(WebSocketFlood flood) {
+        Session(WebSocketFlood flood, boolean floodOnItsOwnThread) {
             this.flood = flood;
+            this.floodOnItsOwnThread = floodOnItsOwnThread;
         }
 
         @Override
         public void onOpen(WebSocket ws, Request handshake) {
+            connectionThread.set(Thread.currentThread());
             opened.complete(ws);
-            if (flood != null) {
-                sendFailure.complete(flood.untilCut(ws));
-                floodEnded.countDown();
+            if (flood == null) return;
+            if (floodOnItsOwnThread) {
+                Thread.ofVirtual().start(() -> floodUntilCut(ws));
+            } else {
+                floodUntilCut(ws);
             }
+        }
+
+        private void floodUntilCut(WebSocket ws) {
+            sendFailure.complete(flood.untilCut(ws));
+            floodEnded.countDown();
+        }
+
+        /** Whether the connection's thread, which runs {@code onOpen} then the read loop, is parked. */
+        boolean connectionThreadParked() {
+            return connectionThread.get().getState() == Thread.State.WAITING;
         }
 
         @Override

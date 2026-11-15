@@ -52,6 +52,8 @@ public interface WebSocket {
      * <p>
      * The reason is UTF-8 encoded and limited to 123 bytes ({@code 125 - 2} for the code).
      * After this call, the connection waits for the peer's Close frame and then closes.
+     * <p>
+     * Once the connection was {@linkplain #abort() aborted}, this method does nothing and does not throw.
      */
     void close(int code, String reason) throws IOException;
 
@@ -62,13 +64,20 @@ public interface WebSocket {
 
     /**
      * Closes the TCP connection at once, without a Close frame and without waiting for the lock that
-     * serialises the writes; over TLS, without a {@code close_notify} either. A send or a
-     * {@link #close(int, String)} blocked in another thread on a peer that does not read fails with an
-     * {@link IOException}.
+     * serialises the writes; over TLS, without a {@code close_notify} either.
+     * <p>
+     * A send blocked in another thread on a peer that does not read fails with an {@link IOException}, and so
+     * does a send queued behind it or made afterwards: its data is lost, and the caller must know. A
+     * {@link #close(int, String)}, queued, cut in its own write or made afterwards, does nothing and returns
+     * without throwing: the connection is closed, which is what it asked for.
      * <p>
      * The handler's {@link WebSocketHandler#onClose onClose} then reports {@link CloseCodes#ABNORMAL_CLOSURE}
      * (1006), unless the connection had already ended (the peer's Close frame received). The I/O failure the
      * abort causes on the connection's own read is not reported to {@link WebSocketHandler#onError onError}.
+     * One exception, the rule for a failed {@link WebSocketHandler#onOpen onOpen}, unchanged: an {@code onOpen}
+     * that throws, including the {@code IOException} of a send the abort cut, gets {@code onError} and no
+     * {@code onClose}.
+     * <p>
      * Idempotent, never throws, safe from any thread.
      * <p>
      * For a connection that must end now: a peer that does not read, a shutdown past its grace. A session

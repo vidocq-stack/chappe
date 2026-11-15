@@ -349,23 +349,32 @@ public final class WebSocketConnection implements WebSocket {
         writeLocked(() -> WebSocketFrameWriter.writeFrame(writeChannel, WebSocketFrame.OP_PONG, payload));
     }
 
+    /**
+     * Does nothing once the connection was aborted, also when this call was queued on {@link #writeLock} at the
+     * abort, or writing its Close frame when the abort cut that write (CHAPPE-060).
+     */
     @Override
     public void close(int code, String reason) throws IOException {
-        if (sendCloseFrame(code, reason)) onCloseSent.run();
+        try {
+            if (sendCloseFrame(code, reason)) onCloseSent.run();
+        } catch (IOException e) {
+            // The abort cut the Close frame's write: the connection is closed, which is what this call asked for.
+            if (!aborted) throw e;
+        }
     }
 
     /**
-     * Sends the Close frame unless one was sent already; the check, the write and {@code closeSent}
-     * are one step under {@code writeLock}, so two threads never send two frames.
+     * Sends the Close frame unless one was sent already or the connection was aborted; the check, the write and
+     * {@code closeSent} are one step under {@code writeLock}, so two threads never send two frames.
      *
      * @return {@code true} when this call sent the frame
      */
     private boolean sendCloseFrame(int code, String reason) throws IOException {
-        if (closeSent) return false;
+        if (closeSent || aborted) return false;
         var payload = buildClosePayload(code, reason);
         var sent = new boolean[1];
         writeLocked(() -> {
-            if (closeSent) return;
+            if (closeSent || aborted) return;
             WebSocketFrameWriter.writeFrame(writeChannel, WebSocketFrame.OP_CLOSE, payload);
             closeSent = true;
             sent[0] = true;
@@ -376,7 +385,8 @@ public final class WebSocketConnection implements WebSocket {
     /**
      * Marks the connection closed and closes it with {@code abortCloseable}, without {@link #writeLock}, which a
      * send blocked on a peer that does not read holds: that send fails with an {@link IOException}, and so does
-     * the read loop's read; {@link #run} then reports 1006 to {@code onClose}, once (CHAPPE-060).
+     * the read loop's read; {@link #run} then reports 1006 to {@code onClose}, once. A {@link #close} from then on
+     * does nothing (CHAPPE-060).
      */
     @Override
     public void abort() {

@@ -22,6 +22,7 @@ package io.vidocq.chappe.http.ws;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -30,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.channels.AsynchronousCloseException;
 import java.nio.channels.ByteChannel;
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
@@ -56,14 +58,7 @@ class WebSocketCloseRaceTest {
     @Test
     void aDataSendRacingACloseNeverWritesAfterTheCloseFrame() throws Exception {
         var channel = new GatedChannel(new byte[0]);
-        var ws = new WebSocketConnection(
-                channel,
-                channel,
-                channel,
-                ByteBuffer.allocate(64),
-                new WebSocketHandler() {},
-                new HttpRequestImpl(),
-                null);
+        var ws = connection(channel, new WebSocketHandler() {});
 
         var closer = Thread.ofVirtual().start(() -> closeQuietly(ws));
         assertTrue(channel.firstWriteBlocked.await(WAIT.toSeconds(), SECONDS), "the Close frame write must start");
@@ -99,27 +94,50 @@ class WebSocketCloseRaceTest {
     void anAbortAfterThePeersCloseKeepsItsCode() throws Exception {
         var channel = new GatedChannel(maskedClose(CloseCodes.GOING_AWAY));
         var closeCode = new CompletableFuture<Integer>();
-        var ws = new WebSocketConnection(
-                channel,
-                channel,
-                channel,
-                ByteBuffer.allocate(64).flip(),
-                new WebSocketHandler() {
-                    @Override
-                    public void onClose(WebSocket connection, int code, String reason) {
-                        closeCode.complete(code);
-                    }
-                },
-                new HttpRequestImpl(),
-                null);
+        var ws = connection(channel, new WebSocketHandler() {
+            @Override
+            public void onClose(WebSocket connection, int code, String reason) {
+                closeCode.complete(code);
+            }
+        });
 
         var session = Thread.ofVirtual().start(ws::run);
         assertTrue(channel.firstWriteBlocked.await(WAIT.toSeconds(), SECONDS), "the echo of the Close must start");
         ws.abort();
-        channel.release.countDown();
 
         assertTrue(session.join(WAIT), "the session must end");
         assertEquals(CloseCodes.GOING_AWAY, closeCode.getNow(null), "onClose reports the peer's code");
+    }
+
+    /**
+     * A {@code close()} whose Close frame write the abort cuts returns quietly: the connection is closed, which is
+     * what it asked for (CHAPPE-060).
+     */
+    @Test
+    void aCloseTheAbortCutsInItsWriteReturnsQuietly() throws Exception {
+        var channel = new GatedChannel(new byte[0]);
+        var ws = connection(channel, new WebSocketHandler() {});
+        var closed = new CompletableFuture<Void>();
+        Thread.ofVirtual().start(() -> {
+            try {
+                ws.close(CloseCodes.NORMAL_CLOSURE, "bye");
+                closed.complete(null);
+            } catch (IOException e) {
+                closed.completeExceptionally(e);
+            }
+        });
+        assertTrue(channel.firstWriteBlocked.await(WAIT.toSeconds(), SECONDS), "the Close frame write must start");
+
+        ws.abort();
+
+        assertDoesNotThrow(() -> closed.get(WAIT.toSeconds(), SECONDS), "close() returns quietly");
+        assertArrayEquals(new byte[0], channel.written(), "the Close frame never reached the wire");
+    }
+
+    /** A session over {@code channel}, which is also what closes and aborts it. */
+    private static WebSocketConnection connection(GatedChannel channel, WebSocketHandler handler) {
+        return new WebSocketConnection(
+                channel, channel, channel, ByteBuffer.allocate(64).flip(), handler, new HttpRequestImpl(), null);
     }
 
     /** The peer's Close frame carrying {@code code}, masked as a client frame must be, with a zero key. */
@@ -147,7 +165,7 @@ class WebSocketCloseRaceTest {
 
     /**
      * A channel whose first write blocks until {@link #release}; it records every byte written, and reads its
-     * input, then EOF.
+     * input, then EOF. Like a socket, it fails a write once closed, the blocked one included.
      */
     private static final class GatedChannel implements ByteChannel {
 
@@ -155,6 +173,7 @@ class WebSocketCloseRaceTest {
         final CountDownLatch release = new CountDownLatch(1);
         private final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         private final ByteBuffer input;
+        private volatile boolean closed;
 
         GatedChannel(byte[] input) {
             this.input = ByteBuffer.wrap(input);
@@ -166,6 +185,7 @@ class WebSocketCloseRaceTest {
                 firstWriteBlocked.countDown();
                 awaitRelease();
             }
+            if (closed) throw new AsynchronousCloseException();
             int n = src.remaining();
             var chunk = new byte[n];
             src.get(chunk);
@@ -197,12 +217,14 @@ class WebSocketCloseRaceTest {
 
         @Override
         public boolean isOpen() {
-            return true;
+            return !closed;
         }
 
+        /** Closes the channel and wakes the blocked write, which then fails. */
         @Override
         public void close() {
-            // nothing to release
+            closed = true;
+            release.countDown();
         }
     }
 }
