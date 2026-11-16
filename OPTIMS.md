@@ -288,7 +288,8 @@ and **zero allocation**.
 - `StaticFileHandler` (chappe-api): new fast path in `ClasspathSource.resolve()` that consults
   the index before `URLConnection.openConnection()`. Index loaded once per ClassLoader via
   `ClassLoader.getResources()` (multi-JAR merge, first wins). **No index = transparent
-  fallback** to the legacy path ⇒ zero regression.
+  fallback** to the legacy path ⇒ zero regression. (Since CHAPPE-061 the index is read once per
+  classpath source and owned by it: the static map of loaders kept every loader alive.)
 - Example `chappe-examples/StaticIndexedExample` + resources under `static/` + plugin enabled in the
   POM; the generated package index contains `static/index.html`, `static/app.css`,
   `static/app.js`.

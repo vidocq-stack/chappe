@@ -5,6 +5,35 @@ cause hypothesis, and status.
 
 ---
 
+## CHAPPE-061 — a class loader that served a class path file is kept for the life of the JVM
+
+- **Date**: 2026-11-16
+- **Status**: FIXED on `fix/static-index-keeps-loader`
+- **Module**: `chappe-api` (`StaticFileHandler`)
+- **Symptom**: a host that replaces its application class loader while Chappe's classes stay loaded keeps every
+  loader it replaced, once a `StaticFileHandler` served one class path file through it. The Vidocq dev mode does
+  that at each hot reload: with a static mount on the class path (`vidocq.http.mount.<name>.classpath`) and one
+  page served per boot, 6 application layers are alive after 5 reloads, where one is expected. Found by the
+  reload-leak guard of Vidocq/vidocq#631, by elimination: the same reloads without a request to the static mount
+  leave one layer.
+- **Minimal repro**:
+  ```
+  loader = new URLClassLoader(...)                   // holds static/app.js
+  StaticFileHandler.builder().addClasspath(loader, "static").build().handle(GET /app.js)
+  drop the handler and the loader, run the collector
+  -> the loader is still reachable                   // with or without META-INF/chappe-static-index.properties
+  ```
+- **Cause**: `StaticFileHandler.StaticIndex.PER_LOADER`, a static `ConcurrentHashMap<ClassLoader, Map<...>>` that
+  cached the index of each loader. Every class path lookup went through it, so the first request put the loader
+  in as a key, and nothing ever removed one. Listed as a latent leak on 2026-11-02 (vidocq-workspace#40, item 26),
+  not measured then.
+- **Fix**: no static. Each classpath source owns the index of its loader (`StaticIndex`, read at the source's
+  first lookup), so the index goes with the handler. Two sources on one loader each read the index file once.
+  `StaticFileHandlerIndexTest.aDroppedHandlerDoesNotKeepItsClassLoader` (red, then green, with and without an
+  index file).
+
+---
+
 ## CHAPPE-060 — a WebSocket cannot be cut while a send is blocked on a peer that does not read
 
 - **Date**: 2026-11-15

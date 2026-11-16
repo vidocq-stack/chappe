@@ -43,6 +43,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Static file handler with fallback chain, classpath support, and in-memory cache.
@@ -382,11 +383,18 @@ public final class StaticFileHandler implements Handler {
         }
     }
 
-    /** Classpath source (jar, module, classpath directory). */
-    private record ClasspathSource(ClassLoader loader, String basePath) implements ResourceSource {
+    /**
+     * Classpath source (jar, module, classpath directory). It owns the index it reads through its
+     * loader, so the index goes with the handler and nothing keeps the loader after it (CHAPPE-061).
+     */
+    private record ClasspathSource(ClassLoader loader, String basePath, StaticIndex index) implements ResourceSource {
 
         /** The separator of class loader resource names: always a slash, whatever the platform. */
         private static final String SEPARATOR = "/";
+
+        ClasspathSource(ClassLoader loader, String basePath) {
+            this(loader, basePath, new StaticIndex(loader));
+        }
 
         @Override
         public ResolvedResource resolve(String relative, String indexFile) {
@@ -415,10 +423,10 @@ public final class StaticFileHandler implements Handler {
          */
         private ResolvedResource resolveIndexed(String resourcePath, String indexFile) {
             String path = resourcePath;
-            IndexedEntry idx = StaticIndex.lookup(loader, path);
+            IndexedEntry idx = index.lookup(path);
             if (idx == null) {
                 path = indexOf(resourcePath, indexFile);
-                idx = StaticIndex.lookup(loader, path);
+                idx = index.lookup(path);
                 if (idx == null) return null;
             }
             String found = path;
@@ -488,18 +496,33 @@ public final class StaticFileHandler implements Handler {
     private record IndexedEntry(long size, long mtime, String mime, String etag) {}
 
     /**
-     * Index loaded once per ClassLoader from {@code META-INF/chappe-static-index.properties}.
-     * Absent ⇒ empty map ⇒ fallback to the classic runtime path lookup (no regression).
+     * The index of one class loader, read from {@code META-INF/chappe-static-index.properties} at
+     * the first lookup of the source that owns it. Absent ⇒ empty map ⇒ fallback to the classic
+     * runtime path lookup (no regression).
+     *
+     * <p>One per classpath source, never a static: a static map of the loaders kept every loader
+     * that had served a file for the life of the JVM, and with it the application a host had
+     * replaced (CHAPPE-061).
      */
     private static final class StaticIndex {
         private static final String RESOURCE = "META-INF/chappe-static-index.properties";
-        private static final ConcurrentHashMap<ClassLoader, Map<String, IndexedEntry>> PER_LOADER =
-                new ConcurrentHashMap<>();
 
-        static IndexedEntry lookup(ClassLoader loader, String path) {
-            ClassLoader key = loader == null ? ClassLoader.getSystemClassLoader() : loader;
-            Map<String, IndexedEntry> map = PER_LOADER.computeIfAbsent(key, StaticIndex::load);
-            return map.get(path);
+        private final ClassLoader loader;
+
+        /** The entries, once read. Two first lookups at once may both read them: they read the same. */
+        private final AtomicReference<Map<String, IndexedEntry>> entries = new AtomicReference<>();
+
+        StaticIndex(ClassLoader loader) {
+            this.loader = loader == null ? ClassLoader.getSystemClassLoader() : loader;
+        }
+
+        IndexedEntry lookup(String path) {
+            Map<String, IndexedEntry> read = entries.get();
+            if (read == null) {
+                read = load(loader);
+                entries.set(read);
+            }
+            return read.get(path);
         }
 
         private static Map<String, IndexedEntry> load(ClassLoader loader) {

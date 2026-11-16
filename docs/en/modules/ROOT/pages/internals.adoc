@@ -246,3 +246,5 @@ For measured numbers, see link:{repo-chappe}/blob/main/BENCHMARKS.md[BENCHMARKS.
 == O(1) static index
 
 `StaticFileHandler` loads a `META-INF/chappe-static-index.properties` index (produced by `chappe-static-index-maven-plugin` at build time). `O(1)` path lookup, no filesystem scan at runtime. `.gz` sidecars (and `.br` if present) are flagged in the index — `preferPrecompressed(true)` serves them zero-copy when `Accept-Encoding` allows.
+
+Each classpath source of a handler reads the index of its class loader at its first lookup and keeps it as long as the handler lives. No static holds an index or a class loader: a host that replaces its application class loader, as the Vidocq dev mode does at each hot reload, releases the old one with its handlers (CHAPPE-061).
